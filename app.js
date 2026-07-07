@@ -951,24 +951,43 @@ function renderFolgaPanel(){
   const target=getWindow48hKey();
   const targetDate=new Date();targetDate.setDate(targetDate.getDate()+2);
   const dayName=DAYS[targetDate.getDay()];
+  const dayKey=DAY_KEYS[targetDate.getDay()];
   const folgasTarget=S.folgas[target]||[];
   if(!S.chatters.length){panel.style.display='none';return;}
   panel.style.display='block';
+
+  // Automático: turnos com folga recorrente (cadastrada na Escala) que cai nesse dia
+  const autoVagas=[];
+  S.shifts.forEach(s=>{
+    const c=S.chatters.find(ch=>ch.id===s.chatterId);
+    if(!c)return;
+    const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
+    const modelStr=models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo';
+    if(s.folgaDia===dayKey)autoVagas.push({chatterName:c.name,modelStr,start:s.start,end:s.end});
+    if(s.folgaDia2===dayKey)autoVagas.push({chatterName:c.name,modelStr,start:s.start2||s.start,end:s.end2||s.end});
+  });
+
   const chattersOff=getFolgasForDate(target);
   const chattersOn=S.chatters.filter(c=>!folgasTarget.includes(c.id));
+
   el.innerHTML=`
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <span style="font-size:20px">🗓️</span>
       <div>
         <div style="font-weight:700;font-size:14px">Janelas de horário · ${dayName} (${target.slice(8,10)}/${target.slice(5,7)})</div>
-        <div style="font-size:11.5px;color:var(--text2)">Defina com 48h de antecedência para dar tempo de postar</div>
+        <div style="font-size:11.5px;color:var(--text2)">48h de antecedência para dar tempo de postar</div>
       </div>
     </div>
-    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar folga (abre janela de hora extra)</div>
+
+    <div style="background:var(--ok-soft);border:1px solid rgba(23,115,80,.2);border-radius:10px;padding:11px 13px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">🔓 Modelo e horário livre nesse dia</div>
+      ${autoVagas.length?autoVagas.map(v=>`<div style="font-size:13.5px;font-weight:700;color:var(--text);padding:4px 0">${v.modelStr} · ${v.start}–${v.end} <span style="font-size:11px;color:var(--text3);font-weight:400">(${v.chatterName})</span></div>`).join(''):'<div style="font-size:12.5px;color:var(--text3)">Nenhuma folga recorrente cadastrada pra esse dia na Escala</div>'}
+    </div>
+
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar folga pontual (abre janela extra)</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
       ${S.chatters.map(c=>{
         const onFolga=folgasTarget.includes(c.id);
-        const color=getComputedLevelColor(c.level);
         return`<button onclick="toggleFolga('${c.id}','${target}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid ${onFolga?'var(--bad)':'var(--line)'};background:${onFolga?'var(--bad-soft)':'var(--bg-soft)'};cursor:pointer;font-family:var(--font-display);font-size:12.5px;font-weight:${onFolga?'700':'500'};color:${onFolga?'var(--bad)':'var(--text2)'}">
           ${onFolga?'🏖️':''}${c.name}
         </button>`;
@@ -976,9 +995,8 @@ function renderFolgaPanel(){
     </div>
     ${chattersOff.length?`
       <div style="background:var(--bad-soft);border:1px solid rgba(180,35,52,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ Janela aberta em ${dayName} (${chattersOff.length})</div>
+        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ Folga pontual marcada (${chattersOff.length})</div>
         ${chattersOff.map(c=>{
-          const dayKey=DAY_KEYS[targetDate.getDay()];
           const shifts=S.shifts.filter(s=>s.chatterId===c.id&&(s.days||[]).includes(dayKey));
           const windows=shifts.flatMap(s=>{
             const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
@@ -993,11 +1011,7 @@ function renderFolgaPanel(){
           </div>`;
         }).join('')}
       </div>
-      ${chattersOn.length?`<div style="margin-top:9px;background:var(--ok-soft);border:1px solid rgba(23,115,80,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">✅ Escalados normalmente (${chattersOn.length})</div>
-        ${chattersOn.map(c=>`<div style="font-size:13px;font-weight:600;color:var(--text);padding:3px 0">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>`).join('')}
-      </div>`:''}
-    `:'<div style="font-size:12.5px;color:var(--text3);text-align:center;padding:8px 0">Nenhuma janela de horário aberta ainda para essa data — marque acima com 48h de antecedência</div>'}
+    `:''}
   `;
 }
 
