@@ -140,6 +140,29 @@ function pruneHeavyData(s){
       });
       s.chatlabAnalyses=kept;
     }
+    // Faturamento (revenues) é o único campo sem limite de crescimento —
+    // arquiva o detalhe DIÁRIO de mais de 180 dias em totais MENSAIS
+    // (mantém o valor exato, só perde qual dia exato dentro do mês — algo
+    // que nenhum relatório usa pra faturamento tão antigo).
+    if(s.revenues){
+      const cutoff2=new Date();cutoff2.setDate(cutoff2.getDate()-180);
+      const cutoffKey2=fmt(cutoff2);
+      if(!s.revenuesArchive)s.revenuesArchive={};
+      const toDelete=[];
+      Object.keys(s.revenues).forEach(key=>{
+        const parts=key.split('_');
+        if(parts.length<3)return;
+        const dateKey=parts.slice(2).join('_');
+        if(dateKey>=cutoffKey2)return; // ainda recente, mantém como está
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(dateKey))return; // formato inesperado, não arrisca
+        const monthKey=dateKey.slice(0,7); // YYYY-MM
+        const archiveKey=`${parts[0]}_${parts[1]}_${monthKey}`;
+        const val=parseFloat(s.revenues[key])||0;
+        s.revenuesArchive[archiveKey]=(s.revenuesArchive[archiveKey]||0)+val;
+        toDelete.push(key);
+      });
+      toDelete.forEach(key=>delete s.revenues[key]);
+    }
   }catch(e){console.error('Erro ao limpar dados pesados',e);}
   return s;
 }
@@ -458,7 +481,7 @@ function load(){
   }
 }
 let S={
-  chatters:[],shifts:[],absences:[],orientations:[],studies:[],revenues:{},models:[],
+  chatters:[],shifts:[],absences:[],orientations:[],studies:[],revenues:{},revenuesArchive:{},models:[],
   quickNotes:[],lastCode:null,
   turnoLog:{},          // date -> [{chatterId, action, time, note, otEnd}]
   midnightTasks:{},     // date -> [{id, chatterId, label, done}]
