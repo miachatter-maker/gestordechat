@@ -2994,31 +2994,7 @@ function generateFullReport(){
     lines.push(`● Ação tomada: ${d('acao-'+c.id)||'—'}`);
     lines.push(``);
   });
-  const emTeste=S.chatters.filter(c=>c.level==='treinamento'||c.level==='teste');
-  if(emTeste.length){
-    lines.push(`3. CHATTERS EM TESTE`);
-    emTeste.forEach(c=>{
-      let rev=0;wd.forEach(dd=>S.models.forEach(m=>{rev+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(dd)}`])||0;}));
-      const created=c.createdAt?Math.floor((new Date()-new Date(c.createdAt))/86400000):0;
-      lines.push(`Nome: ${c.name}`);
-      lines.push(`● Dias em teste: ${created}`);
-      lines.push(`● Faturamento: ${money(rev)}`);
-      lines.push(`● Evolução: ${d('evolucao-'+c.id)||'—'}`);
-      lines.push(`● Principais erros: ${d('erroteste-'+c.id)||'—'}`);
-      lines.push(`● Decisão: ${d('decisao-'+c.id)||'—'}`);
-      lines.push(``);
-    });
-    const evoluiram=emTeste.filter(c=>d('evolucao-'+c.id)==='Boa').length;
-    const dificuldade=emTeste.filter(c=>d('evolucao-'+c.id)==='Ruim'||d('evolucao-'+c.id)==='Média').length;
-    const reprovaram=emTeste.filter(c=>d('decisao-'+c.id)==='Reprovar').length;
-    lines.push(`4. EVOLUÇÃO DOS NOVOS`);
-    lines.push(`● Quantos entraram: ${emTeste.length}`);
-    lines.push(`● Evoluíram bem: ${evoluiram}`);
-    lines.push(`● Com dificuldade: ${dificuldade}`);
-    lines.push(`● Reprovados: ${reprovaram}`);
-    lines.push(``);
-  }
-  lines.push(`5. MEUS PRINCIPAIS ERROS DA SEMANA`);
+  lines.push(`3. MEUS PRINCIPAIS ERROS DA SEMANA`);
   lines.push(`● Erro 1: ${d('erro1')||'—'}`);
   lines.push(`● Erro 2: ${d('erro2')||'—'}`);
   lines.push(`● Erro 3: ${d('erro3')||'—'}`);
@@ -3029,16 +3005,16 @@ function generateFullReport(){
     return doneDate>=wkStart&&doneDate<=wkEnd;
   }).length;
   const corrections=S.orientations.filter(o=>o.date>=wkStart&&o.date<=wkEnd).length;
-  lines.push(`6. AÇÕES REALIZADAS`);
+  lines.push(`4. AÇÕES REALIZADAS`);
   lines.push(`● Treinamentos feitos: ${trainsDone}`);
   lines.push(`● Correções aplicadas: ${corrections}`);
   lines.push(`● Ajustes na operação: ${d('ajustes')||'—'}`);
   lines.push(``);
-  lines.push(`7. PROBLEMAS ENCONTRADOS`);
+  lines.push(`5. PROBLEMAS ENCONTRADOS`);
   lines.push(`● Problema 1: ${d('prob1')||'—'}`);
   lines.push(`● Problema 2: ${d('prob2')||'—'}`);
   lines.push(``);
-  lines.push(`8. PLANO PARA PRÓXIMA SEMANA`);
+  lines.push(`6. PLANO PARA PRÓXIMA SEMANA`);
   lines.push(`● Ação 1: ${d('plano1')||'—'}`);
   lines.push(`● Ação 2: ${d('plano2')||'—'}`);
   lines.push(`● Ação 3: ${d('plano3')||'—'}`);
@@ -6658,8 +6634,9 @@ function setTesterDecision(chatterId,decision){
   S.chatterFichas[chatterId].testerDecisionDate=todayKey();
   if(decision==='aprovado'){
     c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
+    if(c.level==='teste'||c.level==='treinamento')c.level='junior'; // promove o nível também, senão fica filtrado de fora em quadros que checam nível separado do cargo
     c.testerApprovalDate=todayKey(); // a partir dessa data os relatórios entram nas análises (Evolução etc)
-    toast(`✅ ${c.name} aprovado! Já passou pro Time Base — relatórios de teste ficam de fora da Evolução até essa data.`);
+    toast(`✅ ${c.name} aprovado! Já passou pro Time Base e entra em todas as análises de desenvolvimento a partir de hoje.`);
   } else if(decision==='reprovado'){
     toast(`${c.name} marcado como reprovado.`);
   } else {
