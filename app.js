@@ -436,6 +436,7 @@ function setWeekOffset(o){
   if(v==='semana')renderSemana();
   if(v==='report')renderReport_Weekly();
   if(v==='evolucao')renderEvolucao();
+  if(v==='fichas'){const sel=document.getElementById('ficha-chatter-select');if(sel&&sel.value)renderFichaChatter(sel.value);}
   renderWeekNav();
 }
 function renderWeekNav(){
@@ -886,12 +887,15 @@ function toggleMidnight(dateKey,id){
    HOME
    =========================================================== */
 /* ===========================================================
-   FOLGAS — manual day-off registrations.
-   A panel appears on the home screen after 22h showing who
-   is off tomorrow, so the manager can plan extra coverage.
+   JANELAS DE HORÁRIO — registro manual de folga com 48h de
+   antecedência, para dar tempo de postar/anunciar a vaga de
+   hora extra a tempo. Painel sempre visível na Home.
    =========================================================== */
 function getTomorrowKey(){
   const d=new Date();d.setDate(d.getDate()+1);return fmt(d);
+}
+function getWindow48hKey(){
+  const d=new Date();d.setDate(d.getDate()+2);return fmt(d);
 }
 function getFolgasForDate(dateKey){
   return(S.folgas[dateKey]||[]).map(id=>S.chatters.find(c=>c.id===id)).filter(Boolean);
@@ -904,53 +908,50 @@ function toggleFolga(chatterId,dateKey){
   save();renderFolgaPanel();
 }
 function isFolgaActive(){
-  // Show the panel from 22h of today until end of tomorrow
-  const now=new Date();
-  return now.getHours()>=22||now.getHours()<6;
+  // Painel de Janelas de horário agora fica sempre visível (48h de antecedência)
+  return true;
 }
 function renderFolgaPanel(){
   const panel=document.getElementById('home-folga-panel');
   if(!panel)return;
   const el=document.getElementById('home-folga-content');
   if(!panel||!el)return;
-  const tomorrow=getTomorrowKey();
-  const tomorrowDate=new Date();tomorrowDate.setDate(tomorrowDate.getDate()+1);
-  const dayName=DAYS[tomorrowDate.getDay()];
-  const folgasAmanha=S.folgas[tomorrow]||[];
-  // Show if it's after 22h OR if there are folgas registered for tomorrow
-  const shouldShow=isFolgaActive()||folgasAmanha.length>0;
-  if(!shouldShow||!S.chatters.length){panel.style.display='none';return;}
+  const target=getWindow48hKey();
+  const targetDate=new Date();targetDate.setDate(targetDate.getDate()+2);
+  const dayName=DAYS[targetDate.getDay()];
+  const folgasTarget=S.folgas[target]||[];
+  if(!S.chatters.length){panel.style.display='none';return;}
   panel.style.display='block';
-  const chattersOff=getFolgasForDate(tomorrow);
-  const chattersOn=S.chatters.filter(c=>!folgasAmanha.includes(c.id));
+  const chattersOff=getFolgasForDate(target);
+  const chattersOn=S.chatters.filter(c=>!folgasTarget.includes(c.id));
   el.innerHTML=`
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-      <span style="font-size:20px">🌙</span>
+      <span style="font-size:20px">🗓️</span>
       <div>
-        <div style="font-weight:700;font-size:14px">Folgas de amanhã · ${dayName}</div>
-        <div style="font-size:11.5px;color:var(--text2)">Programe as janelas de hora extra</div>
+        <div style="font-weight:700;font-size:14px">Janelas de horário · ${dayName} (${target.slice(8,10)}/${target.slice(5,7)})</div>
+        <div style="font-size:11.5px;color:var(--text2)">Defina com 48h de antecedência para dar tempo de postar</div>
       </div>
     </div>
-    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar de folga amanhã</div>
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar folga (abre janela de hora extra)</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
       ${S.chatters.map(c=>{
-        const onFolga=folgasAmanha.includes(c.id);
+        const onFolga=folgasTarget.includes(c.id);
         const color=getComputedLevelColor(c.level);
-        return`<button onclick="toggleFolga('${c.id}','${tomorrow}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid ${onFolga?'var(--bad)':'var(--line)'};background:${onFolga?'var(--bad-soft)':'var(--bg-soft)'};cursor:pointer;font-family:var(--font-display);font-size:12.5px;font-weight:${onFolga?'700':'500'};color:${onFolga?'var(--bad)':'var(--text2)'}">
+        return`<button onclick="toggleFolga('${c.id}','${target}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid ${onFolga?'var(--bad)':'var(--line)'};background:${onFolga?'var(--bad-soft)':'var(--bg-soft)'};cursor:pointer;font-family:var(--font-display);font-size:12.5px;font-weight:${onFolga?'700':'500'};color:${onFolga?'var(--bad)':'var(--text2)'}">
           ${onFolga?'🏖️':''}${c.name}
         </button>`;
       }).join('')}
     </div>
     ${chattersOff.length?`
       <div style="background:var(--bad-soft);border:1px solid rgba(180,35,52,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ De folga amanhã (${chattersOff.length})</div>
+        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ Janela aberta em ${dayName} (${chattersOff.length})</div>
         ${chattersOff.map(c=>`<div style="font-size:13px;font-weight:600;color:var(--text);padding:3px 0">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>`).join('')}
       </div>
       ${chattersOn.length?`<div style="margin-top:9px;background:var(--ok-soft);border:1px solid rgba(23,115,80,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">✅ Disponíveis amanhã (${chattersOn.length})</div>
+        <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">✅ Escalados normalmente (${chattersOn.length})</div>
         ${chattersOn.map(c=>`<div style="font-size:13px;font-weight:600;color:var(--text);padding:3px 0">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>`).join('')}
       </div>`:''}
-    `:'<div style="font-size:12.5px;color:var(--text3);text-align:center;padding:8px 0">Nenhuma folga marcada para amanhã</div>'}
+    `:'<div style="font-size:12.5px;color:var(--text3);text-align:center;padding:8px 0">Nenhuma janela de horário aberta ainda para essa data — marque acima com 48h de antecedência</div>'}
   `;
 }
 
@@ -1273,6 +1274,7 @@ function renderHome(){
   renderUrgentPanel();
   renderSmartAlerts();
   renderJanelaPanel();
+  renderFolgaPanel();
   renderMotivacionalHome();
   render48hAlerts();
   renderMidnightPreviewHome();
@@ -3698,7 +3700,7 @@ function parseTeamReportsCore(forceExtra){
       // Auto-fill ficha técnica from analytics
       const f=S.chatterFichas[chatter.id];
       // Valor/hora: 0.3=regular, 0.5=bom, 0.8=ótimo, 1+=excelente
-      const scoreLabel=n=>n>=5?'5 - Excelente':n>=4?'4 - Ótimo':n>=3?'3 - Bom':n>=2?'2 - Regular':'1 - Fraco';
+      const scoreLabel=n=>n>=5?'Excelente':n>=4?'Ótimo':n>=3?'Bom':n>=2?'Regular':'Fraco';
       const convScore=vendasPorHora>=30?5:vendasPorHora>=20?4:vendasPorHora>=10?3:vendasPorHora>=5?2:1; // R$/hora scale
       const ticketScore=ticketMedio>=150?5:ticketMedio>=80?4:ticketMedio>=40?3:ticketMedio>=20?2:1;
       f.tech.conversao=scoreLabel(convScore);
@@ -4131,6 +4133,7 @@ function setChatterTime(chatterId,time){
 
 
 function renderFichas(){
+  renderWeekNav();
   const sel=document.getElementById('ficha-chatter-select');
   if(!sel)return;
   if(!S.chatters.length){
@@ -4139,6 +4142,73 @@ function renderFichas(){
   }
   sel.innerHTML=S.chatters.filter(c=>c.time!=='tester').map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   renderFichaChatter(sel.value);
+}
+// Cruza os dados semanais (faturamento/ticket/valor-hora) e os snapshots de
+// ficha para descrever, em texto, como foi a evolução do chatter — sempre
+// respeitando a semana selecionada no navegador de semana (weekOffset).
+function renderFichaCruzamento(chatterId){
+  const f=S.chatterFichas[chatterId]||{};
+  const analytics=f.analytics?.weeklyData||{};
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  if(!c)return'';
+  const weekGroups={};
+  Object.keys(analytics).forEach(dk=>{
+    const d=new Date(dk+'T12:00:00');
+    const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());
+    const wk=fmt(sun);
+    if(!weekGroups[wk])weekGroups[wk]={rev:0,tickets:[],vphs:[]};
+    const a=analytics[dk];
+    weekGroups[wk].rev+=a.chatterTotal||0;
+    if(a.ticketMedio>0){weekGroups[wk].tickets.push(a.ticketMedio);weekGroups[wk].vphs.push(a.vendasPorHora||0);}
+  });
+  const weekKeysSorted=Object.keys(weekGroups).sort();
+  if(!weekKeysSorted.length){
+    return`<div class="panel" style="margin-top:14px;border:2px solid var(--info)">
+      <div class="panel-head"><div class="panel-title">🔎 Evolução — cruzamento semanal</div></div>
+      <div style="font-size:12.5px;color:var(--text3)">Ainda não há dados semanais suficientes para cruzar. Continue processando relatórios e salvando snapshots.</div>
+    </div>`;
+  }
+  const avg=arr=>arr.length?arr.reduce((s,v)=>s+v,0)/arr.length:0;
+  const curWk=getWeekKey(); // respeita a semana selecionada no topo
+  const curIdx=weekKeysSorted.indexOf(curWk);
+  const effIdx=curIdx!==-1?curIdx:weekKeysSorted.length-1;
+  const thisWeek=weekGroups[weekKeysSorted[effIdx]];
+  const prevWeek=effIdx>0?weekGroups[weekKeysSorted[effIdx-1]]:null;
+
+  let narrative;
+  if(!prevWeek){
+    narrative=`Essa é a primeira semana com dados registrados para ${c.name.split(' ')[0]} — ainda não há semana anterior para comparar a evolução.`;
+  } else {
+    const revDiff=prevWeek.rev>0?Math.round((thisWeek.rev-prevWeek.rev)/prevWeek.rev*100):null;
+    const ticketDiff=avg(prevWeek.tickets)>0?Math.round((avg(thisWeek.tickets)-avg(prevWeek.tickets))/avg(prevWeek.tickets)*100):null;
+    const vphDiff=avg(prevWeek.vphs)>0?Math.round((avg(thisWeek.vphs)-avg(prevWeek.vphs))/avg(prevWeek.vphs)*100):null;
+    const parts=[];
+    if(revDiff!==null)parts.push(revDiff>=10?`o faturamento melhorou bastante (${money(thisWeek.rev)} contra ${money(prevWeek.rev)} da semana anterior)`:revDiff>=0?`o faturamento ficou estável, com leve alta (${money(thisWeek.rev)})`:revDiff>=-15?`o faturamento caiu um pouco (${money(thisWeek.rev)} contra ${money(prevWeek.rev)})`:`o faturamento caiu bastante (${money(thisWeek.rev)} contra ${money(prevWeek.rev)}) — vale uma conversa`);
+    if(ticketDiff!==null)parts.push(ticketDiff>=10?'o ticket médio subiu de forma consistente':ticketDiff>=-10?'o ticket médio ficou estável':'o ticket médio caiu — vale reforçar a técnica de venda de valor mais alto');
+    if(vphDiff!==null)parts.push(vphDiff>=10?'o valor por hora melhorou':vphDiff>=-10?'o valor por hora ficou parecido':'o valor por hora caiu — pode ser volume de leads ou abordagem');
+    narrative=parts.length?`Cruzando as fichas semanais: ${parts.join('; ')}.`:'Ainda não há métricas suficientes nas duas semanas para uma comparação completa.';
+  }
+
+  // Cruzamento qualitativo — compara o snapshot mais antigo com o mais recente
+  const hist=[...(f.history||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  let qualNote='';
+  if(hist.length>=2){
+    const first=hist[0],last=hist[hist.length-1];
+    const changed=[];
+    ['tech','behavior'].forEach(store=>{
+      Object.keys(last[store]||{}).forEach(k=>{
+        const beforeVal=first[store]?.[k];
+        const afterVal=last[store]?.[k];
+        if(beforeVal&&afterVal&&beforeVal!==afterVal)changed.push(`${k} passou de "${beforeVal}" para "${afterVal}"`);
+      });
+    });
+    qualNote=changed.length?` Nas fichas registradas, ${changed.slice(0,3).join('; ')}.`:'';
+  }
+
+  return`<div class="panel" style="margin-top:14px;border:2px solid var(--info)">
+    <div class="panel-head"><div class="panel-title">🔎 Evolução — cruzamento semanal</div></div>
+    <div style="font-size:13px;color:var(--text);line-height:1.6">${narrative}${qualNote}</div>
+  </div>`;
 }
 function renderFichaChatter(chatterId){
   const el=document.getElementById('ficha-content');if(!el)return;
@@ -4222,6 +4292,8 @@ function renderFichaChatter(chatterId){
           ${Object.entries(snap).filter(([k])=>k!=='date').map(([k,v])=>v?`<div style="margin-bottom:4px"><span style="font-size:10.5px;font-weight:700;color:var(--text3)">${k.toUpperCase()}</span><div style="font-size:12.5px;color:var(--text2)">${v}</div></div>`:'').join('')}
         </div>`).join('')}
     </div>`:''}
+
+    ${renderFichaCruzamento(chatterId)}
   `;
 }
 function formatFichaSnapshot(snap){
@@ -4810,6 +4882,7 @@ function saveModelRequestSplit(modelId){
    =========================================================== */
 const CHAT_METRICS=['conexao','conducao','engajamento','conversao','resposta','naturalidade'];
 const CHAT_METRIC_LABELS={conexao:'Conexão',conducao:'Condução',engajamento:'Engajamento',conversao:'Conversão',resposta:'Resposta',naturalidade:'Naturalidade'};
+const SCORE_WORD={1:'Fraco',2:'Regular',3:'Bom',4:'Ótimo',5:'Excelente'};
 
 function openChatAnalysis(){
   if(!S.chatters.length){toast('⚠️ Cadastre chatters primeiro');return;}
@@ -4864,10 +4937,9 @@ function updateFichaFromAnalysis(chatterId){
   const avg=key=>Math.round(allAnalyses.reduce((s,a)=>s+(a[key]||0),0)/allAnalyses.length);
   // Map to ficha fields
   const scores={conversao:avg('conversao'),resposta:avg('resposta'),evolucao:avg('engajamento')};
-  const labels={1:'1 - Fraco',2:'2 - Regular',3:'3 - Bom',4:'4 - Ótimo',5:'5 - Excelente'};
-  Object.entries(scores).forEach(([k,v])=>{if(v>0)f.tech[k]=labels[v]||String(v);});
+  Object.entries(scores).forEach(([k,v])=>{if(v>0)f.tech[k]=SCORE_WORD[v]||String(v);});
   const behavScores={intensidade:avg('conexao'),comunicacao:avg('conducao'),energia:avg('naturalidade')};
-  Object.entries(behavScores).forEach(([k,v])=>{if(v>0)f.behavior[k]=labels[v]||String(v);});
+  Object.entries(behavScores).forEach(([k,v])=>{if(v>0)f.behavior[k]=SCORE_WORD[v]||String(v);});
 }
 function renderChatAnalysisList(){
   const el=document.getElementById('chat-analysis-list');
@@ -4893,7 +4965,7 @@ function renderChatAnalysisList(){
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px">
         ${CHAT_METRICS.map(m=>`<div style="text-align:center;background:var(--bg);border-radius:7px;padding:5px 3px">
           <div style="font-size:9px;color:var(--text3)">${CHAT_METRIC_LABELS[m]}</div>
-          <div style="font-size:17px;font-weight:800;color:${(a[m]||0)>=4?'var(--ok)':(a[m]||0)>=3?'var(--warn)':'var(--bad)'}">${a[m]||'—'}</div>
+          <div style="font-size:13px;font-weight:800;color:${(a[m]||0)>=4?'var(--ok)':(a[m]||0)>=3?'var(--warn)':'var(--bad)'}">${SCORE_WORD[a[m]]||'—'}</div>
         </div>`).join('')}
       </div>
       ${a.fortes?`<div style="font-size:12px;margin-bottom:4px"><strong style="color:var(--ok)">✅</strong> ${a.fortes}</div>`:''}
@@ -5196,7 +5268,7 @@ function renderEvolucao(){
         const avgM=analyses.reduce((s,a)=>s+(a[m]||0),0)/analyses.length;
         if(avgM>0&&avgM<low){low=avgM;lowM=m;}
       });
-      if(lowM&&low<4)weakestMetric={name:CHAT_METRIC_LABELS[lowM],score:Math.round(low*10)/10};
+      if(lowM&&low<4)weakestMetric={name:CHAT_METRIC_LABELS[lowM],score:SCORE_WORD[Math.round(low)]||Math.round(low)};
     }
 
     // Data-driven personalized recommendations
@@ -5210,7 +5282,7 @@ function renderEvolucao(){
     if(avgVph>0&&avgVph<10)recs.push(`${money(avgVph)}/hora está abaixo do mínimo (R$10/h) — revisar abordagem ou volume de leads`);
     else if(avgVph>=10&&avgVph<20)recs.push(`${money(avgVph)}/hora é regular — meta: chegar a R$20/h aumentando conversão nos horários fortes`);
     if(maxGap>90)recs.push(`Ficou <strong>${maxGap}min sem vender</strong> — mapear o que aconteceu nesse intervalo (pausa? lead frio? falta de fila?)`);
-    if(weakestMetric)recs.push(`Ponto mais fraco nas análises de chat: <strong>${weakestMetric.name}</strong> (${weakestMetric.score}/5) — prioridade de treinamento`);
+    if(weakestMetric)recs.push(`Ponto mais fraco nas análises de chat: <strong>${weakestMetric.name}</strong> (${weakestMetric.score}) — prioridade de treinamento`);
     if(pct!==null&&pct<50){
       const falta=meta-getChatterWeekRevenue(c.id);
       recs.push(`${pct}% da meta — faltam ${money(falta)}; com valor/hora atual precisa de ~${avgVph>0?Math.ceil(falta/avgVph)+'h':'mais dados'} de chat focado`);
@@ -5258,7 +5330,7 @@ function renderEvolucao(){
           <div style="font-size:13px;font-weight:700;color:var(--accent)">${peakHour||'—'}</div>
         </div>
       </div>`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Processe relatórios para ver métricas</div>'}
-      ${avgScore!==null?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Análise do chat: <strong style="color:${avgScore>=4?'var(--ok)':avgScore>=3?'var(--warn)':'var(--bad)'}">${avgScore}/5</strong> (${analyses.length} análise${analyses.length>1?'s':''})</div>`:''}
+      ${avgScore!==null?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Análise do chat: <strong style="color:${avgScore>=4?'var(--ok)':avgScore>=3?'var(--warn)':'var(--bad)'}">${SCORE_WORD[Math.round(avgScore)]||avgScore}</strong> (${analyses.length} análise${analyses.length>1?'s':''})</div>`:''}
       <div style="background:var(--bg-soft);border-radius:8px;padding:10px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">💡 ONDE MELHORAR</div>
         ${recs.map(r=>`<div style="font-size:12.5px;color:var(--text);padding:3px 0;border-bottom:1px solid var(--line)">• ${r}</div>`).join('')}
@@ -6776,10 +6848,14 @@ function calcChatterPagamento(fat, medalha, cat, htTotal, extraFat){
   const htBonus=(htTotal||0)*0.08;
   const extraBonus=(extraFat||0)*0.10;
   const total=comissao+premio+htBonus+extraBonus;
+  // O "piso" é só uma referência informativa (mínimo garantido pela empresa,
+  // política salarial separada) — NÃO soma nem substitui o valor calculado.
+  // O que é efetivamente pago vem SEMPRE só do resultado da própria pessoa:
+  // comissão sobre o faturamento + prêmio de meta + bônus de high ticket/hora extra.
   const piso=PAG_PISO[medalha]||1000;
   const pisoComp=Math.max(0,piso-total);
 
-  return{comissao,premio,htBonus,extraBonus,total,piso,pisoComp,totalComPiso:Math.max(total,piso)};
+  return{comissao,premio,htBonus,extraBonus,total,piso,pisoComp,totalComPiso:total};
 }
 
 function pagSwitchTab(tab){
@@ -6894,9 +6970,9 @@ function renderChatterPagCells(r,pct,col){
       <div style="font-size:9px;color:var(--text3)">% meta</div>
       <div style="font-size:12px;font-weight:800;color:${col}">${pct}%</div>
     </div>
-    <div style="background:${r.pisoComp>0?'var(--warn-soft)':'var(--ok-soft)'};border-radius:7px;padding:7px;text-align:center">
-      <div style="font-size:9px;color:var(--text3)">Total</div>
-      <div style="font-size:12px;font-weight:800;color:${r.pisoComp>0?'var(--warn)':'var(--ok)'}">${money(r.totalComPiso)}</div>
+    <div style="background:var(--ok-soft);border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:var(--text3)">Total (real)</div>
+      <div style="font-size:12px;font-weight:800;color:var(--ok)">${money(r.totalComPiso)}</div>
     </div>`;
 }
 
@@ -6950,7 +7026,7 @@ function renderPagPreview(){
         <div style="font-size:15px;font-weight:700;font-family:var(--font-mono)">${money(r.extraBonus)}</div>
       </div>`:''}
     </div>
-    ${r.pisoComp>0?`<div style="background:var(--warn-soft);border-radius:8px;padding:10px;margin-top:8px;font-size:12.5px;color:var(--warn)">⚠️ Piso complementa +${money(r.pisoComp)} (total garantido: ${money(r.piso)})</div>`:''}
+    ${r.pisoComp>0?`<div style="background:var(--bg-soft);border-radius:8px;padding:10px;margin-top:8px;font-size:12px;color:var(--text3)">ℹ️ O piso de referência dessa medalha é ${money(r.piso)} (política salarial separada) — o valor acima já é o total real pago, calculado só pelo resultado desta pessoa.</div>`:''}
   </div>`;
 }
 
