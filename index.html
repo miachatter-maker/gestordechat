@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FFFFFF">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<title>GestorPro</title>
+<style>
+/* ============================================================
+   GestorPro — clean design tokens
+   Conceito: ferramenta de trabalho discreta. Hierarquia vem de
+   tipografia, espaço e peso — não de cor. Um único acento (índigo)
+   carrega toda ação primária; estado (ok/warn/bad/info) é sutil,
+   texto colorido sobre fundo neutro, nunca blocos vibrantes.
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root{
+  --bg:#FFFFFF;
+  --bg-soft:#FBF6F7;
+  --surface:#FFFFFF;
+  --line:#F0E2E5;
+  --line-strong:#E5CFD5;
+
+  --text:#241A1D;
+  --text2:#7A6A6E;
+  --text3:#B5A1A6;
+
+  --accent:#E8779B;
+  --accent-soft:#FCEAF0;
+  --accent-strong:#D85C84;
+
+  --ok:#177350;
+  --ok-soft:#E7F5EE;
+  --warn:#9A5B00;
+  --warn-soft:#FBF0DD;
+  --bad:#B42334;
+  --bad-soft:#FBEAEA;
+  --info:#1D5FAE;
+  --info-soft:#EAF2FB;
+
+  --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:16px;
+  --font-display:'Inter',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{background:var(--bg);}
+body{
+  font-family:var(--font-display);color:var(--text);min-height:100dvh;
+  overflow-x:hidden;font-size:14.5px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+#app{display:flex;flex-direction:column;min-height:100dvh;}
+
+/* ---------- HEADER ---------- */
+.topbar{
+  position:sticky;top:0;z-index:90;background:rgba(255,255,255,0.96);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+  padding:14px 18px 0;
+}
+.topbar-row{display:flex;align-items:center;gap:10px;padding-bottom:13px;}
+.brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0;}
+.brand-mark{
+  width:28px;height:28px;border-radius:7px;flex-shrink:0;
+  background:var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:13px;color:#fff;
+}
+.brand-text{display:flex;flex-direction:column;gap:0px;min-width:0;}
+.brand-greet{font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;}
+.brand-date{font-size:14px;font-weight:600;color:var(--text);text-transform:capitalize;}
+.topclock{
+  font-family:var(--font-mono);font-size:13.5px;font-weight:500;color:var(--text2);
+  flex-shrink:0;
+}
+.toptabs{display:flex;gap:2px;overflow-x:auto;padding-bottom:0;}
+.toptabs::-webkit-scrollbar{display:none;}
+.toptab{
+  flex-shrink:0;font-family:var(--font-display);font-size:13px;font-weight:500;
+  color:var(--text2);background:transparent;border:none;padding:9px 12px;
+  cursor:pointer;white-space:nowrap;position:relative;
+}
+.toptab.active{color:var(--text);font-weight:600;}
+.toptab.active::after{content:'';position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent);border-radius:1px;}
+
+/* ---------- MAIN ---------- */
+.main{flex:1;padding:20px 16px 100px;max-width:640px;margin:0 auto;width:100%;}
+.view{display:none;}
+.view.active{display:block;}
+
+.eyebrow{font-size:11.5px;font-weight:600;letter-spacing:.04em;color:var(--text3);text-transform:uppercase;margin-bottom:6px;}
+.view-title{font-size:21px;font-weight:700;letter-spacing:-.01em;margin-bottom:3px;color:var(--text);}
+.view-sub{font-size:13px;color:var(--text2);margin-bottom:20px;}
+
+/* ---------- PANEL / CARD ---------- */
+.panel{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:16px;margin-bottom:12px;
+}
+.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:13px;}
+.panel-title{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;color:var(--text);}
+.panel-note{font-size:11.5px;color:var(--text3);margin-top:2px;font-weight:400;}
+
+/* ---------- BUTTONS ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  font-family:var(--font-display);font-weight:600;font-size:13px;
+  border:none;border-radius:var(--r-sm);padding:9px 14px;cursor:pointer;
+  transition:opacity .12s,background-color .12s;
+}
+.btn:active{opacity:.75;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-primary:hover{background:var(--accent-strong);}
+.btn-danger{background:var(--bad);color:#fff;}
+.btn-soft{background:var(--accent-soft);color:var(--accent);}
+.btn-ghost{background:var(--bg-soft);color:var(--text2);border:1px solid var(--line);}
+.btn-line{background:transparent;color:var(--text2);border:1px solid var(--line);}
+.btn-sm{padding:6px 11px;font-size:12px;border-radius:7px;}
+.btn-xs{padding:4px 9px;font-size:11.5px;border-radius:6px;}
+.btn-block{width:100%;}
+.btn-icon{width:32px;height:32px;padding:0;border-radius:8px;flex-shrink:0;}
+.fab{
+  position:fixed;right:18px;bottom:96px;z-index:80;
+  width:50px;height:50px;border-radius:50%;background:var(--accent);
+  color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;
+  border:none;cursor:pointer;box-shadow:0 4px 16px rgba(232,119,155,.35);
+}
+.fab:active{opacity:.85;}
+
+/* ---------- BOTTOM NAV ---------- */
+.bottomnav{
+  position:fixed;bottom:0;left:0;right:0;z-index:90;
+  background:rgba(255,255,255,0.97);backdrop-filter:blur(14px);
+  border-top:1px solid var(--line);
+  display:flex;justify-content:space-around;
+  padding:7px 4px env(safe-area-inset-bottom,7px);
+}
+.navbtn{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  background:none;border:none;color:var(--text3);cursor:pointer;
+  padding:5px 4px;min-width:52px;font-family:var(--font-display);position:relative;
+}
+.navbtn.active{color:var(--text);}
+.navbtn-ic{font-size:17px;line-height:1;opacity:.75;}
+.navbtn.active .navbtn-ic{opacity:1;}
+.navbtn-lb{font-size:9.5px;font-weight:600;letter-spacing:.02em;}
+.navbtn-dot{position:absolute;top:0;right:8px;width:6px;height:6px;border-radius:50%;background:var(--bad);}
+
+/* ---------- INPUTS ---------- */
+.field{margin-bottom:13px;}
+.flabel{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:.01em;margin-bottom:6px;display:block;}
+.finput,.fselect,.ftext{
+  width:100%;padding:10px 12px;background:var(--bg-soft);border:1px solid var(--line);
+  border-radius:var(--r-sm);color:var(--text);font-family:var(--font-display);font-size:14px;
+  outline:none;transition:border-color .15s;-webkit-appearance:none;
+}
+.finput:focus,.fselect:focus,.ftext:focus{border-color:var(--accent);background:var(--surface);}
+.ftext{resize:vertical;min-height:74px;line-height:1.5;}
+.fselect{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B6B76' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;cursor:pointer;
+}
+.finput[type=time],.finput[type=date]{font-family:var(--font-mono);}
+.fgrid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+/* ---------- CHIPS / TABS ---------- */
+.chiprow{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;}
+.chip{
+  font-family:var(--font-display);padding:5px 12px;border-radius:6px;font-size:12px;font-weight:500;
+  background:var(--bg-soft);color:var(--text2);border:1px solid var(--line);cursor:pointer;
+}
+.chip.sel{background:var(--accent);color:#fff;border-color:var(--accent);}
+.segtabs{display:flex;gap:4px;margin-bottom:14px;overflow-x:auto;background:var(--bg-soft);padding:3px;border-radius:9px;}
+.segtabs::-webkit-scrollbar{display:none;}
+.segtab{
+  flex-shrink:0;font-family:var(--font-display);padding:6px 13px;border-radius:7px;font-size:12px;font-weight:600;
+  background:transparent;color:var(--text2);border:none;cursor:pointer;
+}
+.segtab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08);}
+
+/* ---------- BADGES / PILLS ---------- */
+.pill{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:5px;font-size:10.5px;font-weight:600;}
+.pill-ok{background:var(--ok-soft);color:var(--ok);}
+.pill-bad{background:var(--bad-soft);color:var(--bad);}
+.pill-warn{background:var(--warn-soft);color:var(--warn);}
+.pill-info{background:var(--info-soft);color:var(--info);}
+.pill-flat{background:var(--bg-soft);color:var(--text3);border:1px solid var(--line);}
+
+/* ---------- STAT GRID ---------- */
+.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:13px;}
+.statcell{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 14px;}
+.statval{font-family:var(--font-mono);font-size:22px;font-weight:500;letter-spacing:-.01em;color:var(--text);}
+.statlb{font-size:10.5px;color:var(--text3);margin-top:3px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+
+/* ---------- ROSTER ROW ---------- */
+.roster{display:flex;flex-direction:column;gap:1px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;}
+.rrow{
+  display:flex;align-items:center;gap:11px;background:var(--surface);
+  padding:11px 12px;position:relative;border-bottom:1px solid var(--line);
+}
+.rrow:last-child{border-bottom:none;}
+.rrow.on{background:var(--ok-soft);}
+.rrow.ot{background:var(--warn-soft);}
+.rrow.off{opacity:.7;}
+.ravatar{
+  width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;flex-shrink:0;font-family:var(--font-display);
+}
+.rinfo{flex:1;min-width:0;}
+.rname{font-size:13.5px;font-weight:600;color:var(--text);}
+.rmeta{font-size:11.5px;color:var(--text2);margin-top:1px;}
+.ractions{display:flex;gap:5px;flex-shrink:0;}
+
+/* ---------- TEAM CARD ---------- */
+.teamcard{
+  display:flex;align-items:center;gap:11px;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:13px;margin-bottom:8px;cursor:pointer;
+}
+.teamcard:active{background:var(--bg-soft);}
+.tc-status{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+
+/* ---------- LEVEL COLORS ---------- */
+.lvl-treinamento{color:var(--accent);background:var(--accent-soft);}
+.lvl-teste{color:var(--text2);background:var(--bg-soft);border:1px solid var(--line);}
+.lvl-junior{color:var(--info);background:var(--info-soft);}
+.lvl-pleno{color:var(--warn);background:var(--warn-soft);}
+.lvl-senior{color:var(--ok);background:var(--ok-soft);}
+
+/* ---------- TASK / CHECK LIST ---------- */
+.tasklist{display:flex;flex-direction:column;gap:1px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;}
+.taskrow{
+  display:flex;align-items:flex-start;gap:11px;background:var(--surface);
+  padding:12px;border-bottom:1px solid var(--line);
+}
+.taskrow:last-child{border-bottom:none;}
+.taskrow.done{opacity:.5;}
+.tcheck{
+  width:19px;height:19px;border-radius:5px;border:1.5px solid var(--line-strong);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;background:var(--surface);
+  font-weight:700;transition:all .15s;margin-top:1px;
+}
+.tcheck.done{background:var(--accent);border-color:var(--accent);color:#fff;}
+.tbody{flex:1;min-width:0;}
+.ttext{font-size:13.5px;font-weight:500;color:var(--text);}
+.taskrow.done .ttext{text-decoration:line-through;color:var(--text3);}
+.tmeta-row{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;}
+
+/* ---------- ORIENT / LOG ITEM ---------- */
+.logitem{
+  background:var(--bg-soft);border-left:2px solid var(--accent);border-radius:0 var(--r-sm) var(--r-sm) 0;
+  padding:10px 12px;margin-bottom:8px;
+}
+.logitem.alt{border-left-color:var(--warn);}
+.logdate{font-size:10.5px;color:var(--text3);margin-bottom:5px;font-weight:600;}
+.logtext{font-size:13px;color:var(--text2);line-height:1.55;}
+
+/* ---------- EMPTY STATE ---------- */
+.empty{text-align:center;padding:34px 16px;color:var(--text3);}
+.empty-ic{font-size:26px;margin-bottom:9px;opacity:.5;}
+.empty-tx{font-size:12.5px;line-height:1.6;}
+
+/* ---------- ALARM HERO ---------- */
+.alarmhero{text-align:center;padding:6px 0 4px;}
+.alarmclock{font-family:var(--font-mono);font-size:32px;font-weight:500;letter-spacing:-.01em;color:var(--text);}
+.alarmclock.ringing{animation:ring-text .6s infinite alternate;}
+@keyframes ring-text{from{opacity:1}to{opacity:.4}}
+.alarmsub{font-size:12px;color:var(--text3);margin-top:5px;font-weight:500;}
+.alarm-ringicon{
+  width:46px;height:46px;border-radius:50%;background:var(--bg-soft);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:19px;margin:0 auto 11px;
+}
+.alarm-ringicon.ringing{animation:ring-shake .4s infinite;background:var(--bad-soft);border-color:var(--bad);}
+@keyframes ring-shake{0%,100%{transform:rotate(0)}25%{transform:rotate(-8deg)}75%{transform:rotate(8deg)}}
+.codebox{
+  background:var(--accent);border-radius:var(--r-md);
+  padding:13px 18px;text-align:center;font-family:var(--font-mono);font-size:24px;font-weight:500;
+  color:#fff;letter-spacing:6px;margin:11px 0;
+}
+
+/* ---------- WEEK GOALS ---------- */
+.goalcard{
+  background:var(--bg-soft);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:13px;margin-bottom:9px;
+}
+.goalcard.met{border-color:var(--ok);background:var(--ok-soft);}
+.goal-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;}
+.goal-text{font-size:13.5px;font-weight:600;flex:1;color:var(--text);}
+.goalbar-track{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:8px;}
+.goalbar-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .4s;}
+.goal-nums{display:flex;justify-content:space-between;margin-top:6px;font-family:var(--font-mono);font-size:11px;color:var(--text2);}
+
+/* ---------- BAR CHART ---------- */
+.barchart{display:flex;align-items:flex-end;gap:5px;height:54px;margin:12px 0 6px;}
+.barcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.barfill{width:100%;border-radius:3px 3px 1px 1px;min-height:3px;background:var(--text2);transition:height .4s;}
+.barlb{font-size:9px;color:var(--text3);font-weight:600;}
+
+/* ---------- REVENUE TABLE ---------- */
+.rtable{width:100%;border-collapse:collapse;font-size:12px;}
+.rtable th{text-align:left;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;padding:6px 5px;border-bottom:1px solid var(--line);}
+.rtable td{padding:8px 5px;border-bottom:1px solid var(--line);vertical-align:middle;}
+.rtable tr:last-child td{border-bottom:none;}
+.rinput{width:76px;padding:6px 7px;font-family:var(--font-mono);font-size:12px;text-align:right;background:var(--bg-soft);border:1px solid var(--line);border-radius:6px;color:var(--text);outline:none;}
+.rinput:focus{border-color:var(--accent);}
+.rtotalrow td{font-weight:700;color:var(--text);font-family:var(--font-mono);}
+
+/* ---------- REPORT ROW ---------- */
+.reprow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);}
+.reprow:last-child{border-bottom:none;}
+.replb{font-size:12.5px;color:var(--text2);}
+.repval{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--text);}
+.divider{height:1px;background:var(--line);margin:13px 0;}
+.sectionlb{font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+
+/* ---------- MODAL ---------- */
+.modalbg{
+  display:none;position:fixed;inset:0;z-index:200;background:rgba(22,22,26,.35);
+  align-items:flex-end;justify-content:center;
+}
+.modalbg.open{display:flex;}
+.modal{
+  background:var(--surface);border-top-left-radius:18px;border-top-right-radius:18px;
+  border:1px solid var(--line);width:100%;max-width:600px;padding:18px 16px;
+  max-height:92dvh;overflow-y:auto;
+}
+.modal-handle{width:34px;height:4px;background:var(--line-strong);border-radius:2px;margin:0 auto 16px;}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:15px;letter-spacing:-.01em;color:var(--text);}
+.modalbtns{display:flex;gap:8px;margin-top:8px;}
+
+/* ---------- TOAST ---------- */
+.toast{
+  position:fixed;bottom:92px;left:50%;transform:translateX(-50%) translateY(12px);
+  background:var(--text);color:#fff;
+  padding:10px 16px;border-radius:8px;font-size:13px;font-weight:500;z-index:300;
+  opacity:0;transition:all .25s;pointer-events:none;white-space:nowrap;
+  box-shadow:0 4px 16px rgba(0,0,0,.2);font-family:var(--font-display);
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* ---------- WATCH BANNER ---------- */
+.watchbanner{
+  background:var(--bad-soft);border:1px solid rgba(180,35,52,.2);border-radius:var(--r-lg);padding:14px;margin-bottom:13px;
+}
+.watchitem{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid rgba(180,35,52,.12);}
+.watchitem:last-child{border-bottom:none;}
+
+::-webkit-scrollbar{width:0;height:0;}
+</style>
+</head>
+<body>
+<div id="app">
+
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand">
+      <div class="brand-mark">G</div>
+      <div class="brand-text">
+        <span class="brand-greet">Gestão da equipe</span>
+        <span class="brand-date" id="hd-date">—</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+      <span class="pill pill-flat" id="sync-badge" style="font-size:9.5px">💾 local</span>
+      <button onclick="exportBackup()" title="Exportar backup" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:.6" title="Exportar backup JSON">⬇️</button>
+      <button onclick="importBackup()" title="Importar backup" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:.6" title="Restaurar backup JSON">⬆️</button>
+      <div class="topclock" id="hd-clock">00:00</div>
+    </div>
+  </div>
+  <nav class="toptabs" id="toptabs">
+    <button class="toptab active" data-go="home">Painel</button>
+    <button class="toptab" data-go="gestao">Gestão</button>
+    <button class="toptab" data-go="fat">Faturamento</button>
+    <button class="toptab" data-go="turno">Turno</button>
+    <button class="toptab" data-go="time">Equipe</button>
+    <button class="toptab" data-go="fichas">Fichas</button>
+    <button class="toptab" data-go="report">Relatório</button>
+    <button class="toptab" data-go="extra">H. Extra</button>
+    <button class="toptab" data-go="gerador">Relatórios</button>
+    <button class="toptab" data-go="semana">Semana</button>
+    <button class="toptab" data-go="estudos">Estudos</button>
+    <button class="toptab" data-go="evolucao">Evolução</button>
+    <button class="toptab" data-go="chatlab">ChatLab</button>
+    <button class="toptab" data-go="testers">Testers</button>
+    <button class="toptab" data-go="pagamento">Pagamento</button>
+    <button class="toptab" data-go="projecao">Projeção</button>
+    
+  </nav>
+</header>
+
+<main class="main">
+
+<!-- ===================== PAINEL (HOME) ===================== -->
+<section class="view active" id="v-home">
+  <div class="eyebrow">status ao vivo</div>
+  <div class="view-title">Painel</div>
+
+  <!-- ESCRITÓRIO + PRÓXIMO TURNO -->
+  <div class="panel" id="home-escritorio"></div>
+
+  <!-- ALERTAS URGENTES -->
+  <div class="panel" id="home-urgent-panel" style="display:none;border-color:var(--bad)">
+    <div class="panel-head">
+      <div><div class="panel-title" style="color:var(--bad)">🚨 Urgente</div></div>
+      <span id="home-urgent-badge" class="pill pill-bad" style="font-size:10px"></span>
+    </div>
+    <div id="home-urgent-list"></div>
+  </div>
+
+  <!-- ATENÇÃO / AGENDA -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">🔔 Atenção necessária</div></div>
+      <span id="smart-alerts-badge" class="pill pill-bad" style="font-size:10px"></span>
+    </div>
+    <div id="home-smart-alerts"></div>
+  </div>
+
+  <!-- WATCH -->
+  <div id="home-watch-wrap"></div>
+
+  <!-- JANELA DE TURNOS -->
+  <div class="panel" id="home-janela-panel" style="display:none">
+    <div class="panel-head"><div><div class="panel-title">⚠️ Janela sem cobertura</div><div class="panel-note">Turnos sem chatter escalado</div></div></div>
+    <div id="home-janela-list"></div>
+  </div>
+
+  <!-- MOTIVACIONAL -->
+  <div class="panel" id="home-motiv-panel">
+    <div class="panel-head"><div class="panel-title">💡 Motivacional da semana</div><button class="btn btn-ghost btn-xs" onclick="openMotivacionalHome()">editar</button></div>
+    <div id="home-motiv-content"></div>
+  </div>
+
+  <!-- RELATÓRIOS FALTANTES NO PAINEL -->
+
+  <!-- DEMANDAS URGENTES -->
+  <div id="home-demandas-urgentes"></div>
+
+
+
+
+
+  <!-- BACKUP -->
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-soft);border-radius:10px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:15px">💾</span>
+      <div style="font-size:11px;color:var(--text3)" id="backup-status-lb">dados salvos localmente</div>
+    </div>
+    <span class="pill pill-ok" id="backup-status-pill" style="font-size:10px">ativo</span>
+  </div>
+</section>
+
+<!-- ===================== TURNO ===================== -->
+<section class="view" id="v-turno">
+  <div class="eyebrow">escala</div>
+  <div class="view-title">Turno</div>
+
+  <!-- ESCALA DO DIA -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title" id="turno-day-title">Hoje</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-xs" onclick="copyTurnoDay()">📋 copiar</button>
+        <button class="btn btn-primary btn-xs" onclick="openModal('m-shift')">+ turno</button>
+      </div>
+    </div>
+    <div id="turno-day-list"></div>
+  </div>
+
+  <!-- ESCALA SEMANAL -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">Escala da semana</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="copyTurnoWeek()">📋 copiar</button>
+    </div>
+    <div id="turno-week-list"></div>
+  </div>
+
+  <!-- PRESENÇAS -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Presenças</div>
+      <button class="btn btn-ghost btn-xs" onclick="openModal('m-absence')">+ falta/atraso</button>
+    </div>
+    <div id="absence-list"></div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-bottom:8px">
+    <button class="btn btn-ghost btn-block btn-sm" onclick="openModal('m-swap')">⇄ troca</button>
+  </div>
+</section>
+
+<!-- ===================== AGENDA ===================== -->
+
+
+<!-- ===================== SEMANA ===================== -->
+<section class="view" id="v-semana">
+  <div class="eyebrow">planejamento</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+    <div class="view-title" style="margin:0">Semana</div>
+    <div class="week-nav" id="week-nav-semana"></div>
+  </div>
+  <div id="semana-range" style="color:var(--text3);font-size:13px;margin-bottom:20px"></div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">🎯 Orientações da semana</div><div class="panel-note">Concluídas somem só na próxima semana</div></div>
+      <button class="btn btn-primary btn-xs" onclick="addWeekOrient()">+ orientação</button>
+    </div>
+    <div class="field" style="margin-bottom:8px"><input class="finput" id="week-orient-input" placeholder="Nova orientação..." onkeydown="if(event.key==='Enter')addWeekOrient()"></div>
+    <div id="week-orients-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">Objetivos da semana</div></div>
+      <button class="btn btn-primary btn-xs" onclick="openModal('m-goal')">+ objetivo</button>
+    </div>
+    <div id="goals-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Faturamento da semana</div></div>
+    <div id="semana-revenue-preview"></div>
+  </div>
+
+  <!-- DESENVOLVIMENTO POR CHATTER -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📊 Desenvolvimento da equipe</div><div class="panel-note">Dados dos relatórios desta semana</div></div>
+      <button class="btn btn-soft btn-xs" onclick="renderSemanaDesenvolvimento()">↻</button>
+    </div>
+    <div id="semana-desenvolvimento"></div>
+  </div>
+
+  <!-- ANÁLISE SEMANAL GERADA -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">🤖 Análise semanal</div><div class="panel-note">Gerada automaticamente dos dados</div></div>
+      <button class="btn btn-primary btn-xs" onclick="gerarAnaliseSemanal()">Gerar</button>
+    </div>
+    <div id="semana-analise"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Notas de planejamento</div></div>
+    <textarea class="ftext" id="week-notes" placeholder="Prioridades, riscos, observações da semana..." style="min-height:88px"></textarea>
+    <button class="btn btn-primary btn-sm" style="margin-top:9px" onclick="saveWeekNotes()">Salvar</button>
+  </div>
+</section>
+
+<!-- ===================== EQUIPE ===================== -->
+<section class="view" id="v-time">
+  <div class="eyebrow">roster</div>
+  <div class="view-title">Minha equipe</div>
+  <div class="view-sub">Perfis, níveis e mapeamento individual.</div>
+
+  <div class="segtabs" id="team-filter-tabs">
+    <button class="segtab active" data-lvl="all">Todos</button>
+    <button class="segtab" data-lvl="treinamento">Treino</button>
+    <button class="segtab" data-lvl="teste">Teste</button>
+    <button class="segtab" data-lvl="junior">Júnior</button>
+    <button class="segtab" data-lvl="pleno">Pleno</button>
+    <button class="segtab" data-lvl="senior">Sênior</button>
+  </div>
+  <div id="team-list"></div>
+  <button class="fab" onclick="openModal('m-chatter')">+</button>
+</section>
+
+<!-- ===================== FATURAMENTO ===================== -->
+<section class="view" id="v-fat">
+  <div class="eyebrow">financeiro</div>
+  <div class="view-title">Faturamento</div>
+  <div class="view-sub">Lançamento diário por modelo e relatórios.</div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Modelos</div>
+    <button class="btn btn-ghost btn-xs" onclick="openModal('m-model')">+ modelo</button></div>
+    <div id="models-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">Lançamento diário</div><div class="panel-note" id="fat-date-lb">—</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="openModal('m-revreport')">relatório</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <button class="btn btn-ghost btn-xs" onclick="changeFatDate(-1)">◀ anterior</button>
+      <input type="date" class="finput" id="fat-date-picker" style="flex:1;text-align:center;font-family:var(--font-mono);font-size:13px" onchange="setFatDate(this.value)">
+      <button class="btn btn-ghost btn-xs" onclick="changeFatDate(1)">próximo ▶</button>
+    </div>
+    <button class="btn btn-line btn-xs btn-block" style="margin-bottom:10px" onclick="selectedFatDate=todayKey();document.getElementById('fat-date-picker').value=todayKey();renderFat()">📅 Ir para hoje</button>
+    <div id="revenue-table"></div>
+  </div>
+
+    <!-- METAS DOS CHATTERS -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🎯 Metas da semana</div></div>
+    <div id="fat-meta-progress"></div>
+  </div>
+
+  <!-- HORA EXTRA -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">⚡ Hora extra acumulada</div></div>
+    <div id="fat-extra-progress"></div>
+  </div>
+
+  <!-- ANÁLISE DO CHATTER -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📊 Análise do chatter</div></div>
+    <select class="fselect" id="fat-analysis-chatter" style="margin-bottom:10px" onchange="renderChatterAnalysis()">
+      <option value="">— selecionar chatter —</option>
+    </select>
+    <div id="fat-chatter-analysis"></div>
+  </div>
+
+<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">📅 Diário por Modelo</div><div class="panel-note">Faturamento dia a dia, semana atual</div></div></div>
+    <div id="daily-by-model"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">📅 Diário por Chatter</div><div class="panel-note">Faturamento dia a dia, semana atual</div></div></div>
+    <div id="daily-by-chatter"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🎯 Metas da Semana</div><div class="panel-note">Defina a meta de cada chatter e acompanhe o progresso</div></div></div>
+    <div id="chatter-goals-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Relatórios</div></div>
+    <div class="segtabs" id="report-period-tabs">
+      <button class="segtab active" data-rep="week">Semana</button>
+      <button class="segtab" data-rep="month">Mês</button>
+    </div>
+    <div id="report-body"></div>
+  </div>
+</section>
+
+<!-- ===================== RELATÓRIO SEMANAL ===================== -->
+<section class="view" id="v-report">
+  <div class="eyebrow">gestão</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+    <div class="view-title" style="margin:0">Relatório</div>
+    <div class="week-nav" id="week-nav-report"></div>
+  </div>
+  <div class="view-sub" id="report-wk-range">—</div>
+
+  <!-- Seção 1: Visão Geral — preenchida automaticamente -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">1. Visão Geral</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
+    <div id="rpt-visao-geral"></div>
+  </div>
+
+  <!-- Seção 2: Performance por Chatter — semi-automático -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">2. Performance por Chatter</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
+    <div id="rpt-performance"></div>
+  </div>
+
+  <!-- Seção 3: Chatters em Teste — semi-automático -->
+  <div class="panel" id="rpt-teste-panel">
+    <div class="panel-head"><div class="panel-title">3. Chatters em Teste</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
+    <div id="rpt-teste"></div>
+  </div>
+
+  <!-- Seção 4: Evolução dos Novos — automático -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">4. Evolução dos Novos</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
+    <div id="rpt-evolucao"></div>
+  </div>
+
+  <!-- Seção 5: Seus erros — manual -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">5. Seus Principais Erros da Semana</div><span class="pill pill-flat" style="font-size:10px">manual</span></div>
+    <div class="field"><label class="flabel">Erro 1</label><input class="finput" id="rpt-erro1" placeholder="Descreva o erro..."></div>
+    <div class="field"><label class="flabel">Erro 2</label><input class="finput" id="rpt-erro2" placeholder="Descreva o erro..."></div>
+    <div class="field"><label class="flabel">Erro 3</label><input class="finput" id="rpt-erro3" placeholder="Descreva o erro..."></div>
+  </div>
+
+  <!-- Seção 6: Ações realizadas — semi-automático -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">6. Ações Realizadas</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
+    <div id="rpt-acoes"></div>
+    <div class="field" style="margin-top:10px"><label class="flabel">Ajustes na operação</label><input class="finput" id="rpt-ajustes" placeholder="Ex: mudei horário do turno da tarde..."></div>
+  </div>
+
+  <!-- Seção 7: Problemas — manual -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">7. Problemas Encontrados</div><span class="pill pill-flat" style="font-size:10px">manual</span></div>
+    <div class="field"><label class="flabel">Problema 1</label><input class="finput" id="rpt-prob1" placeholder="Descreva o problema..."></div>
+    <div class="field"><label class="flabel">Problema 2</label><input class="finput" id="rpt-prob2" placeholder="Descreva o problema..."></div>
+  </div>
+
+  <!-- Seção 8: Plano próxima semana — manual -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">8. Plano para Próxima Semana</div><span class="pill pill-flat" style="font-size:10px">manual</span></div>
+    <div class="field"><label class="flabel">Ação 1</label><input class="finput" id="rpt-plano1" placeholder="Ex: focar em chatter X..."></div>
+    <div class="field"><label class="flabel">Ação 2</label><input class="finput" id="rpt-plano2" placeholder=""></div>
+    <div class="field"><label class="flabel">Ação 3</label><input class="finput" id="rpt-plano3" placeholder=""></div>
+  </div>
+
+  <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="generateFullReport()">📋 Gerar relatório completo</button>
+  <button class="btn btn-ghost btn-block" onclick="saveReportDraft()">💾 Salvar rascunho</button>
+
+  <!-- Preview do relatório gerado -->
+  <div class="panel" id="rpt-output-panel" style="display:none;margin-top:12px">
+    <div class="panel-head"><div class="panel-title">Relatório gerado</div></div>
+    <textarea class="ftext" id="rpt-output" readonly style="min-height:400px;font-family:var(--font-mono);font-size:11px;line-height:1.7" onclick="this.select()"></textarea>
+    <button class="btn btn-primary btn-block" style="margin-top:10px" onclick="copyFullReport()">📋 Copiar tudo</button>
+  </div>
+</section>
+
+<!-- ===================== HORA EXTRA ===================== -->
+<section class="view" id="v-extra">
+  <div class="eyebrow">operação</div>
+  <div class="view-title">Hora Extra</div>
+  <div class="view-sub" id="extra-sub">Vagas disponíveis esta semana</div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">⚡ Vagas disponíveis</div><div class="panel-note">Geradas automaticamente pelos dias de folga dos turnos</div></div>
+      <span class="pill pill-info" id="extra-vagas-badge">0 vagas</span>
+    </div>
+    <div id="extra-vagas-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">✅ Hora extra atribuída</div><div class="panel-note">Faturamento separado do geral</div></div>
+      <span class="pill pill-ok" id="extra-total-badge">R$0</span>
+    </div>
+    <div id="extra-atribuida-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">💰 Faturamento de hora extra</div></div>
+    <div id="extra-fat-breakdown"></div>
+  </div>
+</section>
+
+<!-- ===================== RELATÓRIOS DA EQUIPE ===================== -->
+<section class="view" id="v-gerador">
+  <div class="eyebrow">relatórios de venda</div>
+  <div class="view-title">Relatórios</div>
+
+  <!-- TABS INTERNAS -->
+  <div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px">
+    <button class="toptab active" id="reltab-gerador" onclick="relSwitchTab('gerador')" style="font-size:12.5px">📄 Gerar</button>
+    <button class="toptab" id="reltab-editor" onclick="relSwitchTab('editor')" style="font-size:12.5px">✏️ Editar</button>
+    <button class="toptab" id="reltab-processar" onclick="relSwitchTab('processar')" style="font-size:12.5px">📊 Processar</button>
+  </div>
+
+  <!-- ── GERAR ── -->
+  <div id="relpane-gerador">
+    <div class="panel">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field" style="margin:0"><label class="flabel">Data do relatório</label><input type="date" class="finput" id="ger-data"></div>
+        <div class="field" style="margin:0"><label class="flabel">Canal</label><input class="finput" id="ger-canal" value="PRIVACY FREE" onblur="S.geradorCanal=this.value;save();"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">📊 Planilhas dos modelos</div><div class="panel-note">XLSX exportado do Privacy</div></div>
+      <div id="ger-sheets"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><div class="panel-title">👥 Meu time</div><div class="panel-note">Cole o log do Discord e clique em Interpretar</div></div>
+        <button class="btn btn-ghost btn-xs" onclick="gerAddMeu()">+ manual</button>
+      </div>
+      <div class="field">
+        <label class="flabel">Log do Discord</label>
+        <textarea class="ftext" id="ger-discord" style="min-height:90px;font-family:var(--font-mono);font-size:12px" placeholder="1. Guilherme — Ontem às 15:27&#10;ON (Momoi)&#10;2. Guilherme — Ontem às 23:00&#10;OFF (Momoi)&#10;3. Zanlith2 — Ontem às 16:07&#10;ON (Arruda) - HORA EXTRA"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="gerInterpretar()">🔍 Interpretar</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ger-discord').value=''">Limpar</button>
+      </div>
+      <div id="ger-meu-cards"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><div class="panel-title">🌐 Time externo</div><div class="panel-note">Nome, modelo e horários — vendas excluídas dos seus relatórios</div></div>
+        <button class="btn btn-ghost btn-xs" onclick="gerAddExt()">+ chatter</button>
+      </div>
+      <div id="ger-ext-cards"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><div class="panel-title">⭐ Time Elite</div><div class="panel-note">Cole nome, modelo e vendas brutas — comissões são subtraídas do time básico</div></div>
+        <button class="btn btn-ghost btn-xs" onclick="gerAddElite()">+ chatter</button>
+      </div>
+      <div class="panel-note" style="margin-bottom:10px">Formato: cole as vendas brutas com horário — o app calcula as comissões automaticamente usando a planilha do modelo</div>
+      <div id="ger-elite-cards"></div>
+    </div>
+
+    <button class="btn btn-primary btn-block" onclick="gerarRelatorios()" style="margin-bottom:12px">📄 Gerar todos os relatórios</button>
+    <div id="ger-out"></div>
+  </div>
+
+  <!-- ── EDITOR ── -->
+  <div id="relpane-editor" style="display:none">
+    <div class="panel">
+      <div class="panel-head">
+        <div><div class="panel-title">✏️ Editar / corrigir relatório</div><div class="panel-note">Cole um relatório com erro, corrija e copie para a planilha</div></div>
+      </div>
+      <textarea class="ftext" id="ger-editor" style="min-height:220px;font-family:var(--font-mono);font-size:12px" placeholder="Cole aqui o relatório para editar..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="gerCopyEditor()">📋 Copiar</button>
+        <button class="btn btn-primary btn-sm" onclick="gerProcessarEditor()">→ Processar no faturamento</button>
+        <button class="btn btn-soft btn-sm" style="color:var(--info);border-color:var(--info)" onclick="gerProcessarEditorAsExtra()" title="Envia todo o valor direto para Hora Extra — não conta como meta">⚡ → Hora Extra</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PROCESSAR ── -->
+  <div id="relpane-processar" style="display:none">
+    <div class="panel">
+      <div class="panel-head">
+        <div><div class="panel-title">📨 Colar e processar relatórios</div><div class="panel-note">Cole todos juntos — o app extrai os dados</div></div>
+      </div>
+      <textarea class="ftext" id="teamreport-input" style="min-height:180px;font-family:var(--font-mono);font-size:12px" placeholder="Cole aqui os relatórios...&#10;&#10;Data: 01/07/2026&#10;Nome: Luiz Emanuel&#10;MOMOI PRIVACY FREE&#10;..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" style="flex:2" onclick="parseTeamReports()">📊 Processar</button>
+        <button class="btn btn-soft" style="flex:1;color:var(--info);border-color:var(--info)" onclick="parseTeamReportsAsExtra()" title="Envia todo o valor processado direto para Hora Extra — não conta como meta">⚡ Hora Extra</button>
+        <button class="btn btn-ghost btn-xs" onclick="document.getElementById('teamreport-input').value='';document.getElementById('teamreport-results').innerHTML=''">✕</button>
+      </div>
+    </div>
+    <div id="teamreport-results"></div>
+    <div id="teamreport-summary" style="display:none">
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title">📋 Resumo para envio</div></div>
+        <textarea class="ftext" id="teamreport-export" readonly style="min-height:300px;font-family:var(--font-mono);font-size:11.5px;line-height:1.7" onclick="this.select()"></textarea>
+        <button class="btn btn-primary btn-block" style="margin-top:10px" onclick="copyTeamReport()">📋 Copiar tudo</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== GESTÃO ===================== -->
+<section class="view" id="v-gestao">
+  <div class="eyebrow">operação</div>
+  <div class="view-title">Gestão</div>
+
+  <!-- PERFIL DO GESTOR -->
+  <div class="panel" id="manager-profile-panel" style="background:var(--accent-soft);border:none;position:relative">
+    <button onclick="openModal('m-manager-profile')" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:13px;color:var(--accent);opacity:.5;padding:4px" title="Editar perfil">✏️</button>
+    <div id="manager-profile-display"></div>
+  </div>
+
+  <!-- ROTINA DA MANHÃ -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">☀️ Rotina da manhã</div><span class="pill pill-flat" style="font-size:10px">repete todo dia</span></div>
+    <div id="morning-routine-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input class="finput" id="morning-routine-input" placeholder="Nova tarefa da rotina..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addMorningRoutine()">+</button>
+    </div>
+  </div>
+
+  <!-- PROBLEMAS PRA RESOLVER HOJE -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📋 Tarefas do dia</div><span class="pill pill-bad" style="font-size:10px" id="problems-badge"></span></div>
+    <div id="problems-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input class="finput" id="problems-input" placeholder="Descreva o problema..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addProblem()">+</button>
+    </div>
+  </div>
+
+  <!-- DEMANDAS DO KAIQUE -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📌 Demandas do Kaique</div></div>
+    <div id="demandas2-list"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <input class="finput" id="demandas2-text" placeholder="Nova demanda...">
+      <div style="display:flex;gap:8px">
+        <input type="date" class="finput" id="demandas2-date" style="flex:1">
+        <button class="btn btn-primary btn-sm" onclick="addDemanda2()">+</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TREINAMENTO -->
+  <div class="panel" style="border:2px solid var(--warn)">
+    <div class="panel-head"><div><div class="panel-title" style="color:var(--warn)">🎓 TREINAMENTO</div></div><button class="btn btn-soft btn-xs" onclick="openModal('m-add-training')">+ novo</button></div>
+    <div id="training-list"></div>
+  </div>
+
+  <!-- PREMIAÇÃO SEMANAL -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🏆 Premiação semanal</div></div>
+    <div id="prize-panel"></div>
+  </div>
+
+  <!-- MOTIVACIONAL -->
+  <div class="panel" style="border:1.5px solid var(--info)">
+    <div class="panel-head"><div class="panel-title" style="color:var(--info)">💡 Motivacional da semana</div></div>
+    <div class="field"><label class="flabel">Ideia para a equipe</label>
+      <textarea class="ftext" id="motiv-idea-gestao" placeholder="Uma ideia motivacional para a semana..." style="min-height:60px" onblur="saveMotivacionalGestao()"></textarea>
+    </div>
+    <div class="field"><label class="flabel">Análise dos resultados</label>
+      <textarea class="ftext" id="motiv-results-gestao" placeholder="Como a equipe respondeu à ideia..." style="min-height:60px" onblur="saveMotivacionalGestao()"></textarea>
+    </div>
+  </div>
+
+  <!-- REQUISIÇÕES POR MODELO -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📝 Requisições para modelos</div></div>
+    <div id="model-requests-split-list"></div>
+  </div>
+
+  <!-- REQUISIÇÕES DE HORÁRIOS -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🗓 Requisições de horários</div></div>
+    <div id="schedule-requests-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <select class="fselect" id="sched-req-chatter" style="flex:0 0 auto;width:140px"></select>
+      <input class="finput" id="sched-req-text" placeholder="Pedido..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addScheduleRequest()">+</button>
+    </div>
+  </div>
+
+  <!-- ANÁLISE DIÁRIA DO CHAT -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🔍 Análise diária do chat</div><button class="btn btn-primary btn-xs" onclick="openChatAnalysis()">+ nova análise</button></div>
+    <div style="margin-bottom:10px">
+      <select class="fselect" id="chat-analysis-chatter" onchange="renderChatAnalysisList()">
+        <option value="">— selecionar chatter —</option>
+      </select>
+    </div>
+    <div id="chat-analysis-list"></div>
+  </div>
+
+  <!-- ORIENTAÇÕES -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">Orientações</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="openModal('m-orient')">+ nova</button>
+    </div>
+    <div id="orient-list"></div>
+  </div>
+
+</section>
+
+<!-- ===================== FICHAS ===================== -->
+<section class="view" id="v-fichas">
+  <div class="eyebrow">acompanhamento</div>
+  <div class="view-title">Fichas dos Chatters</div>
+  <div class="view-sub">Atualização semanal · histórico cronológico</div>
+  <div style="margin-bottom:12px">
+    <select class="fselect" id="ficha-chatter-select" onchange="renderFichaChatter(this.value)"></select>
+  </div>
+  <div id="ficha-content"></div>
+</section>
+
+<!-- ===================== ESTUDOS ===================== -->
+<section class="view" id="v-estudos">
+  <div class="eyebrow">desenvolvimento pessoal</div>
+  <div class="view-title">Estudos</div>
+
+  <!-- O QUE MELHORAR -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">💪 O que melhorar e como</div><div class="panel-note">Feitos somem na virada da semana</div></div>
+      <button class="btn btn-primary btn-xs" onclick="addMelhora()">+ adicionar</button>
+    </div>
+    <div id="melhoras-list"></div>
+  </div>
+
+  <!-- MATERIAIS DE ESTUDO -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">📚 Materiais de estudo</div>
+      <button class="btn btn-primary btn-xs" onclick="openModal('m-study')">+ item</button>
+    </div>
+    <div id="study-list"></div>
+  </div>
+
+  <!-- HISTÓRICO DE EVOLUÇÃO PESSOAL -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📈 Histórico de evolução pessoal</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="saveEstudosSnapshot()">💾 snapshot</button>
+    </div>
+    <div id="estudos-historico"></div>
+  </div>
+
+  <!-- CONSELHEIRO EXECUTIVO (discreto, collapsible) -->
+  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
+    <button onclick="toggleConselheiro()" style="width:100%;padding:11px 14px;background:var(--bg-soft);border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text2)">
+      <span>🧠 Conselheiro Executivo</span>
+      <span id="conselheiro-ic" style="font-size:11px;color:var(--text3)">▸</span>
+    </button>
+    <div id="conselheiro-body" style="display:none;padding:14px">
+      <div class="field">
+        <textarea class="ftext" id="conselheiro-input" style="min-height:100px" placeholder="Descreva a situação — ex: um chatter com queda de performance, conflito na equipe, decisão difícil..."></textarea>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="conselheiro-btn" onclick="rodarConselheiro()">💬 Consultar</button>
+      <div id="conselheiro-out" style="margin-top:12px"></div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================== EVOLUÇÃO ===================== -->
+<section class="view" id="v-evolucao">
+  <div class="eyebrow">desenvolvimento</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+    <div class="view-title" style="margin:0">Evolução</div>
+    <div class="week-nav" id="week-nav-evolucao"></div>
+  </div>
+  <div class="view-sub">Semana analisada + histórico por chatter</div>
+  <div id="evolucao-content"></div>
+</section>
+
+
+<!-- ===================== TESTERS ===================== -->
+<section class="view" id="v-testers">
+  <div class="eyebrow">testes</div>
+  <div class="view-title">Testers</div>
+  <div class="view-sub">Acompanhe os resultados diários de cada tester</div>
+  <div style="margin-bottom:12px">
+    <select class="fselect" id="tester-select" onchange="renderTesterDetail(this.value)">
+      <option value="">— selecionar tester —</option>
+    </select>
+  </div>
+  <div id="tester-content"></div>
+</section>
+
+
+<!-- ===================== PAGAMENTO ===================== -->
+<section class="view" id="v-pagamento">
+  <div class="eyebrow">remuneração</div>
+  <div class="view-title">Pagamento</div>
+  <div class="view-sub">Previsão de ganhos — chatters e gerência</div>
+
+  <div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px">
+    <button class="toptab active" id="pagtab-chatters" onclick="pagSwitchTab('chatters')" style="font-size:12.5px">👥 Chatters</button>
+    <button class="toptab" id="pagtab-gerente" onclick="pagSwitchTab('gerente')" style="font-size:12.5px">👔 Gerência</button>
+  </div>
+
+  <!-- CHATTERS -->
+  <div id="pagpane-chatters">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">⚙️ Configurar semana</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field" style="margin:0">
+          <label class="flabel">Medalha do chatter</label>
+          <select class="fselect" id="pag-medalha" onchange="renderPagPreview()">
+            <option value="0">Sem medalha (4%)</option>
+            <option value="1">Bronze (4%)</option>
+            <option value="2">Prata (4.5%)</option>
+            <option value="3">Ouro (5%)</option>
+            <option value="4">Diamante (6%)</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label class="flabel">Categoria semanal</label>
+          <select class="fselect" id="pag-cat" onchange="renderPagPreview()">
+            <option value="A">A — meta R$2.500–3.500</option>
+            <option value="B">B — meta R$3.500–5.000</option>
+            <option value="C">C — meta R$5.000–7.000</option>
+            <option value="D">D — meta R$7.000–10.000</option>
+            <option value="E">E — meta R$10.000–14.000</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label class="flabel">Faturamento semanal simulado (R$)</label>
+        <input type="number" class="finput" id="pag-fat" placeholder="Ex: 5000" oninput="renderPagPreview()">
+      </div>
+      <div class="field">
+        <label class="flabel">Vendas high ticket (R$300+) — total de comissões nessas vendas</label>
+        <input type="number" class="finput" id="pag-ht" placeholder="Ex: 1500 (soma das vendas ≥R$300)" oninput="renderPagPreview()">
+      </div>
+      <div class="field">
+        <label class="flabel">Hora extra faturada (modelo extra)</label>
+        <input type="number" class="finput" id="pag-extra" placeholder="Ex: 800" oninput="renderPagPreview()">
+      </div>
+    </div>
+    <div id="pag-preview"></div>
+    <div id="pag-chatters-all"></div>
+    <div class="panel" style="margin-top:8px">
+      <div class="panel-head"><div class="panel-title">📊 Tabela de metas — todas as categorias</div></div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="background:var(--bg-soft)">
+            <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--line)">Cat.</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">70%</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">→ prêmio</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">85%</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">→ prêmio</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">100%</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">→ prêmio</th>
+          </tr></thead>
+          <tbody id="pag-meta-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- GERENTE -->
+  <div id="pagpane-gerente" style="display:none">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">⚙️ Simulador da gerência</div></div>
+      <div class="panel-note" style="margin-bottom:12px">Configure a meta e o faturamento de cada chatter para calcular sua premiação</div>
+      <div class="field">
+        <label class="flabel">Meta global da operação (mês)</label>
+        <input type="number" class="finput" id="ger-meta-global" placeholder="Ex: 100000" oninput="renderGerPreview()">
+      </div>
+      <div class="field">
+        <label class="flabel">Faturamento real da operação (mês)</label>
+        <input type="number" class="finput" id="ger-fat-global" placeholder="Ex: 115000" oninput="renderGerPreview()">
+      </div>
+      <div id="ger-chatters-config"></div>
+      <div id="ger-preview"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">📊 Tabela de premiação por chatter</div></div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="background:var(--bg-soft)">
+            <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--line)">% da meta</th>
+            <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">Sua fatia</th>
+            <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--line)">Exemplo (meta R$20k)</th>
+          </tr></thead>
+          <tbody>
+            <tr><td style="padding:6px 10px;border-bottom:1px solid var(--line)">até 50%</td><td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)">2%</td><td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--text3)">R$10k → R$200</td></tr>
+            <tr><td style="padding:6px 10px;border-bottom:1px solid var(--line)">50%–70%</td><td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)">4%</td><td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--text3)">R$14k → R$420</td></tr>
+            <tr><td style="padding:6px 10px;border-bottom:1px solid var(--line)">70%–85%</td><td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)">6%</td><td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--text3)">R$17k → R$540</td></tr>
+            <tr><td style="padding:6px 10px;border-bottom:1px solid var(--line)">85%–100%</td><td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)">9%</td><td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--text3)">R$20k → R$810</td></tr>
+            <tr style="background:var(--ok-soft)"><td style="padding:6px 10px;border-bottom:1px solid var(--line)">100%–130% 🚀</td><td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);color:var(--ok)">10%</td><td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--ok)">R$26k → R$1.170</td></tr>
+            <tr style="background:var(--ok-soft)"><td style="padding:6px 10px;border-bottom:1px solid var(--line)">130%–170% 🚀</td><td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);color:var(--ok)">11%</td><td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--ok)">R$34k → R$2.050</td></tr>
+            <tr style="background:var(--ok-soft)"><td style="padding:6px 10px">acima 170% 🚀</td><td style="padding:6px 10px;text-align:right;color:var(--ok)">12%</td><td style="padding:6px 10px;color:var(--ok)">R$40k → R$3.010</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== PROJEÇÃO ===================== -->
+<section class="view" id="v-projecao">
+  <div class="eyebrow">desenvolvimento</div>
+  <div class="view-title">Projeção</div>
+  <div class="view-sub">Análise mensal de rendimento e desenvolvimento de cada chatter</div>
+  <div style="margin-bottom:12px">
+    <select class="fselect" id="proj-chatter" onchange="renderProjecaoChatter(this.value)">
+      <option value="">— selecionar chatter —</option>
+    </select>
+  </div>
+  <div id="proj-content"></div>
+</section>
+
+<!-- ===================== CHATLAB ===================== -->
+<section class="view" id="v-chatlab">
+  <div class="eyebrow">análise com IA</div>
+  <div class="view-title">ChatLab</div>
+  <div class="view-sub">Cole a conversa — a IA gera o diagnóstico completo do chatter</div>
+
+  <div class="panel">
+    <div class="field">
+      <label class="flabel">Chatter</label>
+      <select class="fselect" id="cl-chatter"><option value="">— selecionar —</option></select>
+    </div>
+    <div class="field">
+      <label class="flabel">Conversa completa</label>
+      <textarea class="ftext" id="cl-conversa" style="min-height:180px" placeholder="Cole aqui a conversa entre o chatter e o cliente..."></textarea>
+    </div>
+    <div class="field">
+      <label class="flabel">Contexto (opcional)</label>
+      <input class="finput" id="cl-ctx" placeholder="Ex: cliente recorrente, primeira compra...">
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="cl-btn" onclick="rodarChatLab()">⚡ Analisar</button>
+      <button class="btn btn-ghost" onclick="limparChatLab()">Limpar</button>
+    </div>
+  </div>
+
+  <div id="cl-resultado"></div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">Histórico de análises</div></div>
+    <div id="cl-historico"></div>
+  </div>
+</section>
+
+
+
+</main>
+
+<nav class="bottomnav" id="bottomnav">
+  <button class="navbtn active" data-go="home"><span class="navbtn-ic">⌂</span><span class="navbtn-lb">Painel</span></button>
+  <button class="navbtn" data-go="gestao"><span class="navbtn-ic">📋</span><span class="navbtn-lb">Gestão</span></button>
+  <button class="navbtn" data-go="fat"><span class="navbtn-ic">¤</span><span class="navbtn-lb">Fat.</span></button>
+  <button class="navbtn" data-go="turno"><span class="navbtn-ic">⇄</span><span class="navbtn-lb">Turno</span><span class="navbtn-dot" id="nav-dot-turno" style="display:none"></span></button>
+  <button class="navbtn" data-go="time"><span class="navbtn-ic">▦</span><span class="navbtn-lb">Equipe</span></button>
+  <button class="navbtn" data-go="fichas"><span class="navbtn-ic">👤</span><span class="navbtn-lb">Fichas</span></button>
+  <button class="navbtn" data-go="extra"><span class="navbtn-ic">⚡</span><span class="navbtn-lb">H.Extra</span></button>
+  <button class="navbtn" data-go="gerador"><span class="navbtn-ic">📄</span><span class="navbtn-lb">Relatórios</span></button>
+</nav>
+</div>
+
+<!-- ===================================================== MODALS ===================================================== -->
+
+
+<!-- SUBSTITUTE REPORT MODAL -->
+<div class="modalbg" id="m-substitute-report"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🔄 Substituir relatório</div>
+  <div style="font-size:13px;color:var(--warn);background:var(--warn-soft);border-radius:8px;padding:10px;margin-bottom:12px">
+    ⚠️ Isso vai apagar todos os dados do dia <strong id="substitute-report-date"></strong> e substituir pelo novo relatório.
+  </div>
+  <div class="field">
+    <label class="flabel">Cole o novo relatório completo</label>
+    <textarea class="ftext" id="substitute-report-input" style="min-height:200px;font-family:var(--font-mono);font-size:12px" placeholder="Data: DD/MM/AAAA&#10;Nome: ...&#10;MODELO&#10;HH:MM às HH:MM&#10;..."></textarea>
+  </div>
+  <div class="modalbtns">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-substitute-report')">Cancelar</button>
+    <button class="btn btn-primary btn-block" style="background:var(--warn)" onclick="processSubstituteReport()">🔄 Substituir</button>
+  </div>
+</div></div>
+
+<!-- MANAGER PROFILE MODAL -->
+<div class="modalbg" id="m-manager-profile"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">Meu Perfil</div>
+  <div class="field"><label class="flabel">Nome</label><input class="finput" id="mgr-name" placeholder="Seu nome..."></div>
+  <div class="field"><label class="flabel">Cargo</label><input class="finput" id="mgr-cargo" placeholder="Ex: Gestor de Chatters"></div>
+  <div class="field"><label class="flabel">Foto</label>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <div id="mgr-photo-preview" style="width:60px;height:60px;border-radius:50%;background:var(--bg-soft);border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:24px;overflow:hidden">👤</div>
+      <label class="btn btn-soft btn-sm" style="cursor:pointer">📷 escolher foto<input type="file" accept="image/*" style="display:none" onchange="loadManagerPhoto(this)"></label>
+    </div>
+  </div>
+  <div class="modalbtns">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-manager-profile')">Cancelar</button>
+    <button class="btn btn-primary btn-block" onclick="saveManagerProfile()">Salvar</button>
+  </div>
+</div></div>
+
+<!-- CHAT ANALYSIS MODAL -->
+<div class="modalbg" id="m-chat-analysis"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🔍 Análise do Chat</div>
+  <div class="field"><label class="flabel">Chatter</label>
+    <select class="fselect" id="ca-chatter"></select>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+    <div><label class="flabel">Conexão</label><select class="fselect" id="ca-conexao"><option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+    <div><label class="flabel">Condução</label><select class="fselect" id="ca-conducao"><option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+    <div><label class="flabel">Engajamento</label><select class="fselect" id="ca-engajamento"><option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+    <div><label class="flabel">Conversão</label><select class="fselect" id="ca-conversao"><option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+    <div><label class="flabel">Resposta</label><select class="fselect" id="ca-resposta"><option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+    <div><label class="flabel">Naturalidade</label><select class="fselect" id="ca-naturalidade"><option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+  </div>
+  <div class="field"><label class="flabel">Pontos fortes</label><textarea class="ftext" id="ca-fortes" placeholder="O que foi bem..." style="min-height:60px"></textarea></div>
+  <div class="field"><label class="flabel">Pontos fracos</label><textarea class="ftext" id="ca-fracos" placeholder="O que melhorar..." style="min-height:60px"></textarea></div>
+  <div class="modalbtns">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-chat-analysis')">Cancelar</button>
+    <button class="btn btn-primary btn-block" onclick="saveChatAnalysis()">Salvar análise</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-model"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Novo modelo</div>
+  <div class="field"><label class="flabel">Nome</label><input class="finput" id="model-name" placeholder="Ex: Luna, Bella..."></div>
+  <div class="field"><label class="flabel">Emoji</label><input class="finput" id="model-emoji" placeholder="🌟" maxlength="4"></div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-model')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveModel()">Adicionar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-shift"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title" id="shift-modal-title">Escalar chatter</div>
+  <input type="hidden" id="shift-edit-id" value="">
+  <div class="field"><label class="flabel">Chatter</label><select class="fselect" id="shift-chatter"></select></div>
+
+  <div class="field"><label class="flabel">1º Horário</label>
+    <div class="fgrid2">
+      <div><label class="flabel" style="font-size:10.5px;color:var(--text3)">Entrada</label><input type="time" class="finput" id="shift-start"></div>
+      <div><label class="flabel" style="font-size:10.5px;color:var(--text3)">Saída</label><input type="time" class="finput" id="shift-end"></div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="flabel">2º Horário <span style="font-size:10.5px;color:var(--text3);font-weight:400">(opcional)</span></label>
+    <div class="fgrid2">
+      <div><label class="flabel" style="font-size:10.5px;color:var(--text3)">Entrada</label><input type="time" class="finput" id="shift-start2"></div>
+      <div><label class="flabel" style="font-size:10.5px;color:var(--text3)">Saída</label><input type="time" class="finput" id="shift-end2"></div>
+    </div>
+  </div>
+
+  <div class="field"><label class="flabel">Dias de trabalho</label>
+    <div class="chiprow">
+      <button class="chip" data-day="seg">Seg</button><button class="chip" data-day="ter">Ter</button>
+      <button class="chip" data-day="qua">Qua</button><button class="chip" data-day="qui">Qui</button>
+      <button class="chip" data-day="sex">Sex</button><button class="chip" data-day="sab">Sáb</button>
+      <button class="chip" data-day="dom">Dom</button>
+    </div>
+  </div>
+
+  <div class="field"><label class="flabel">Dia de folga <span style="font-size:10.5px;color:var(--text3);font-weight:400">(gera vaga de hora extra automática)</span></label>
+    <div class="flabel" style="margin-bottom:4px">Folga 1</div>
+    <div class="chiprow" id="shift-folga-chips">
+      <button class="chip chip-folga" data-folga="">—</button>
+      <button class="chip chip-folga" data-folga="seg">Seg</button><button class="chip chip-folga" data-folga="ter">Ter</button>
+      <button class="chip chip-folga" data-folga="qua">Qua</button><button class="chip chip-folga" data-folga="qui">Qui</button>
+      <button class="chip chip-folga" data-folga="sex">Sex</button><button class="chip chip-folga" data-folga="sab">Sáb</button>
+      <button class="chip chip-folga" data-folga="dom">Dom</button>
+    </div>
+    <div class="flabel" style="margin:8px 0 4px">Folga 2 (opcional)</div>
+    <div class="chiprow" id="shift-folga2-chips">
+      <button class="chip chip-folga2" data-folga="">—</button>
+      <button class="chip chip-folga2" data-folga="seg">Seg</button><button class="chip chip-folga2" data-folga="ter">Ter</button>
+      <button class="chip chip-folga2" data-folga="qua">Qua</button><button class="chip chip-folga2" data-folga="qui">Qui</button>
+      <button class="chip chip-folga2" data-folga="sex">Sex</button><button class="chip chip-folga2" data-folga="sab">Sáb</button>
+      <button class="chip chip-folga2" data-folga="dom">Dom</button>
+    </div>
+  </div>
+
+  <div class="field"><label class="flabel">Modelos atendidas nesse turno</label>
+    <div class="chiprow" id="shift-model-chips"></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px" id="shift-model-empty-note"></div>
+  </div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-shift')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveShift()">Salvar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-chatter"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Novo chatter</div>
+  <div class="field"><label class="flabel">Nome</label><input class="finput" id="ch-name" placeholder="Nome"></div>
+  <div class="field"><label class="flabel">Discord</label><input class="finput" id="ch-discord" placeholder="@usuario"></div>
+  <div class="field"><label class="flabel">Nível</label>
+    <select class="fselect" id="ch-level">
+      <option value="treinamento">Treinamento</option><option value="teste">Teste</option>
+      <option value="junior">Júnior</option><option value="pleno">Pleno</option><option value="senior">Sênior</option>
+    </select>
+  </div>
+  <div class="field"><label class="flabel">Notas</label><textarea class="ftext" id="ch-notes" placeholder="Observações..."></textarea></div>
+  <div class="field"><label class="flabel">Alarme de checagem de login</label>
+    <input type="time" class="finput" id="ch-watchtime" placeholder="Horário esperado de entrada">
+    <div style="font-size:11px;color:var(--text3);margin-top:6px">Você será avisado neste horário para verificar se ele entrou</div>
+  </div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-chatter')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveChatter()">Adicionar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-chatter-detail"><div class="modal">
+  <div class="modal-handle"></div><div id="chatter-detail-body"></div>
+  <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="closeModal('m-chatter-detail')">Fechar</button>
+</div></div>
+
+<div class="modalbg" id="m-absence"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Falta / atraso</div>
+  <div class="field"><label class="flabel">Chatter</label><select class="fselect" id="abs-chatter"></select></div>
+  <div class="field"><label class="flabel">Tipo</label>
+    <select class="fselect" id="abs-type"><option value="falta">Falta</option><option value="atraso">Atraso</option><option value="saida_antecipada">Saída antecipada</option></select>
+  </div>
+  <div class="field"><label class="flabel">Data</label><input type="date" class="finput" id="abs-date"></div>
+  <div class="field"><label class="flabel">Observação</label><textarea class="ftext" id="abs-note" placeholder="Motivo..."></textarea></div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-absence')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveAbsence()">Registrar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-orient"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Nova orientação</div>
+  <div class="field"><label class="flabel">Chatter</label><select class="fselect" id="orient-chatter"></select></div>
+  <div class="field"><label class="flabel">Turno</label>
+    <select class="fselect" id="orient-shift"><option value="manhã">Manhã</option><option value="tarde">Tarde</option><option value="noite">Noite</option></select>
+  </div>
+  <div class="field"><label class="flabel">Orientação</label><textarea class="ftext" id="orient-text" placeholder="O que foi orientado..."></textarea></div>
+  <div class="field"><label class="flabel">Meta do dia (R$)</label><input type="number" class="finput" id="orient-goal" placeholder="0.00"></div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-orient')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveOrientation()">Salvar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-study"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Adicionar estudo</div>
+  <div class="field"><label class="flabel">Título</label><input class="finput" id="study-title" placeholder="O que estudar..."></div>
+  <div class="field"><label class="flabel">Categoria</label>
+    <select class="fselect" id="study-cat">
+      <option value="liderança">Liderança</option><option value="comunicacao">Comunicação</option>
+      <option value="vendas">Vendas</option><option value="gestao">Gestão</option>
+      <option value="treinamento">Preparar treinamento</option><option value="outro">Outro</option>
+    </select>
+  </div>
+  <div class="field"><label class="flabel">Prioridade</label>
+    <select class="fselect" id="study-prio"><option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option></select>
+  </div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-study')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveStudy()">Adicionar</button></div>
+</div></div>
+
+<style>
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+</style>
+
+<div class="modalbg" id="m-add-training"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🎓 Novo Treinamento</div>
+  <div class="field"><label class="flabel">Título</label><input class="finput" id="train-title" placeholder="Ex: Técnicas de conversão"></div>
+  <div class="field"><label class="flabel">Data de início</label><input type="date" class="finput" id="train-date"></div>
+  <div class="field"><label class="flabel">Roteiro (pode adicionar por dia depois)</label><textarea class="ftext" id="train-script" placeholder="Roteiro do dia 1..." style="min-height:80px"></textarea></div>
+  <div class="modalbtns">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-add-training')">Cancelar</button>
+    <button class="btn btn-primary btn-block" onclick="saveTraining()">Criar</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-manual-status"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">⚙️ Corrigir status manualmente</div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Use quando a escala automática não refletir a realidade</div>
+  <div id="manual-status-body"></div>
+  <div class="modalbtns" style="margin-top:14px">
+    <button class="btn btn-primary btn-block" onclick="closeModal('m-manual-status');renderHome()">Fechar</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-swap"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">⇄ Registrar troca de horário</div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Troca pontual para um dia específico. Aparece na escala daquele dia como turno normal.</div>
+
+  <div class="field"><label class="flabel">Tipo de troca</label>
+    <div class="chiprow" id="swap-type-chips">
+      <button class="chip sel" data-swap-type="pontual">Pontual (um dia)</button>
+      <button class="chip" data-swap-type="definitiva">Definitiva (escala)</button>
+    </div>
+  </div>
+
+  <div id="swap-pontual-fields">
+    <div class="field"><label class="flabel">Data da troca</label>
+      <input type="date" class="finput" id="swap-date">
+    </div>
+    <div class="field"><label class="flabel">Chatter que VAI cobrir</label>
+      <select class="fselect" id="swap-chatter-in"></select>
+    </div>
+    <div class="field"><label class="flabel">Chatter cujo horário será coberto</label>
+      <select class="fselect" id="swap-chatter-out"></select>
+    </div>
+    <div id="swap-shift-preview" style="font-size:12px;color:var(--text2);margin-top:4px;padding:8px;background:var(--bg-soft);border-radius:8px;display:none"></div>
+  </div>
+
+  <div id="swap-definitiva-fields" style="display:none">
+    <div style="background:var(--info-soft);border-radius:8px;padding:10px;font-size:12.5px;color:var(--text2)">
+      Para troca definitiva, edite os turnos diretamente na <strong>Escala Semanal</strong> — clique no horário e troque o chatter.
+    </div>
+  </div>
+
+  <div class="modalbtns" id="swap-btns">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-swap')">Cancelar</button>
+    <button class="btn btn-primary btn-block" onclick="saveSwap()">Registrar troca</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-overtime"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Registrar hora extra</div>
+  <div class="field"><label class="flabel">Chatter</label><select class="fselect" id="ot-chatter"></select></div>
+  <div class="fgrid2">
+    <div class="field"><label class="flabel">Início</label><input type="time" class="finput" id="ot-start"></div>
+    <div class="field"><label class="flabel">Fim</label><input type="time" class="finput" id="ot-end"></div>
+  </div>
+  <div class="field"><label class="flabel">Data</label><input type="date" class="finput" id="ot-date"></div>
+  <div class="field"><label class="flabel">Observação</label><input class="finput" id="ot-note" placeholder="Motivo..."></div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-overtime')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveOvertime()">Registrar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-checkin"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title" id="checkin-title">Confirmar saída</div>
+  <div id="checkin-body"></div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-checkin')">Cancelar</button><button class="btn btn-primary btn-block" id="checkin-confirm">Confirmar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-punch-edit"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title" id="punch-edit-title">Editar horário</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:12px" id="punch-edit-date"></div>
+  <div class="field"><label class="flabel">Horário</label><input type="time" class="finput" id="punch-edit-time"></div>
+  <div class="field" id="punch-edit-otend-field" style="display:none"><label class="flabel">Fim da hora extra</label><input type="time" class="finput" id="punch-edit-otend"></div>
+  <div class="modalbtns">
+    <button class="btn btn-danger" id="punch-edit-delete" style="flex:1">Remover</button>
+    <button class="btn btn-primary" id="punch-edit-confirm" style="flex:2">Salvar</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-revreport"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Relatório semanal</div>
+  <div id="revreport-body"></div>
+  <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="closeModal('m-revreport')">Fechar</button>
+</div></div>
+
+<div class="modalbg" id="m-task"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Nova tarefa de hoje</div>
+  <div class="field"><label class="flabel">Tarefa</label><input class="finput" id="task-text" placeholder="O que precisa ser feito..."></div>
+  <div class="field"><label class="flabel">Prioridade</label>
+    <select class="fselect" id="task-prio"><option value="alta">Alta</option><option value="media" selected>Média</option><option value="baixa">Baixa</option></select>
+  </div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-task')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveTask()">Adicionar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-goal"><div class="modal">
+  <div class="modal-handle"></div><div class="modal-title">Novo objetivo da semana</div>
+  <div class="field"><label class="flabel">Objetivo</label><input class="finput" id="goal-text" placeholder="Ex: Faturar R$50.000 na semana"></div>
+  <div class="field"><label class="flabel">Tipo de meta</label>
+    <select class="fselect" id="goal-type" onchange="toggleGoalTarget()">
+      <option value="valor">Valor numérico (R$, qtd...)</option>
+      <option value="simples">Simples (concluído ou não)</option>
+    </select>
+  </div>
+  <div class="field" id="goal-target-field"><label class="flabel">Meta (número alvo)</label><input type="number" class="finput" id="goal-target" placeholder="Ex: 50000"></div>
+  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-goal')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveGoal()">Adicionar</button></div>
+</div></div>
+
+<div class="modalbg" id="m-discord-report"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">📊 Relatório semanal — <span id="report-discord-name"></span></div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Toque em "Copiar" e cole direto no Discord</div>
+  <textarea class="ftext" id="report-discord-text" readonly style="min-height:280px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6" onclick="this.select()"></textarea>
+  <div class="modalbtns" style="margin-top:10px">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-discord-report')">Fechar</button>
+    <button class="btn btn-primary btn-block" onclick="copyDiscordReport()">📋 Copiar</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script src="firebase-bundle.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
