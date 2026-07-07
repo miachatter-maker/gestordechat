@@ -969,7 +969,21 @@ function renderFolgaPanel(){
     ${chattersOff.length?`
       <div style="background:var(--bad-soft);border:1px solid rgba(180,35,52,.2);border-radius:10px;padding:11px 13px">
         <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ Janela aberta em ${dayName} (${chattersOff.length})</div>
-        ${chattersOff.map(c=>`<div style="font-size:13px;font-weight:600;color:var(--text);padding:3px 0">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>`).join('')}
+        ${chattersOff.map(c=>{
+          const dayKey=DAY_KEYS[targetDate.getDay()];
+          const shifts=S.shifts.filter(s=>s.chatterId===c.id&&(s.days||[]).includes(dayKey));
+          const windows=shifts.flatMap(s=>{
+            const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
+            const modelStr=models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo definido';
+            const w=[{start:s.start,end:s.end,modelStr}];
+            if(s.start2&&s.end2)w.push({start:s.start2,end:s.end2,modelStr});
+            return w;
+          });
+          return`<div style="padding:5px 0;border-bottom:1px solid rgba(180,35,52,.15)">
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>
+            ${windows.length?windows.map(w=>`<div style="font-size:11.5px;color:var(--text2);margin-top:2px">📂 livre: ${w.modelStr} · ${w.start}–${w.end}</div>`).join(''):'<div style="font-size:11.5px;color:var(--text3);margin-top:2px">sem turno cadastrado nesse dia</div>'}
+          </div>`;
+        }).join('')}
       </div>
       ${chattersOn.length?`<div style="margin-top:9px;background:var(--ok-soft);border:1px solid rgba(23,115,80,.2);border-radius:10px;padding:11px 13px">
         <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">✅ Escalados normalmente (${chattersOn.length})</div>
