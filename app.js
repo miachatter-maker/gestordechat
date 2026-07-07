@@ -980,8 +980,8 @@ function renderFolgaPanel(){
             return w;
           });
           return`<div style="padding:5px 0;border-bottom:1px solid rgba(180,35,52,.15)">
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>
-            ${windows.length?windows.map(w=>`<div style="font-size:11.5px;color:var(--text2);margin-top:2px">📂 livre: ${w.modelStr} · ${w.start}–${w.end}</div>`).join(''):'<div style="font-size:11.5px;color:var(--text3);margin-top:2px">sem turno cadastrado nesse dia</div>'}
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
+            ${windows.length?windows.map(w=>`<div style="font-size:12.5px;color:var(--text2);margin-top:2px">${w.modelStr} · ${w.start}–${w.end}</div>`).join(''):'<div style="font-size:11.5px;color:var(--text3);margin-top:2px">sem turno cadastrado nesse dia</div>'}
           </div>`;
         }).join('')}
       </div>
