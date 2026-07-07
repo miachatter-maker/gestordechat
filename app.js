@@ -15,6 +15,15 @@ const SCHEMA_VERSION=2; // bump this when S structure changes to trigger migrati
 // When we add new fields to S, old saved data won't have them.
 // This function fills in any missing fields with safe defaults.
 function migrateState(s){
+  // Limpeza de contaminação antiga: em algum momento no passado, o
+  // documento inteiro do Firestore (com os campos "payload",
+  // "schemaVersion", "updatedAt" que são só do INVÓLUCRO do Firestore)
+  // acabou sendo salvo por engano DENTRO do próprio estado do app — cada
+  // vez que salvava, isso ficava se aninhando cada vez mais e inchando o
+  // documento. Remove sempre, sem excessão, pra nunca mais voltar.
+  delete s.payload;
+  delete s.schemaVersion;
+  delete s.updatedAt;
   if(!s.folgas)s.folgas={};
   if(!s.reportDrafts)s.reportDrafts={};
   if(!s.smartAlertsDone)s.smartAlertsDone={};
@@ -289,10 +298,10 @@ function listenToFirestore(connectTimeout){
               const parsedPart=JSON.parse(remote.payload);
               if(docId===FIREBASE_DOC_ID){
                 const migrated=migrateState(parsedPart);
-                S=deepMergeState(S,migrated);
+                S=deepMergeState(S,migrated);delete S.payload;delete S.schemaVersion;delete S.updatedAt;
               } else {
                 // Shard: parsedPart já vem no formato {campo: valor} — funde só essa fatia
-                S=deepMergeState(S,parsedPart);
+                S=deepMergeState(S,parsedPart);delete S.payload;delete S.schemaVersion;delete S.updatedAt;
               }
               persistLocalCache();
               scheduleRerenderAfterSync();
@@ -411,7 +420,7 @@ function load(){
     if(d){
       const parsed=JSON.parse(d);
       if(parsed&&(parsed.chatters||parsed.models||parsed.revenues)){
-        S={...S,...migrateState(parsed)};
+        S={...S,...migrateState(parsed)};delete S.payload;delete S.schemaVersion;delete S.updatedAt;
         loaded=true;
       }
     }
@@ -423,7 +432,7 @@ function load(){
       if(bk){
         const parsed=JSON.parse(bk);
         if(parsed&&(parsed.chatters||parsed.models||parsed.revenues)){
-          S={...S,...migrateState(parsed)};
+          S={...S,...migrateState(parsed)};delete S.payload;delete S.schemaVersion;delete S.updatedAt;
           // Restore primary from backup
           localStorage.setItem(DB,bk);
           loaded=true;
@@ -6903,7 +6912,7 @@ function importBackup(){
           toast('❌ Arquivo inválido — não parece um backup do GestorPro');return;
         }
         if(!confirm(`Restaurar backup? Isso vai substituir os dados atuais.\n\nChatters no backup: ${(parsed.chatters||[]).length}\nModelos: ${(parsed.models||[]).length}`))return;
-        S={...S,...migrateState(parsed)};
+        S={...S,...migrateState(parsed)};delete S.payload;delete S.schemaVersion;delete S.updatedAt;
         save();
         renderView(currentViewName());
         toast('✅ Backup restaurado com sucesso!');
