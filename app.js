@@ -150,7 +150,15 @@ function mergeArraysSafe(local,remote){
   if(rem.length===0&&loc.length>0)return loc; // never let empty remote wipe local list
   const locHasIds=loc.length&&loc[0]&&typeof loc[0]==='object'&&loc[0].id!=null;
   const remHasIds=rem.length&&rem[0]&&typeof rem[0]==='object'&&rem[0].id!=null;
-  if(!locHasIds&&!remHasIds)return rem; // primitive arrays: trust remote (already non-empty-guarded above)
+  if(!locHasIds&&!remHasIds){
+    // Primitive arrays (strings/numbers, ex: lista de chatterIds em folga):
+    // nunca dropar um item que só existe local — faz união em vez de só
+    // confiar no remoto, senão uma marcação recente pode "desaparecer" se
+    // o snapshot do Firestore ainda não tinha alcançado essa mudança.
+    const union=[...loc];
+    rem.forEach(v=>{if(!union.includes(v))union.push(v);});
+    return union;
+  }
   const order=[];const map=new Map();
   loc.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){if(!map.has(item.id))order.push(item.id);map.set(item.id,item);}});
   rem.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){
