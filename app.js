@@ -237,95 +237,120 @@ function deepMergeState(local,remote){
   if((remote===''||remote===0||remote===false)&&local!==undefined&&local!==null&&local!==''&&local!==0&&local!==false)return local;
   return remote;
 }
+// ---------- SHARDING: os campos que mais crescem ficam em documentos
+// próprios no Firestore, separados do documento principal. Isso multiplica
+// o espaço disponível (~1MB por documento) por vários — sem mudar nada na
+// tela: o app continua trabalhando com um único objeto de estado (S) na
+// memória, só a gravação/leitura no Firebase é que fica dividida.
+const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses'];
+const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab'};
+const ALL_SYNC_DOC_IDS=[FIREBASE_DOC_ID,...SHARD_FIELDS.map(f=>SHARD_DOC_IDS[f])];
+let fbDocsSeen=new Set();
+function persistLocalCache(){
+  try{const p=JSON.stringify(S);localStorage.setItem(DB,p);localStorage.setItem('gestorpro_backup',p);}catch(e){
+    localSaveFailCount++;
+    console.error('Falha ao salvar localmente',e);
+    toast(`⚠️ Não foi possível salvar localmente (${e.name||'erro'}) — verifique o espaço de armazenamento do navegador`,6000);
+  }
+}
+function scheduleRerenderAfterSync(){
+  const active=document.activeElement;
+  const isTyping=active&&(active.tagName==='INPUT'||active.tagName==='TEXTAREA'||active.tagName==='SELECT');
+  if(isTyping){
+    const rerenderOnBlur=()=>{
+      _rts[currentViewName()]=0;
+      renderView(currentViewName());
+      active.removeEventListener('blur',rerenderOnBlur);
+    };
+    active.addEventListener('blur',rerenderOnBlur,{once:true});
+  } else {
+    const cv=currentViewName();
+    const heavy=['evolucao','projecao','pagamento','chatlab','testers'];
+    if(heavy.includes(cv)){updateSyncBadge();}
+    else{_rts[cv]=0;renderView(cv);}
+  }
+}
 function listenToFirestore(connectTimeout){
   if(!fbDb)return;
-  fbDb.collection('gestorpro').doc(FIREBASE_DOC_ID).onSnapshot(
-    (doc)=>{
-      if(connectTimeout)clearTimeout(connectTimeout);
-      if(Date.now()<fbIgnoreSnapshotsUntil){
-        fbHasReceivedFirstSnapshot=true;
-        fbSyncStatus='online';updateSyncBadge();
-        return;
-      }
-      if(doc.exists){
-        const remote=doc.data();
-        if(remote&&remote.payload){
-          try{
-            const parsed=JSON.parse(remote.payload);
-            const migrated=migrateState(parsed);
-            // GENERIC PROTECTION: deep-merge remote into local so nothing
-            // real that exists locally (photos, checklists, revenues,
-            // fichas, anything) is ever erased by an empty/stale remote
-            // snapshot — while genuine remote edits still come through.
-            S=deepMergeState(S,migrated);
-            // Always save merged result to both keys
-            try{const p=JSON.stringify(S);localStorage.setItem(DB,p);localStorage.setItem('gestorpro_backup',p);}catch(e){}
-            const active=document.activeElement;
-            const isTyping=active&&(active.tagName==='INPUT'||active.tagName==='TEXTAREA'||active.tagName==='SELECT');
-            if(isTyping){
-              const rerenderOnBlur=()=>{
-                _rts[currentViewName()]=0;
-                renderView(currentViewName());
-                active.removeEventListener('blur',rerenderOnBlur);
-              };
-              active.addEventListener('blur',rerenderOnBlur,{once:true});
-            } else {
-              const cv=currentViewName();
-              // Heavy views: don't re-render on Firebase sync, just update badge
-              const heavy=['evolucao','projecao','pagamento','chatlab','testers'];
-              if(heavy.includes(cv)){
-                updateSyncBadge();
-              } else {
-                _rts[cv]=0;
-                renderView(cv);
-              }
-            }
-          }catch(e){}
+  ALL_SYNC_DOC_IDS.forEach(docId=>{
+    fbDb.collection('gestorpro').doc(docId).onSnapshot(
+      (doc)=>{
+        if(connectTimeout)clearTimeout(connectTimeout);
+        if(Date.now()<fbIgnoreSnapshotsUntil){
+          fbDocsSeen.add(docId);
+          if(fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length)fbHasReceivedFirstSnapshot=true;
+          fbSyncStatus='online';updateSyncBadge();
+          return;
         }
-      } else if(!fbHasReceivedFirstSnapshot){
-        pushToFirestore();
+        if(doc.exists){
+          const remote=doc.data();
+          if(remote&&remote.payload){
+            try{
+              const parsedPart=JSON.parse(remote.payload);
+              if(docId===FIREBASE_DOC_ID){
+                const migrated=migrateState(parsedPart);
+                S=deepMergeState(S,migrated);
+              } else {
+                // Shard: parsedPart já vem no formato {campo: valor} — funde só essa fatia
+                S=deepMergeState(S,parsedPart);
+              }
+              persistLocalCache();
+              scheduleRerenderAfterSync();
+            }catch(e){console.error('Erro ao processar snapshot '+docId,e);}
+          }
+        } else if(!fbDocsSeen.has(docId)){
+          // Documento novo (ex: primeira vez rodando com sharding, ou
+          // primeiro uso do app) — cria a partir do S atual (já carregado
+          // do localStorage antes do Firebase conectar)
+          pushToFirestore();
+        }
+        fbDocsSeen.add(docId);
+        if(fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length)fbHasReceivedFirstSnapshot=true;
+        fbSyncStatus='online';
+        updateSyncBadge();
+        runAutoBackupIfNeeded();
+      },
+      (err)=>{
+        if(connectTimeout)clearTimeout(connectTimeout);
+        fbSyncStatus='offline';
+        updateSyncBadge();
       }
-      fbHasReceivedFirstSnapshot=true;
-      fbSyncStatus='online';
-      updateSyncBadge();
-      runAutoBackupIfNeeded();
-    },
-    (err)=>{
-      if(connectTimeout)clearTimeout(connectTimeout);
-      fbSyncStatus='offline';
-      updateSyncBadge();
-    }
-  );
+    );
+  });
 }
 
 let lastSizeWarningAt=0;
 function pushToFirestore(){
   if(!fbDb||!fbReady)return;
-  const payload=JSON.stringify(S);
-  // O Firestore tem limite de ~1MB por documento. Como todo o app guarda
-  // tudo num único documento, avisamos ANTES de estourar — não só quando
-  // já falhou — para dar tempo de agir (ex: remover fotos grandes).
-  const sizeKB=Math.round(payload.length/1024);
-  if(sizeKB>850&&Date.now()-lastSizeWarningAt>60000){
-    lastSizeWarningAt=Date.now();
-    toast(`⚠️ Dados ocupando ${sizeKB}KB de ~1024KB permitidos no Firestore — se passar do limite, a sincronização para de funcionar. Fale comigo se precisar liberar espaço.`,8000);
-  }
-  fbDb.collection('gestorpro').doc(FIREBASE_DOC_ID).set({
-    payload,
-    schemaVersion:SCHEMA_VERSION,
-    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  }).then(()=>{
-    fbSyncStatus='online';updateSyncBadge();
-  }).catch((err)=>{
-    console.error('Firestore write error',err);
-    fbSyncStatus='offline';
-    fbLastErrorMessage=(err&&err.code)?`${err.code}: ${err.message||''}`:'Erro ao salvar';
-    updateSyncBadge();
-    // Erro de tamanho é o mais crítico: dados deixam de sincronizar entre
-    // dispositivos até isso ser resolvido. Avisa de forma bem visível.
-    if(err&&(err.code==='invalid-argument'||/exceed|too large|longer than/i.test(err.message||''))){
-      toast('🚨 Dados grandes demais para sincronizar! Fale comigo urgente para resolver — por enquanto está tudo salvo só neste aparelho.',10000);
+  const core={};
+  Object.keys(S).forEach(k=>{if(!SHARD_FIELDS.includes(k))core[k]=S[k];});
+  const jobs=[{id:FIREBASE_DOC_ID,data:core}];
+  SHARD_FIELDS.forEach(f=>jobs.push({id:SHARD_DOC_IDS[f],data:{[f]:S[f]}}));
+  jobs.forEach(({id,data})=>{
+    const payload=JSON.stringify(data);
+    // O Firestore tem limite de ~1MB por documento. Cada fatia (central,
+    // fichas, faturamento, chatlab) é monitorada separadamente — avisamos
+    // ANTES de estourar, não só quando já falhou.
+    const sizeKB=Math.round(payload.length/1024);
+    if(sizeKB>850&&Date.now()-lastSizeWarningAt>60000){
+      lastSizeWarningAt=Date.now();
+      toast(`⚠️ "${id}" ocupando ${sizeKB}KB de ~1024KB permitidos no Firestore — se passar do limite, essa parte para de sincronizar. Fale comigo se precisar liberar espaço.`,8000);
     }
+    fbDb.collection('gestorpro').doc(id).set({
+      payload,
+      schemaVersion:SCHEMA_VERSION,
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    }).then(()=>{
+      fbSyncStatus='online';updateSyncBadge();
+    }).catch((err)=>{
+      console.error('Firestore write error ('+id+')',err);
+      fbSyncStatus='offline';
+      fbLastErrorMessage=(err&&err.code)?`${id}: ${err.code}`:'Erro ao salvar ('+id+')';
+      updateSyncBadge();
+      if(err&&(err.code==='invalid-argument'||/exceed|too large|longer than/i.test(err.message||''))){
+        toast(`🚨 "${id}" grande demais pra sincronizar! Fale comigo urgente — por enquanto está tudo salvo só neste aparelho.`,10000);
+      }
+    });
   });
 }
 
@@ -469,11 +494,17 @@ function runAutoBackupIfNeeded(){
   const today=todayKey();
   if(lastAutoBackupDate===today)return;
   lastAutoBackupDate=today;
-  fbDb.collection('gestorpro').doc(`backup-${today}`).set({
-    payload:JSON.stringify(S),
-    createdAt:firebase.firestore.FieldValue.serverTimestamp(),
-    schemaVersion:SCHEMA_VERSION
-  }).then(()=>{
+  const core={};
+  Object.keys(S).forEach(k=>{if(!SHARD_FIELDS.includes(k))core[k]=S[k];});
+  const jobs=[{id:`backup-${today}`,data:core}];
+  SHARD_FIELDS.forEach(f=>jobs.push({id:`backup-${today}-${f}`,data:{[f]:S[f]}}));
+  Promise.all(jobs.map(({id,data})=>
+    fbDb.collection('gestorpro').doc(id).set({
+      payload:JSON.stringify(data),
+      createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+      schemaVersion:SCHEMA_VERSION
+    })
+  )).then(()=>{
     updateBackupStatus(`Último backup: hoje às ${nowHHMM()}`,'pill-ok');
   }).catch(err=>{
     console.error('Auto backup failed',err);
@@ -2306,16 +2337,18 @@ function renderTeam(filter){
 
   const renderCard=c=>{
     const color=getComputedLevelColor(c.level);
-    const revWeek=getChatterWeekRevenueTotal(c.id);
+    const revWeek=getChatterWeekRevenue(c.id,0);
+    const extraWeek=getChatterExtraRevenue(c.id,0);
+    const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,0);
     const status=getChatterStatus(c.id,todayKey());
     const otMins=getChatterOvertimeOn(c.id,todayKey());
     const dotColor=status==='online'?'var(--ok)':status==='overtime'?'var(--warn)':'var(--text3)';
-    const timeBadge=c.time==='elite'?`<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>`:`<span class="pill pill-flat" style="font-size:9px">Básico</span>`;
+    const timeBadge=c.time==='elite'?`<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>`:c.time==='tester'?`<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>`:`<span class="pill pill-flat" style="font-size:9px">Básico</span>`;
     return`<div class="teamcard" onclick="openChatterDetail('${c.id}')">
       <div class="ravatar" style="width:42px;height:42px;background:${color}22;color:${color}">${c.name.slice(0,2).toUpperCase()}</div>
       <div class="rinfo">
         <div style="display:flex;align-items:center;gap:6px"><span class="rname">${c.name}</span><div class="tc-status" style="background:${dotColor}"></div></div>
-        <div class="rmeta">${c.discord||''} · ${moneyShort(revWeek)} semana</div>
+        <div class="rmeta">${c.discord||''} · ${moneyShort(revWeek)} semana${extraWeek>0?` · ⚡${moneyShort(extraWeek)} extra`:''}${htTotal>0?` · 🎯${avgHtPct}% HT (${moneyShort(htTotal)})`:''}</div>
         <div class="tmeta-row">${timeBadge}<span class="pill ${LVLCLASS[c.level]}" style="border:1px solid">${c.level}</span>${otMins>0?`<span class="pill pill-warn">+${otMins}min`:''}${c.watchtime?`<span class="pill pill-info">⏰ ${c.watchtime}</span>`:''}</div>
       </div>
       <span style="color:var(--text3);font-size:18px">›</span>
@@ -2765,78 +2798,6 @@ function renderReport_Weekly(){
     }).join('');
   }
 
-  // ---- Section 3: Chatters em Teste ----
-  const testePanel=document.getElementById('rpt-teste-panel');
-  const s3=document.getElementById('rpt-teste');
-  const emTeste=S.chatters.filter(c=>c.level==='treinamento'||c.level==='teste');
-  if(testePanel)testePanel.style.display=emTeste.length?'block':'none';
-  if(s3&&emTeste.length){
-    s3.innerHTML=emTeste.map(c=>{
-      let rev=0;wd.forEach(wdate=>S.models.forEach(m=>{rev+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(wdate)}`])||0;}));
-      const created=c.createdAt?Math.floor((new Date()-new Date(c.createdAt))/86400000):0;
-      const evolucao=getReportDraft('evolucao-'+c.id);
-      const decisao=getReportDraft('decisao-'+c.id);
-      return`<div style="background:var(--bg-soft);border-radius:12px;padding:14px;margin-bottom:12px;border:1.5px solid var(--line)">
-
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div>
-            <div style="font-weight:700;font-size:14px">${c.name}</div>
-            <div style="font-size:11.5px;color:var(--text3)">${created}d em teste · ${money(rev)} esta semana</div>
-          </div>
-          <span class="pill pill-info" style="font-size:10px">${c.level}</span>
-        </div>
-
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Evolução</div>
-        <div style="display:flex;gap:8px;margin-bottom:10px">
-          <button onclick="setReportToggle('evolucao-${c.id}','Boa','rpt-evo-${c.id}')" id="rpt-evo-${c.id}-Boa"
-            style="flex:1;padding:10px;border-radius:9px;border:2px solid ${evolucao==='Boa'?'var(--ok)':'var(--line)'};background:${evolucao==='Boa'?'var(--ok-soft)':'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:13px;color:${evolucao==='Boa'?'var(--ok)':'var(--text2)'}">
-            ✅ Evoluiu bem
-          </button>
-          <button onclick="setReportToggle('evolucao-${c.id}','Ruim','rpt-evo-${c.id}')" id="rpt-evo-${c.id}-Ruim"
-            style="flex:1;padding:10px;border-radius:9px;border:2px solid ${evolucao==='Ruim'?'var(--bad)':'var(--line)'};background:${evolucao==='Ruim'?'var(--bad-soft)':'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:13px;color:${evolucao==='Ruim'?'var(--bad)':'var(--text2)'}">
-            ❌ Evoluiu mal
-          </button>
-        </div>
-
-        <div class="field">
-          <label class="flabel">Por quê? (erros, comportamento, observações)</label>
-          <textarea class="ftext" id="rpt-erroteste-${c.id}" style="min-height:60px" placeholder="Ex: dificuldade em manter ritmo, erros de comunicação..."
-            onblur="saveReportDraftField('erroteste-${c.id}',this.value)">${getReportDraft('erroteste-'+c.id)}</textarea>
-        </div>
-
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 7px">Decisão</div>
-        <div style="display:flex;gap:6px">
-          ${['Aprovar','Continuar','Reprovar'].map(op=>{
-            const colors={Aprovar:'var(--ok)',Continuar:'var(--warn)',Reprovar:'var(--bad)'};
-            const bgs={Aprovar:'var(--ok-soft)',Continuar:'var(--warn-soft)',Reprovar:'var(--bad-soft)'};
-            const sel=decisao===op;
-            return`<button onclick="setReportToggle('decisao-${c.id}','${op}','rpt-dec-${c.id}')" id="rpt-dec-${c.id}-${op}"
-              style="flex:1;padding:8px 4px;border-radius:8px;border:2px solid ${sel?colors[op]:'var(--line)'};background:${sel?bgs[op]:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12px;color:${sel?colors[op]:'var(--text2)'}">
-              ${op}
-            </button>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }).join('');
-  }
-
-  // ---- Section 4: Evolução dos Novos ----
-  const s4=document.getElementById('rpt-evolucao');
-  if(s4&&emTeste.length){
-    const aprovaram=emTeste.filter(c=>getReportDraft('decisao-'+c.id)==='Aprovar').length;
-    const reprovaram=emTeste.filter(c=>getReportDraft('decisao-'+c.id)==='Reprovar').length;
-    const dificuldade=emTeste.filter(c=>getReportDraft('evolucao-'+c.id)==='Ruim'||getReportDraft('evolucao-'+c.id)==='Média').length;
-    const evoluiram=emTeste.filter(c=>getReportDraft('evolucao-'+c.id)==='Boa').length;
-    s4.innerHTML=`
-      <div class="reprow"><div class="replb">Quantos entraram</div><div class="repval">${emTeste.length}</div></div>
-      <div class="reprow"><div class="replb">Evoluíram bem</div><div class="repval" style="color:var(--ok)">${evoluiram}</div></div>
-      <div class="reprow"><div class="replb">Com dificuldade</div><div class="repval" style="color:var(--warn)">${dificuldade}</div></div>
-      <div class="reprow"><div class="replb">Reprovados</div><div class="repval" style="color:var(--bad)">${reprovaram}</div></div>
-    `;
-  } else if(s4){
-    s4.innerHTML='<div style="color:var(--text3);font-size:12px">Nenhum chatter em teste/treinamento</div>';
-  }
-
   // ---- Section 6: Ações Realizadas ----
   const s6=document.getElementById('rpt-acoes');
   if(s6){
@@ -2848,16 +2809,89 @@ function renderReport_Weekly(){
       return doneDate>=wkStart&&doneDate<=wkEnd;
     }).length;
     const corrections=S.orientations.filter(o=>o.date>=wkStart&&o.date<=wkEnd).length;
+    const swapsWeek=S.swaps.filter(sw=>sw.date>=wkStart&&sw.date<=wkEnd).length;
+    const decisionsWeek=Object.values(S.chatterFichas||{}).filter(f=>f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd).length;
+    const catsSetWeek=Object.values(S.chatterFichas||{}).filter(f=>f.pagCategoria).length;
     s6.innerHTML=`
       <div class="reprow"><div class="replb">Treinamentos feitos</div><div class="repval">${trainsDone}</div></div>
       <div class="reprow"><div class="replb">Orientações/correções</div><div class="repval">${corrections}</div></div>
+      <div class="reprow"><div class="replb">Trocas de turno cobertas</div><div class="repval">${swapsWeek}</div></div>
+      <div class="reprow"><div class="replb">Decisões de teste (aprovado/reprovado)</div><div class="repval">${decisionsWeek}</div></div>
+      <div class="reprow"><div class="replb">Categorias de pagamento definidas</div><div class="repval">${catsSetWeek}</div></div>
     `;
+    // Auto-preenche "Ajustes na operação" com um resumo, só se estiver vazio
+    const ajustesEl=document.getElementById('rpt-ajustes');
+    if(ajustesEl&&!ajustesEl.value&&!getReportDraft('ajustes')){
+      const parts=[];
+      if(swapsWeek)parts.push(`${swapsWeek} troca${swapsWeek>1?'s':''} de turno registrada${swapsWeek>1?'s':''}`);
+      if(decisionsWeek)parts.push(`${decisionsWeek} decisão${decisionsWeek>1?'ões':''} de teste tomada${decisionsWeek>1?'s':''}`);
+      if(trainsDone)parts.push(`${trainsDone} treinamento${trainsDone>1?'s':''} concluído${trainsDone>1?'s':''}`);
+      if(parts.length)ajustesEl.value='Sugestão automática: '+parts.join('; ')+'. (edite ou complete)';
+    }
   }
+
+  // ---- Auto-sugestão para Seção 5 (Erros) e Seção 7 (Problemas) ----
+  // Só preenche campos vazios — nunca sobrescreve o que o gestor já escreveu.
+  autoSuggestReportIssues(wd);
 
   // Restore saved draft values for manual fields
   ['erro1','erro2','erro3','prob1','prob2','plano1','plano2','plano3','ajustes'].forEach(key=>{
     const el=document.getElementById('rpt-'+key);
     if(el&&!el.value)el.value=getReportDraft(key)||'';
+  });
+}
+
+// Analisa dados reais do app (faltas sem justificativa, metas não batidas,
+// relatórios não enviados, orientações pendentes) e sugere conteúdo pras
+// seções "Principais Erros" e "Problemas Encontrados" — só quando o campo
+// ainda está vazio, pra nunca sobrescrever o que o gestor já escreveu.
+function autoSuggestReportIssues(wd){
+  const wkStart=fmt(wd[0]),wkEnd=fmt(wd[6]);
+  const problems=[];
+  const errors=[];
+
+  // Faltas sem justificativa essa semana
+  const faltasSemJust=S.absences.filter(a=>a.date>=wkStart&&a.date<=wkEnd&&a.type==='falta'&&!a.justificativa);
+  if(faltasSemJust.length){
+    const nomes=faltasSemJust.map(a=>S.chatters.find(c=>c.id===a.chatterId)?.name).filter(Boolean);
+    problems.push(`Faltas sem justificativa: ${[...new Set(nomes)].join(', ')} (${faltasSemJust.length} falta${faltasSemJust.length>1?'s':''})`);
+  }
+
+  // Chatters muito abaixo da meta (< 70%) essa semana
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const abaixoMeta=chatters.filter(c=>{
+    const meta=parseFloat((S.chatterWeekGoals[getWeekKey(0)]||{})[c.id])||0;
+    if(!meta)return false;
+    const rev=getChatterWeekRevenue(c.id,0);
+    return rev/meta<0.7;
+  });
+  if(abaixoMeta.length){
+    errors.push(`${abaixoMeta.length} chatter${abaixoMeta.length>1?'s':''} abaixo de 70% da meta: ${abaixoMeta.map(c=>c.name).join(', ')} — vale reforçar acompanhamento`);
+  }
+
+  // Orientações pendentes há mais de 7 dias
+  const oldOrients=(S.weekOrients||[]).filter(o=>!o.done&&o.date&&(new Date()-new Date(o.date+'T12:00:00'))>7*86400000);
+  if(oldOrients.length){
+    problems.push(`${oldOrients.length} orientação${oldOrients.length>1?'ões':''} pendente${oldOrients.length>1?'s':''} há mais de 7 dias`);
+  }
+
+  // Turnos sem chatter escalado
+  S.models.forEach(m=>{
+    DAY_KEYS.forEach(dk=>{
+      const covered=S.shifts.some(s=>(s.days||[]).includes(dk)&&(s.modelIds||[]).includes(m.id)&&s.chatterId);
+      if(!covered)errors.push(`${m.name} sem cobertura cadastrada em ${dk.toUpperCase()}`);
+    });
+  });
+
+  const errorIds=['erro1','erro2','erro3'];
+  errors.slice(0,3).forEach((txt,i)=>{
+    const el=document.getElementById('rpt-'+errorIds[i]);
+    if(el&&!el.value&&!getReportDraft(errorIds[i]))el.value=txt;
+  });
+  const probIds=['prob1','prob2'];
+  problems.slice(0,2).forEach((txt,i)=>{
+    const el=document.getElementById('rpt-'+probIds[i]);
+    if(el&&!el.value&&!getReportDraft(probIds[i]))el.value=txt;
   });
 }
 
@@ -3752,8 +3786,10 @@ function parseTeamReportsCore(forceExtra){
     // ---- Analytics ----
     const normalSales=allSales.filter(s=>!s.isExtra);
     const ticketMedio=normalSales.length>0?chatterTotal/normalSales.length:0;
-    const highTicketSales=normalSales.filter(s=>s.val>=ticketMedio*1.5);
+    const HIGH_TICKET_MIN=375; // limiar fixo — vendas a partir desse valor dão 8% de bônus diário
+    const highTicketSales=normalSales.filter(s=>s.val>=HIGH_TICKET_MIN);
     const highTicketPct=normalSales.length>0?Math.round((highTicketSales.length/normalSales.length)*100):0;
+    const highTicketTotal=highTicketSales.reduce((s,v)=>s+v.val,0); // valor exato em R$, não estimativa
 
     // Vendas por hora — use shift window from "HH:MM às HH:MM" in the report
     let shiftHours=0;
@@ -3789,7 +3825,7 @@ function parseTeamReportsCore(forceExtra){
       if(!S.chatterFichas[chatter.id].analytics)S.chatterFichas[chatter.id].analytics={};
       const a=S.chatterFichas[chatter.id].analytics;
       if(!a.weeklyData)a.weeklyData={};
-      a.weeklyData[dateKey]={ticketMedio,vendasPorHora,highTicketPct,maxGapMin,totalVendas:normalSales.length,chatterTotal,extraTotal,shiftHours,saleTimes:saleTsAll};
+      a.weeklyData[dateKey]={ticketMedio,vendasPorHora,highTicketPct,highTicketTotal,maxGapMin,totalVendas:normalSales.length,chatterTotal,extraTotal,shiftHours,saleTimes:saleTsAll};
       // Auto-fill ficha técnica from analytics
       const f=S.chatterFichas[chatter.id];
       // Valor/hora: 0.3=regular, 0.5=bom, 0.8=ótimo, 1+=excelente
@@ -4630,15 +4666,17 @@ function getChatterWeekHighTicket(chatterId,offset){
   const f=S.chatterFichas[chatterId];
   const analytics=f?.analytics?.weeklyData||{};
   const wd=getWeekDates(offset);
-  let htPctSum=0,days=0,weekRev=0;
+  let htPctSum=0,days=0,htTotal=0;
   wd.forEach(d=>{
     const dk=fmt(d);
     const a=analytics[dk];
-    S.models.forEach(m=>{weekRev+=parseFloat(S.revenues[`${chatterId}_${m.id}_${dk}`])||0;});
-    if(a&&a.ticketMedio>0){htPctSum+=a.highTicketPct||0;days++;}
+    if(a&&a.ticketMedio>0){
+      htPctSum+=a.highTicketPct||0;days++;
+      htTotal+=a.highTicketTotal!=null?a.highTicketTotal:0;
+    }
   });
   const avgHtPct=days>0?htPctSum/days:0;
-  return{avgHtPct:Math.round(avgHtPct),htTotal:weekRev*(avgHtPct/100)};
+  return{avgHtPct:Math.round(avgHtPct),htTotal};
 }
 // Medalha automática — baseada no % da meta semanal batida (mesmos degraus do prêmio)
 function autoMedalForPct(pct){
@@ -4684,18 +4722,19 @@ function getTesterAnalysis(chatterId){
   const testDays=getTesterTestDays(chatterId);
   const f=S.chatterFichas[chatterId]||{};
   const analytics=f?.analytics?.weeklyData||{};
-  let ticketSum=0,vphSum=0,highSum=0,maxGap=0,daysWithData=0,totalVendas=0,totalRev=0;
+  let ticketSum=0,vphSum=0,highSum=0,maxGap=0,daysWithData=0,totalVendas=0,totalRev=0,htTotal=0;
   testDays.forEach(({date,revenue})=>{
     totalRev+=revenue;
     const a=analytics[date];
     if(a){
       totalVendas+=a.totalVendas||0;
+      htTotal+=a.highTicketTotal||0;
       if(a.ticketMedio>0){ticketSum+=a.ticketMedio;vphSum+=a.vendasPorHora||0;highSum+=a.highTicketPct||0;daysWithData++;}
       if((a.maxGapMin||0)>maxGap)maxGap=a.maxGapMin||0;
     }
   });
   return{
-    testDays,totalRev,daysWithData,totalVendas,maxGap,
+    testDays,totalRev,daysWithData,totalVendas,maxGap,htTotal,
     avgTicket:daysWithData>0?ticketSum/daysWithData:0,
     avgVph:daysWithData>0?Math.round(vphSum/daysWithData*100)/100:0,
     avgHigh:daysWithData>0?Math.round(highSum/daysWithData):0,
@@ -5049,7 +5088,7 @@ function renderSemanaDesenvolvimento(){
   el.innerHTML=chatters.map(c=>{
     const f=S.chatterFichas[c.id];
     const analytics=f?.analytics?.weeklyData||{};
-    const wkeys=wd.map(d=>fmt(d)).filter(dk=>analytics[dk]);
+    const wkeys=wd.map(d=>fmt(d)).filter(dk=>analytics[dk]&&(!c.testerApprovalDate||dk>=c.testerApprovalDate));
     if(!wkeys.length)return`<div style="padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--text3)">${c.name} — sem dados esta semana</div>`;
     hasData=true;
 
@@ -5113,7 +5152,7 @@ function gerarAnaliseSemanal(){
   chatters.forEach(c=>{
     const f=S.chatterFichas[c.id];
     const analytics=f?.analytics?.weeklyData||{};
-    const wkeys=wd.map(d=>fmt(d)).filter(dk=>analytics[dk]);
+    const wkeys=wd.map(d=>fmt(d)).filter(dk=>analytics[dk]&&(!c.testerApprovalDate||dk>=c.testerApprovalDate));
     if(!wkeys.length)return;
 
     let totalRev=0,totalVendas=0,totalTicket=0,totalVPH=0,totalHighPct=0,maxGap=0,days=0;
@@ -5250,16 +5289,17 @@ function renderEvolucao(){
     const pct=meta>0?Math.round((getChatterWeekRevenue(c.id)/meta)*100):null;
     const f=S.chatterFichas[c.id]||{};
     const analytics=f?.analytics?.weeklyData||{};
-    const wkeys=wd.map(d=>fmt(d)).filter(dk=>analytics[dk]);
+    const wkeys=wd.map(d=>fmt(d)).filter(dk=>analytics[dk]&&(!c.testerApprovalDate||dk>=c.testerApprovalDate));
 
     // Aggregate analytics
-    let ticketSum=0,vphSum=0,highSum=0,maxGap=0,days=0,totalV=0,extraV=0,totalVendas=0;
+    let ticketSum=0,vphSum=0,highSum=0,maxGap=0,days=0,totalV=0,extraV=0,totalVendas=0,htTotalWeek=0;
     const allSaleTimes=[]; // all sale times in minutes for peak hour
     const hourHistTotal=new Array(24).fill(0); // soma dos resumos de dias antigos (já sem detalhe bruto)
     wkeys.forEach(dk=>{
       const a=analytics[dk];
       totalV+=a.chatterTotal||0; extraV+=a.extraTotal||0;
       totalVendas+=a.totalVendas||0;
+      htTotalWeek+=a.highTicketTotal||0;
       if(a.ticketMedio>0){ticketSum+=a.ticketMedio;vphSum+=a.vendasPorHora||0;highSum+=a.highTicketPct||0;days++;}
       if((a.maxGapMin||0)>maxGap)maxGap=a.maxGapMin||0;
       if(a.saleTimes)a.saleTimes.forEach(t=>allSaleTimes.push(t));
@@ -5317,8 +5357,42 @@ function renderEvolucao(){
       if(lowM&&low<4)weakestMetric={name:CHAT_METRIC_LABELS[lowM],score:SCORE_WORD[Math.round(low)]||Math.round(low)};
     }
 
-    // Data-driven personalized recommendations
-    const recs=[];
+// Cruza a Ficha (observações escritas à mão) e o último diagnóstico do
+// ChatLab (seção "Maiores Erros" do relatório de IA) pra enriquecer a
+// análise individual — sem depender só de números.
+function getFichaAndDiagnosisInsights(chatterId){
+  const insights=[];
+  const f=S.chatterFichas[chatterId];
+  if(f){
+    if(f.risk?.riscos)insights.push(`Risco observado na ficha: ${f.risk.riscos}`);
+    if(f.potential?.proximos)insights.push(`Próximo passo (ficha): ${f.potential.proximos}`);
+    else if(f.tech?.evolucao)insights.push(`Evolução observada na ficha: ${f.tech.evolucao}`);
+  }
+  const clList=(S.chatlabAnalyses||[]).filter(a=>a.chatterId===chatterId);
+  const last=clList[clList.length-1];
+  if(last?.raw){
+    const m=last.raw.match(/##\s*🔴\s*Maiores Erros[^\n]*\n([\s\S]*?)(?:\n##|$)/i);
+    if(m){
+      const firstLine=m[1].split('\n').map(l=>l.trim()).filter(l=>l&&l!=='*')[0];
+      if(firstLine)insights.push(`Diagnóstico ChatLab: ${firstLine.replace(/^[*\-]\s*/,'')}`);
+    }
+  }
+  return insights;
+}
+function suggestTrainingText(chatterId){
+  const insights=getFichaAndDiagnosisInsights(chatterId);
+  const clList=(S.chatlabAnalyses||[]).filter(a=>a.chatterId===chatterId);
+  const last=clList[clList.length-1];
+  let plano='';
+  if(last?.raw){
+    const m=last.raw.match(/##\s*📋\s*Plano de Treinamento[^\n]*\n([\s\S]*?)(?:\n##|$)/i);
+    if(m)plano=m[1].trim().split('\n').slice(0,3).join(' ');
+  }
+  const parts=[];
+  if(plano)parts.push(plano);
+  if(insights.length)parts.push(...insights.slice(0,2));
+  return parts.join(' · ');
+}
     if(peakHour)recs.push(`Rende mais entre <strong>${peakHour}</strong> — concentre os leads quentes e ofertas nesse horário`);
     if(bestDay&&worstDay&&bestDay!==worstDay){
       const diff=analytics[bestDay].chatterTotal-analytics[worstDay].chatterTotal;
@@ -5335,6 +5409,8 @@ function renderEvolucao(){
     }
     if(!recs.length&&rev>0)recs.push(`Desempenho sólido (${money(rev)}, ${totalVendas} vendas) — manter ritmo e testar aumento de ticket`);
     if(!recs.length)recs.push('Sem dados suficientes — processe os relatórios de vendas desta semana');
+    // Cruza com a ficha e o diagnóstico do ChatLab pra não depender só de números
+    getFichaAndDiagnosisInsights(c.id).forEach(ins=>recs.push(ins));
 
     const timeLabel=c.time==='elite'?'<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>':c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>':'';
 
@@ -5364,8 +5440,9 @@ function renderEvolucao(){
           ${evoVph!==null?`<div style="font-size:10px;color:${evoVph>=0?'var(--ok)':'var(--bad)'}">${evoVph>=0?'▲':'▼'}${Math.abs(evoVph)}%</div>`:''}
         </div>
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
-          <div style="font-size:9px;color:var(--text3)">High ticket</div>
+          <div style="font-size:9px;color:var(--text3)">High ticket ≥R$375</div>
           <div style="font-size:13px;font-weight:700;color:${avgHigh>=30?'var(--ok)':avgHigh>=15?'var(--warn)':'var(--bad)'}">${avgHigh}%</div>
+          ${htTotalWeek>0?`<div style="font-size:10px;color:var(--text3)">${money(htTotalWeek)}/sem.</div>`:''}
         </div>
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
           <div style="font-size:9px;color:var(--text3)">Vendas semana</div>
@@ -5406,7 +5483,7 @@ function renderEvolucao(){
           <div style="font-size:11px;font-weight:700;color:var(--warn)">🏋️ COMO TREINAR MELHOR</div>
           <button class="btn btn-ghost btn-xs" onclick="sendTrainingToWeek('${c.id}')">→ orientações da semana</button>
         </div>
-        <textarea class="ftext" style="min-height:52px;font-size:12.5px;background:#fff" placeholder="Escreva como treinar ${c.name} esta semana..." onblur="saveChatterTraining('${c.id}',this.value)">${(S.chatterTraining[c.id]||'')}</textarea>
+        <textarea class="ftext" style="min-height:52px;font-size:12.5px;background:#fff" placeholder="Escreva como treinar ${c.name} esta semana..." onblur="saveChatterTraining('${c.id}',this.value)">${(S.chatterTraining[c.id]||suggestTrainingText(c.id))}</textarea>
       </div>
     </div>`;
   });
@@ -5704,10 +5781,34 @@ function toggleTurnoEditMode(){
 /* ===========================================================
    ORIENTAÇÕES DA SEMANA — done items only vanish on new week
    =========================================================== */
+// Detecta quem está com muita dificuldade de bater a meta (< 50%) e pouca
+// evolução, e sugere automaticamente uma orientação — sem duplicar a
+// mesma sugestão na mesma semana, e sem nunca remover o que o gestor
+// escreveu manualmente.
+function autoSuggestOrientations(){
+  const wk=getWeekKey(0);
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  chatters.forEach(c=>{
+    const meta=parseFloat((S.chatterWeekGoals[wk]||{})[c.id])||0;
+    if(!meta)return;
+    const rev=getChatterWeekRevenue(c.id,0);
+    const pct=rev/meta*100;
+    if(pct>=50)return; // não está em dificuldade severa
+    const evo=calcEvolutionPct(c.id);
+    const poucaEvolucao=!evo||Object.values(evo).every(v=>v<=5);
+    if(!poucaEvolucao)return;
+    const already=S.weekOrients.some(o=>o.chatterId===c.id&&o.autoWeek===wk);
+    if(already)return;
+    S.weekOrients.push({id:'wo'+Date.now()+Math.random().toString(36).slice(2,4),chatterId:c.id,
+      text:`⚠️ ${c.name} está em ${Math.round(pct)}% da meta com pouca evolução — sugestão automática: conversa 1:1 e reforço de treinamento`,
+      done:false,doneWeek:null,auto:true,autoWeek:wk});
+  });
+}
 function renderWeekOrients(){
   const el=document.getElementById('week-orients-list');
   if(!el)return;
   const wk=getWeekKey();
+  autoSuggestOrientations();
   // prune: done in a PREVIOUS week disappears
   S.weekOrients=S.weekOrients.filter(o=>!o.done||o.doneWeek===wk);
   if(!S.weekOrients.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:6px 0">Nenhuma orientação esta semana</div>';return;}
@@ -5716,7 +5817,7 @@ function renderWeekOrients(){
     return`<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
       <button onclick="toggleWeekOrient('${o.id}')" style="width:20px;height:20px;border-radius:5px;border:2px solid ${o.done?'var(--ok)':'var(--line-strong)'};background:${o.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;margin-top:1px">${o.done?'<span style="color:#fff">✓</span>':''}</button>
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;${o.done?'text-decoration:line-through;color:var(--text3)':''}">${o.text}</div>
+        <div style="font-size:13px;${o.done?'text-decoration:line-through;color:var(--text3)':''}">${o.text}${o.auto?' <span class="pill pill-info" style="font-size:9px">auto</span>':''}</div>
         ${c?`<div style="font-size:10.5px;color:var(--accent);margin-top:1px">👤 ${c.name}</div>`:''}
       </div>
       <button onclick="removeWeekOrient('${o.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
@@ -6536,9 +6637,41 @@ function saveFichaText(chatterId,store,key,val){
 /* ===========================================================
    TESTERS — daily result tracking per tester chatter
    =========================================================== */
+// Todos os dias (não só os 3 do teste inicial) em que o chatter faturou algo
+function getTesterAllWorkDays(chatterId){
+  const dateTotals={};
+  Object.keys(S.revenues).forEach(key=>{
+    const parts=key.split('_');
+    if(parts.length<3||parts[0]!==chatterId)return;
+    const dateKey=parts.slice(2).join('_');
+    const val=parseFloat(S.revenues[key])||0;
+    if(val<=0)return;
+    dateTotals[dateKey]=(dateTotals[dateKey]||0)+val;
+  });
+  return Object.keys(dateTotals).sort().map(dk=>({date:dk,revenue:dateTotals[dk]}));
+}
+function setTesterDecision(chatterId,decision){
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  if(!c)return;
+  if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[chatterId].testerDecision=decision;
+  S.chatterFichas[chatterId].testerDecisionDate=todayKey();
+  if(decision==='aprovado'){
+    c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
+    c.testerApprovalDate=todayKey(); // a partir dessa data os relatórios entram nas análises (Evolução etc)
+    toast(`✅ ${c.name} aprovado! Já passou pro Time Base — relatórios de teste ficam de fora da Evolução até essa data.`);
+  } else if(decision==='reprovado'){
+    toast(`${c.name} marcado como reprovado.`);
+  } else {
+    toast(`${c.name} colocado em espera.`);
+  }
+  save();
+  renderTesters();
+}
 function renderTesters(){
   const sel=document.getElementById('tester-select');
-  const testers=S.chatters.filter(c=>c.time==='tester');
+  // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
+  const testers=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
   if(sel){
     const cur=sel.value;
     sel.innerHTML='<option value="">— ver todos —</option>'+
@@ -6559,58 +6692,66 @@ function renderTesters(){
     return;
   }
 
-  // Build score for each tester based on their 3-day test window
-  const scored=testers.map(c=>{
+  const decided=testers.filter(c=>['aprovado','reprovado'].includes(S.chatterFichas?.[c.id]?.testerDecision));
+  const pending=testers.filter(c=>!decided.includes(c));
+
+  // Build score for each pending tester based on their 3-day test window
+  const scored=pending.map(c=>{
     const analysis=getTesterAnalysis(c.id);
-    const logs=(S.testerLogs?.[c.id]||[]);
-    const days=logs.length;
-    return{c,days,logs,rev:analysis.totalRev,analysis};
+    const decision=S.chatterFichas?.[c.id]?.testerDecision||'';
+    return{c,rev:analysis.totalRev,analysis,decision};
   }).sort((a,b)=>b.rev-a.rev);
-
-  // Classify
-  const n=scored.length;
-  const topN=Math.max(1,Math.ceil(n/3));
-  const botN=Math.max(1,Math.floor(n/3));
-
-  const groups=[
-    {label:'🟢 Melhores',color:'var(--ok)',bg:'var(--ok-soft)',items:scored.slice(0,topN)},
-    {label:'🟡 Médios',color:'var(--warn)',bg:'var(--warn-soft)',items:scored.slice(topN,n-botN)},
-    {label:'🔴 Precisam de atenção',color:'var(--bad)',bg:'var(--bad-soft)',items:scored.slice(n-botN)},
-  ];
 
   const DIAS=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   const dayName=dk=>{const[y,mo,d]=dk.split('-').map(Number);return DIAS[new Date(y,mo-1,d).getDay()];};
+  const fmtBR=dk=>{const[y,mo,d]=dk.split('-');return`${d}/${mo}/${y}`;};
+
+  const decisionBtns=(c,current)=>['aprovado','espera','reprovado'].map(op=>{
+    const labels={aprovado:'✅ Aprovado',espera:'⏳ Espera',reprovado:'❌ Reprovado'};
+    const colors={aprovado:'var(--ok)',espera:'var(--warn)',reprovado:'var(--bad)'};
+    const bgs={aprovado:'var(--ok-soft)',espera:'var(--warn-soft)',reprovado:'var(--bad-soft)'};
+    const sel2=current===op;
+    return`<button onclick="event.stopPropagation();setTesterDecision('${c.id}','${op}')"
+      style="flex:1;padding:7px 4px;border-radius:8px;border:2px solid ${sel2?colors[op]:'var(--line)'};background:${sel2?bgs[op]:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:11px;color:${sel2?colors[op]:'var(--text2)'}">${labels[op]}</button>`;
+  }).join('');
 
   el.innerHTML=`
     <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12.5px;color:var(--text2)">
-      📊 <strong>${testers.length} testers</strong> classificados pelo resultado dos 3 dias de teste (faturamento).
-      Clique em qualquer um para ver a análise completa.
+      📊 <strong>${pending.length} em avaliação</strong> — classificados do melhor pro pior pelo resultado dos 3 dias de teste. Os 3 primeiros ficam sempre em destaque como fila de espera.
     </div>
-    ${groups.filter(g=>g.items.length).map(g=>`
-      <div style="margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:${g.color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${g.label} (${g.items.length})</div>
-        ${g.items.map((item,rank)=>{
-          const {c,days,logs,rev,analysis}=item;
-          const lastLog=logs.length?logs[logs.length-1]:null;
-          const daysLabel=analysis.testDays.length?analysis.testDays.map(td=>dayName(td.date)).join(', '):'sem dias de teste ainda';
-          return`<div style="display:flex;align-items:flex-start;gap:12px;padding:11px;background:var(--surface);border:1px solid var(--line);border-left:3px solid ${g.color};border-radius:9px;margin-bottom:7px;cursor:pointer"
-            onclick="document.getElementById('tester-select').value='${c.id}';renderTesterDetail('${c.id}')">
-            <div style="font-size:22px;font-weight:800;font-family:var(--font-mono);color:${g.color};min-width:28px;flex-shrink:0;line-height:1.2">${ranked(scored,item)}</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:700;font-size:14px">${c.name} <span style="font-size:11px;color:var(--text3);font-weight:400">${c.level}</span></div>
-              <div style="font-size:11.5px;color:var(--text2);margin-top:2px">Teste: ${daysLabel}${analysis.testDays.length?` · <strong style="color:${g.color}">${money(rev)}</strong> nos 3 dias`:''}</div>
-              <div style="font-size:11px;color:var(--text3);margin-top:1px">${days} registro${days!==1?'s':''} de acompanhamento</div>
-              ${lastLog?`<div style="font-size:12px;color:var(--text3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Último: ${lastLog.fortes||lastLog.fracos||lastLog.results||'—'}</div>`:''}
-            </div>
-            <div style="font-size:18px">›</div>
+    ${scored.map((item,idx)=>{
+      const {c,rev,analysis,decision}=item;
+      const isTop3=idx<3;
+      const color=isTop3?'var(--ok)':idx<scored.length-Math.max(1,Math.floor(scored.length/3))?'var(--warn)':'var(--bad)';
+      const daysLabel=analysis.testDays.length?analysis.testDays.map(td=>dayName(td.date)).join(', '):'sem dias de teste ainda';
+      const workDays=getTesterAllWorkDays(c.id);
+      const contractDate=c.createdAt?fmtBR(c.createdAt.slice(0,10)):'—';
+      return`<div style="padding:12px;background:var(--surface);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;margin-bottom:9px">
+        <div style="display:flex;align-items:flex-start;gap:12px;cursor:pointer" onclick="document.getElementById('tester-select').value='${c.id}';renderTesterDetail('${c.id}')">
+          <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:${color};min-width:26px;flex-shrink:0">${isTop3?['🥇','🥈','🥉'][idx]:`${idx+1}º`}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:14px">${c.name} ${isTop3?'<span class="pill pill-ok" style="font-size:9px">🌟 fila</span>':''}</div>
+            <div style="font-size:11.5px;color:var(--text2);margin-top:2px">Teste: ${daysLabel}${analysis.testDays.length?` · <strong style="color:${color}">${money(rev)}</strong> nos 3 dias`:''}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:1px">${workDays.length} dia${workDays.length!==1?'s':''} de trabalho · contrato desde ${contractDate}</div>
+          </div>
+          <div style="font-size:18px">›</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:10px">${decisionBtns(c,decision)}</div>
+      </div>`;
+    }).join('')}
+    ${decided.length?`
+      <div style="margin-top:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📋 Decididos</div>
+        ${decided.sort((a,b)=>(S.chatterFichas[b.id]?.testerDecisionDate||'').localeCompare(S.chatterFichas[a.id]?.testerDecisionDate||'')).map(c=>{
+          const f=S.chatterFichas[c.id]||{};
+          const isAprov=f.testerDecision==='aprovado';
+          return`<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px">
+            <div><strong>${c.name}</strong> <span style="color:${isAprov?'var(--ok)':'var(--bad)'}">${isAprov?'✅ aprovado':'❌ reprovado'}</span></div>
+            <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
           </div>`;
         }).join('')}
-      </div>`).join('')}`;
-}
-
-function ranked(scored,item){
-  const i=scored.indexOf(item);
-  return i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}º`;
+      </div>`:''}
+  `;
 }
 
 function renderTesterDetail(cid){
@@ -6659,8 +6800,9 @@ function renderTesterDetail(cid){
           <div style="font-size:13px;font-weight:700;color:${analysis.avgVph>=20?'var(--ok)':analysis.avgVph>=10?'var(--warn)':'var(--bad)'}">${money(analysis.avgVph)}/h</div>
         </div>
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
-          <div style="font-size:9px;color:var(--text3)">High ticket</div>
+          <div style="font-size:9px;color:var(--text3)">High ticket ≥R$375</div>
           <div style="font-size:13px;font-weight:700;color:${analysis.avgHigh>=30?'var(--ok)':analysis.avgHigh>=15?'var(--warn)':'var(--bad)'}">${analysis.avgHigh}%</div>
+          ${analysis.htTotal>0?`<div style="font-size:10px;color:var(--text3)">${money(analysis.htTotal)}</div>`:''}
         </div>
       </div>`:''}
     `:'<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">Ainda sem lançamento em Faturamento — os 3 dias de teste aparecem aqui automaticamente.</div>'}
@@ -6825,19 +6967,25 @@ function pagBoost(pctAcima){
   return 3.5;
 }
 
-function calcChatterPagamento(fat, medalha, cat, htTotal, extraFat){
+function calcChatterPagamento(fat, medalha, cat, htTotal, extraFat, customMeta){
   const com=PAG_COM[medalha]||0.04;
   const comissao=fat*com;
 
-  // Meta prize — find which level was hit
+  // Meta prize — usa a meta customizada (definida em Faturamento) quando
+  // existir, escalando os 3 degraus proporcionalmente; senão usa a
+  // categoria padrão. O valor do prêmio em R$ de cada degrau continua
+  // vindo da categoria (política de bônus da empresa).
   const c=PAG_CATS[cat];
+  const n100=customMeta>0?customMeta:c.n100;
+  const n85=customMeta>0?customMeta*(c.n85/c.n100):c.n85;
+  const n70=customMeta>0?customMeta*(c.n70/c.n100):c.n70;
   let premio=0;
-  if(fat>=c.n100){
-    const pctOver=((fat-c.n100)/c.n100)*100;
+  if(fat>=n100){
+    const pctOver=((fat-n100)/n100)*100;
     premio=Math.round(c.p100*pagBoost(pctOver));
-  } else if(fat>=c.n85){
+  } else if(fat>=n85){
     premio=c.p85;
-  } else if(fat>=c.n70){
+  } else if(fat>=n70){
     premio=c.p70;
   }
 
@@ -6851,7 +6999,7 @@ function calcChatterPagamento(fat, medalha, cat, htTotal, extraFat){
   const piso=PAG_PISO[medalha]||1000;
   const pisoComp=Math.max(0,piso-total);
 
-  return{comissao,premio,htBonus,extraBonus,total,piso,pisoComp,totalComPiso:total};
+  return{comissao,premio,htBonus,extraBonus,total,piso,pisoComp,totalComPiso:total,n100,n85,n70};
 }
 
 function pagSwitchTab(tab){
@@ -6885,6 +7033,21 @@ function renderPagamento(){
   renderGerPreview();
 }
 
+// Quantos dias de trabalho ainda restam essa semana pra um chatter (hoje
+// incluso), pra dividir "quanto falta" em uma meta diária de apoio
+function getRemainingWorkDaysThisWeek(chatterId){
+  const wd=getWeekDates(0);
+  const today=todayKey();
+  let count=0;
+  wd.forEach(d=>{
+    const dk=fmt(d);
+    if(dk<today)return;
+    const dayKey=DAY_KEYS[d.getDay()];
+    const hasShift=S.shifts.some(s=>s.chatterId===chatterId&&(s.days||[]).includes(dayKey)&&s.folgaDia!==dayKey);
+    if(hasShift)count++;
+  });
+  return count;
+}
 function renderPagChattersAll(){
   const el=document.getElementById('pag-chatters-all');
   if(!el)return;
@@ -6904,12 +7067,17 @@ function renderPagChattersAll(){
       const metaVal=parseFloat(goals[c.id])||0;
       const savedCat=S.chatterFichas?.[c.id]?.pagCategoria;
       const cat=savedCat||Object.entries(PAG_CATS).find(([k,v])=>metaVal>0&&metaVal<=v.n100)?.[0]||'B';
-      const metaCat=PAG_CATS[cat].n100;
-      const pct=weekRev>0&&PAG_CATS[cat]?Math.round(weekRev/metaCat*100):0;
+      // A meta REAL é a que você define em Faturamento — quando existir,
+      // ela substitui a meta padrão da categoria em todos os cálculos daqui.
+      const metaCat=metaVal>0?metaVal:PAG_CATS[cat].n100;
+      const pct=weekRev>0&&metaCat>0?Math.round(weekRev/metaCat*100):0;
       const falta=Math.max(0,metaCat-weekRev);
+      const remainDays=getRemainingWorkDaysThisWeek(c.id);
+      const faltaPorDia=falta>0&&remainDays>0?falta/remainDays:null;
       const medal=autoMedalForPct(pct);
-      const r=calcChatterPagamento(weekRev,medal,cat,htTotal,weekExtra);
+      const r=calcChatterPagamento(weekRev,medal,cat,htTotal,weekExtra,metaVal);
       const col=pct>=100?'var(--ok)':pct>=85?'var(--warn)':pct>=70?'var(--info)':'var(--bad)';
+      const tier=pct>=100?'100%':pct>=85?'85%':pct>=70?'70%':'—';
       return`<div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div style="font-weight:700;font-size:14px">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>
@@ -6918,9 +7086,12 @@ function renderPagChattersAll(){
         <div style="background:var(--line);border-radius:4px;height:7px;overflow:hidden;margin-bottom:5px">
           <div style="height:7px;border-radius:4px;background:${col};width:${Math.min(100,pct)}%;transition:width .3s"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:10px">
-          <span style="color:${col};font-weight:700">${pct}% da meta (${money(weekRev)} de ${money(metaCat)})</span>
-          ${falta>0?`<span style="color:var(--bad);font-weight:700">falta ${money(falta)}</span>`:`<span style="color:var(--ok);font-weight:700">✅ meta batida!</span>`}
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;margin-bottom:6px">
+          <span style="color:${col};font-weight:700">${pct}% da meta <span style="background:${col};color:#fff;border-radius:5px;padding:1px 6px;font-size:10px;margin-left:4px">degrau ${tier}</span></span>
+          <span style="color:var(--text3)">${money(weekRev)} de ${money(metaCat)}${metaVal>0?'':' (categoria)'}</span>
+        </div>
+        <div style="margin-bottom:10px">
+          ${falta>0?`<div style="color:var(--bad);font-weight:700;font-size:12.5px">falta ${money(falta)}${faltaPorDia?` · <span style="color:var(--warn)">${money(faltaPorDia)}/dia</span> em ${remainDays} dia${remainDays>1?'s':''} de trabalho restante${remainDays>1?'s':''}`:remainDays===0?' · sem mais dias de trabalho essa semana':''}</div>`:`<div style="color:var(--ok);font-weight:700;font-size:12.5px">✅ meta batida!</div>`}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
           <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
@@ -6940,7 +7111,7 @@ function renderPagChattersAll(){
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
           <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
-            <div style="font-size:9px;color:var(--text3)">High ticket (auto, ${avgHtPct}%)</div>
+            <div style="font-size:9px;color:var(--text3)">High ticket ≥R$375 (auto, ${avgHtPct}%)</div>
             <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(htTotal)}</div>
           </div>
           <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
@@ -7050,10 +7221,13 @@ function renderGerPreview(){
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre chatters na aba Equipe</div>';return;}
 
+  const wkey=getWeekKey(0);
+  const goals=S.chatterWeekGoals[wkey]||{};
   let frente1=0;
   const rows=chatters.map(c=>{
     const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
-    const meta=PAG_CATS[cat].n100;
+    const metaVal=parseFloat(goals[c.id])||0;
+    const meta=metaVal>0?metaVal:PAG_CATS[cat].n100;
     const fat=getChatterWeekRevenue(c.id,0); // sempre semana atual, automático
     const premio=calcGerPremio(fat,meta);
     frente1+=premio;
@@ -7068,10 +7242,12 @@ function renderGerPreview(){
     </tr>`;
   });
 
-  // Meta global do mês = soma das metas semanais de cada chatter (pela categoria escolhida) × ~4,3 semanas
+  // Meta global do mês = soma das metas semanais reais de cada chatter × ~4,3 semanas
   const metaGlobal=chatters.reduce((s,c)=>{
     const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
-    return s+PAG_CATS[cat].n100*(30/7);
+    const metaVal=parseFloat(goals[c.id])||0;
+    const meta=metaVal>0?metaVal:PAG_CATS[cat].n100;
+    return s+meta*(30/7);
   },0);
   const fatGlobal=getCompanyMonthToDateRevenue(); // faturamento real do mês, automático
   const frente2=calcGerMeta2(metaGlobal,fatGlobal);
