@@ -77,6 +77,61 @@ function migrateState(s){
     time:'basico', // 'basico' | 'elite'
     ...c
   }));
+  pruneHeavyData(s);
+  return s;
+}
+
+// Mantém o documento do Firestore sob controle: remove só o detalhe bruto
+// (horário de cada venda individual) de dias com mais de 60 dias — os
+// TOTAIS e MÉDIAS daquele dia continuam guardados pra sempre, só o detalhe
+// minuto-a-minuto (que só serve pra gráfico de horário de pico recente)
+// sai. Também remove snapshots de ficha duplicados no mesmo dia (mantém
+// o mais recente de cada data, em vez de acumular repetidos).
+function pruneHeavyData(s){
+  try{
+    const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
+    const cutoffKey=fmt(cutoff);
+    Object.values(s.chatterFichas||{}).forEach(f=>{
+      const wd=f?.analytics?.weeklyData;
+      if(wd){
+        Object.keys(wd).forEach(dk=>{
+          if(dk<cutoffKey&&wd[dk]&&wd[dk].saleTimes){
+            // Calcula o resultado (quantas vendas em cada hora do dia) ANTES
+            // de apagar o detalhe bruto — preserva o horário de pico exato
+            // ocupando 24 números fixos em vez de uma lista que só cresce.
+            if(!wd[dk].hourHistogram){
+              const hist=new Array(24).fill(0);
+              wd[dk].saleTimes.forEach(mins=>{hist[Math.floor(mins/60)%24]++;});
+              wd[dk].hourHistogram=hist;
+            }
+            delete wd[dk].saleTimes;
+          }
+        });
+      }
+      if(Array.isArray(f?.history)&&f.history.length>1){
+        const byDate={};
+        f.history.forEach(h=>{if(h&&h.date)byDate[h.date]=h;}); // último de cada data vence
+        f.history=Object.keys(byDate).sort().map(dk=>byDate[dk]);
+      }
+    });
+    // ChatLab: relatórios de IA são textos longos — mantém só os 5 mais
+    // recentes POR CHATTER. Análises antigas raramente são revisitadas e
+    // são, de longe, o maior peso do documento.
+    if(Array.isArray(s.chatlabAnalyses)&&s.chatlabAnalyses.length){
+      const byChatter={};
+      s.chatlabAnalyses.forEach(a=>{
+        const cid=a.chatterId||'_sem';
+        if(!byChatter[cid])byChatter[cid]=[];
+        byChatter[cid].push(a);
+      });
+      let kept=[];
+      Object.values(byChatter).forEach(list=>{
+        list.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+        kept=kept.concat(list.slice(-5));
+      });
+      s.chatlabAnalyses=kept;
+    }
+  }catch(e){console.error('Erro ao limpar dados pesados',e);}
   return s;
 }
 
@@ -926,92 +981,71 @@ function toggleMidnight(dateKey,id){
 function getTomorrowKey(){
   const d=new Date();d.setDate(d.getDate()+1);return fmt(d);
 }
-function getWindow48hKey(){
-  const d=new Date();d.setDate(d.getDate()+2);return fmt(d);
-}
-function getFolgasForDate(dateKey){
-  return(S.folgas[dateKey]||[]).map(id=>S.chatters.find(c=>c.id===id)).filter(Boolean);
-}
-function toggleFolga(chatterId,dateKey){
-  if(!S.folgas[dateKey])S.folgas[dateKey]=[];
-  const idx=S.folgas[dateKey].indexOf(chatterId);
-  if(idx===-1)S.folgas[dateKey].push(chatterId);
-  else S.folgas[dateKey].splice(idx,1);
-  save();renderFolgaPanel();
-}
-function isFolgaActive(){
-  // Painel de Janelas de horário agora fica sempre visível (48h de antecedência)
-  return true;
-}
-function renderFolgaPanel(){
-  const panel=document.getElementById('home-folga-panel');
-  if(!panel)return;
-  const el=document.getElementById('home-folga-content');
-  if(!panel||!el)return;
-  const target=getWindow48hKey();
-  const targetDate=new Date();targetDate.setDate(targetDate.getDate()+2);
-  const dayName=DAYS[targetDate.getDay()];
-  const dayKey=DAY_KEYS[targetDate.getDay()];
-  const folgasTarget=S.folgas[target]||[];
-  if(!S.chatters.length){panel.style.display='none';return;}
-  panel.style.display='block';
-
-  // Automático: turnos com folga recorrente (cadastrada na Escala) que cai nesse dia
-  const autoVagas=[];
-  S.shifts.forEach(s=>{
-    const c=S.chatters.find(ch=>ch.id===s.chatterId);
-    if(!c)return;
-    const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
-    const modelStr=models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo';
-    if(s.folgaDia===dayKey)autoVagas.push({chatterName:c.name,modelStr,start:s.start,end:s.end});
-    if(s.folgaDia2===dayKey)autoVagas.push({chatterName:c.name,modelStr,start:s.start2||s.start,end:s.end2||s.end});
+// Todas as janelas abertas (folga recorrente da Escala) dentro da semana
+// ATUAL — uma por (turno, dia), com o modelo e horário que fica livre.
+function getWeekAvailableWindows(){
+  const wd=getWeekDates(0); // sempre semana atual, não segue navegação de outras abas
+  const windows=[];
+  wd.forEach(day=>{
+    const dayKey=DAY_KEYS[day.getDay()];
+    const dateStr=fmt(day);
+    S.shifts.forEach(s=>{
+      const opensBlock1=s.folgaDia===dayKey;
+      const opensBlock2=s.folgaDia2===dayKey&&s.start2&&s.end2;
+      if(!opensBlock1&&!opensBlock2)return;
+      const c=S.chatters.find(ch=>ch.id===s.chatterId);
+      if(!c)return;
+      const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
+      const modelStr=models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo';
+      const timeStr=[opensBlock1?`${s.start}–${s.end}`:null,opensBlock2?`${s.start2}–${s.end2}`:null].filter(Boolean).join(' · ');
+      const existingSwap=S.swaps.find(sw=>sw.date===dateStr&&sw.shiftId===s.id&&sw.originalId===c.id);
+      windows.push({date:dateStr,dayName:DAYS[day.getDay()],shiftId:s.id,originalId:c.id,originalName:c.name,modelStr,timeStr,covererId:existingSwap?existingSwap.covererId:''});
+    });
   });
-
-  const chattersOff=getFolgasForDate(target);
-  const chattersOn=S.chatters.filter(c=>!folgasTarget.includes(c.id));
-
+  return windows.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function assignWindowCover(shiftId,date,originalId,covererId){
+  S.swaps=S.swaps.filter(sw=>!(sw.date===date&&sw.shiftId===shiftId&&sw.originalId===originalId));
+  if(covererId){
+    const s=S.shifts.find(sh=>sh.id===shiftId);
+    if(s){
+      S.swaps.push({id:'sw'+Date.now()+Math.random().toString(36).slice(2,5),date,covererId,originalId,start:s.start,end:s.end,start2:s.start2||'',end2:s.end2||'',shiftId:s.id,createdAt:todayKey()});
+      const coverer=S.chatters.find(c=>c.id===covererId);
+      const original=S.chatters.find(c=>c.id===originalId);
+      toast(`✅ ${coverer?.name} vai cobrir ${original?.name} em ${date} — já aparece na escala do dia`);
+    }
+  }
+  save();
+  renderAvailWindowsPanel();
+  if(typeof renderTurno==='function'&&currentViewName()==='turno')renderTurno();
+}
+function renderAvailWindowsPanel(){
+  const panel=document.getElementById('home-availwindows-panel');
+  const el=document.getElementById('home-availwindows-content');
+  if(!panel||!el)return;
+  if(!S.chatters.length){panel.style.display='none';return;}
+  const windows=getWeekAvailableWindows();
+  if(!windows.length){panel.style.display='none';return;}
+  panel.style.display='block';
   el.innerHTML=`
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <span style="font-size:20px">🗓️</span>
-      <div>
-        <div style="font-weight:700;font-size:14px">Janelas de horário · ${dayName} (${target.slice(8,10)}/${target.slice(5,7)})</div>
-        <div style="font-size:11.5px;color:var(--text2)">48h de antecedência para dar tempo de postar</div>
-      </div>
+      <div style="font-weight:700;font-size:14px">Janelas disponíveis na semana</div>
     </div>
-
-    <div style="background:var(--ok-soft);border:1px solid rgba(23,115,80,.2);border-radius:10px;padding:11px 13px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">🔓 Modelo e horário livre nesse dia</div>
-      ${autoVagas.length?autoVagas.map(v=>`<div style="font-size:13.5px;font-weight:700;color:var(--text);padding:4px 0">${v.modelStr} · ${v.start}–${v.end} <span style="font-size:11px;color:var(--text3);font-weight:400">(${v.chatterName})</span></div>`).join(''):'<div style="font-size:12.5px;color:var(--text3)">Nenhuma folga recorrente cadastrada pra esse dia na Escala</div>'}
-    </div>
-
-    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar folga pontual (abre janela extra)</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-      ${S.chatters.map(c=>{
-        const onFolga=folgasTarget.includes(c.id);
-        return`<button onclick="toggleFolga('${c.id}','${target}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid ${onFolga?'var(--bad)':'var(--line)'};background:${onFolga?'var(--bad-soft)':'var(--bg-soft)'};cursor:pointer;font-family:var(--font-display);font-size:12.5px;font-weight:${onFolga?'700':'500'};color:${onFolga?'var(--bad)':'var(--text2)'}">
-          ${onFolga?'🏖️':''}${c.name}
-        </button>`;
-      }).join('')}
-    </div>
-    ${chattersOff.length?`
-      <div style="background:var(--bad-soft);border:1px solid rgba(180,35,52,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ Folga pontual marcada (${chattersOff.length})</div>
-        ${chattersOff.map(c=>{
-          const shifts=S.shifts.filter(s=>s.chatterId===c.id&&(s.days||[]).includes(dayKey));
-          const windows=shifts.flatMap(s=>{
-            const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
-            const modelStr=models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo definido';
-            const w=[{start:s.start,end:s.end,modelStr}];
-            if(s.start2&&s.end2)w.push({start:s.start2,end:s.end2,modelStr});
-            return w;
-          });
-          return`<div style="padding:5px 0;border-bottom:1px solid rgba(180,35,52,.15)">
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
-            ${windows.length?windows.map(w=>`<div style="font-size:12.5px;color:var(--text2);margin-top:2px">${w.modelStr} · ${w.start}–${w.end}</div>`).join(''):'<div style="font-size:11.5px;color:var(--text3);margin-top:2px">sem turno cadastrado nesse dia</div>'}
-          </div>`;
-        }).join('')}
-      </div>
-    `:''}
+    ${windows.map(w=>{
+      const d=new Date(w.date+'T12:00:00');
+      const dayShort=w.dayName.slice(0,3);
+      return`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:700;color:var(--text)">${w.modelStr} · ${w.timeStr}</div>
+          <div style="font-size:11px;color:var(--text3)">${dayShort} ${d.getDate()}/${d.getMonth()+1} · turno de ${w.originalName}</div>
+        </div>
+        <select onchange="assignWindowCover('${w.shiftId}','${w.date}','${w.originalId}',this.value)" style="max-width:130px;font-size:12px;padding:6px 8px;border-radius:8px;border:1.5px solid ${w.covererId?'var(--ok)':'var(--line)'};background:${w.covererId?'var(--ok-soft)':'var(--bg-soft)'};color:var(--text)">
+          <option value="">— cobrir —</option>
+          ${S.chatters.filter(c=>c.id!==w.originalId).map(c=>`<option value="${c.id}" ${w.covererId===c.id?'selected':''}>${c.name}</option>`).join('')}
+        </select>
+      </div>`;
+    }).join('')}
   `;
 }
 
@@ -1333,8 +1367,7 @@ function renderHome(){
   renderEscritorioPanel();
   renderUrgentPanel();
   renderSmartAlerts();
-  renderJanelaPanel();
-  renderFolgaPanel();
+  renderAvailWindowsPanel();
   renderMotivacionalHome();
   render48hAlerts();
   renderMidnightPreviewHome();
@@ -4829,76 +4862,7 @@ function saveMotivacionalGestao(){
 /* ===========================================================
    JANELA DE TURNOS — empty slots in upcoming days
    =========================================================== */
-function renderJanelaPanel(){
-  const panel=document.getElementById('home-janela-panel');
-  const list=document.getElementById('home-janela-list');
-  if(!panel||!list)return;
-  const DAY_KEYS=['dom','seg','ter','qua','qui','sex','sab'];
-  const DAY_LABEL={seg:'Seg',ter:'Ter',qua:'Qua',qui:'Qui',sex:'Sex',sab:'Sáb',dom:'Dom'};
-  const gaps=[];
 
-  for(let i=0;i<=7;i++){
-    const d=new Date();d.setDate(d.getDate()+i);
-    const dk=DAY_KEYS[d.getDay()];
-    const dateKey=fmt(d);
-    const dayLabel=DAY_LABEL[dk]||(i===0?'Hoje':i===1?'Amanhã':dk);
-    const prefix=i===0?'Hoje':i===1?'Amanhã':dayLabel+' '+d.getDate()+'/'+(d.getMonth()+1);
-
-    // 1. Models with no shift coverage on this day
-    S.models.forEach(m=>{
-      const covered=S.shifts.some(s=>
-        (s.days||[]).includes(dk)&&
-        (s.modelIds||[]).includes(m.id)&&
-        s.chatterId&&
-        !(S.folgas[dateKey]||[]).includes(s.chatterId)
-      );
-      if(!covered) gaps.push({type:'nocoverage',prefix,dateKey,dk,model:m,label:`${m.emoji||'🧩'} ${m.name} sem cobertura`});
-    });
-
-    // 2. Folgas that create open shift slots (chatter on folga = their shift is open)
-    S.shifts.filter(s=>(s.days||[]).includes(dk)&&s.chatterId).forEach(s=>{
-      // Check if this chatter has folgaDia matching this day OR manual folga registered
-      const isFolgaDia=s.folgaDia===dk||s.folgaDia2===dk;
-      const isManualFolga=(S.folgas[dateKey]||[]).includes(s.chatterId);
-      if(!isFolgaDia&&!isManualFolga)return;
-      const c=S.chatters.find(ch=>ch.id===s.chatterId);
-      if(!c)return;
-      const models=((s.modelIds||[])).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
-      const timeStr=`${s.start}–${s.end}${s.start2&&s.end2?` · ${s.start2}–${s.end2}`:''}`;
-      gaps.push({
-        type:'folga',prefix,dateKey,dk,
-        chatterId:c.id,chatterName:c.name,
-        timeStr,models,shiftId:s.id,
-        label:`${c.name} de folga — ${timeStr} (${models.map(m=>m.name).join('/')||'turno aberto'})`
-      });
-    });
-  }
-
-  if(!gaps.length){panel.style.display='none';return;}
-  panel.style.display='block';
-
-  list.innerHTML=gaps.slice(0,8).map(g=>{
-    if(g.type==='nocoverage'){
-      return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
-        <span style="font-size:15px">⚠️</span>
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:13px">${g.model.emoji||'🧩'} ${g.model.name}</div>
-          <div style="font-size:11.5px;color:var(--bad)">${g.prefix} — sem cobertura</div>
-        </div>
-      </div>`;
-    }
-    // folga type — show open slot with model context
-    const modStr=g.models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo';
-    return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
-      <span style="font-size:15px">🏖️</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:13px">${g.chatterName} <span style="font-size:10.5px;color:var(--bad);font-weight:400">de folga</span></div>
-        <div style="font-size:11.5px;color:var(--text2)">${g.prefix} · <span style="font-family:var(--font-mono);color:var(--warn)">${g.timeStr}</span> · ${modStr}</div>
-      </div>
-      <button class="btn btn-ghost btn-xs" onclick="navTo('extra')">⚡ escalar</button>
-    </div>`;
-  }).join('');
-}
 
 /* ===========================================================
    48H DEADLINE ALERTS for demandas in home panel
@@ -5291,6 +5255,7 @@ function renderEvolucao(){
     // Aggregate analytics
     let ticketSum=0,vphSum=0,highSum=0,maxGap=0,days=0,totalV=0,extraV=0,totalVendas=0;
     const allSaleTimes=[]; // all sale times in minutes for peak hour
+    const hourHistTotal=new Array(24).fill(0); // soma dos resumos de dias antigos (já sem detalhe bruto)
     wkeys.forEach(dk=>{
       const a=analytics[dk];
       totalV+=a.chatterTotal||0; extraV+=a.extraTotal||0;
@@ -5298,20 +5263,23 @@ function renderEvolucao(){
       if(a.ticketMedio>0){ticketSum+=a.ticketMedio;vphSum+=a.vendasPorHora||0;highSum+=a.highTicketPct||0;days++;}
       if((a.maxGapMin||0)>maxGap)maxGap=a.maxGapMin||0;
       if(a.saleTimes)a.saleTimes.forEach(t=>allSaleTimes.push(t));
+      else if(a.hourHistogram)a.hourHistogram.forEach((n,h)=>hourHistTotal[h]+=n);
     });
     const avgTicket=days>0?ticketSum/days:0;
     const avgVph=days>0?Math.round(vphSum/days*100)/100:0;
     const avgHigh=days>0?Math.round(highSum/days):0;
     teamTotal+=rev; if(days>0){teamDays++;teamTicketSum+=avgTicket;teamVphSum+=avgVph;teamHighSum+=avgHigh;}
 
-    // Peak hour calculation — find hour with most sales
+    // Peak hour calculation — find hour with most sales (detalhe bruto e/ou resumo)
     let peakHour=null;
-    if(allSaleTimes.length>=3){
-      const hourCount={};
-      allSaleTimes.forEach(mins=>{
-        const h=Math.floor(mins/60)%24;
-        hourCount[h]=(hourCount[h]||0)+1;
-      });
+    const hourCount={};
+    allSaleTimes.forEach(mins=>{
+      const h=Math.floor(mins/60)%24;
+      hourCount[h]=(hourCount[h]||0)+1;
+    });
+    hourHistTotal.forEach((n,h)=>{if(n>0)hourCount[h]=(hourCount[h]||0)+n;});
+    const totalSampled=allSaleTimes.length+hourHistTotal.reduce((s,n)=>s+n,0);
+    if(totalSampled>=3){
       const topH=Object.entries(hourCount).sort((a,b)=>b[1]-a[1])[0];
       if(topH)peakHour=`${String(topH[0]).padStart(2,'0')}h–${String((parseInt(topH[0])+1)%24).padStart(2,'0')}h`;
     }
