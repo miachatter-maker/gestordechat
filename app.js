@@ -3648,7 +3648,7 @@ function parseTeamReportsCore(forceExtra){
     } else if(/^nome:/i.test(line)&&current){
       current.name=line.replace(/^nome:\s*/i,'').trim();
     } else if(current){
-      const isModelLine=/^[A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕ\s0-9]+$/.test(line)&&line.length>3&&!line.includes('R$')&&!/^\d/.test(line)&&line===line.toUpperCase();
+      const isModelLine=/^[A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕ\s0-9-]+$/.test(line)&&line.length>3&&!line.includes('R$')&&!/^\d/.test(line)&&line===line.toUpperCase();
       if(isModelLine){
         // If current model has NO sales/shift yet, it might be a continuation of the model name
         // e.g. "ARRUDA" then "PRIVACY FREE" = one model "ARRUDA PRIVACY FREE"
@@ -5975,20 +5975,11 @@ function gerarRelatorios(){
   const dataVal=document.getElementById('ger-data')?.value;
   const canal=(document.getElementById('ger-canal')?.value.trim()||'PRIVACY FREE').toUpperCase();
   const meu=(S.geradorMeu||[]).filter(c=>c.name);
-  const ext=(S.geradorExt||[]).filter(c=>c.name);
   const elite=(S.geradorElite||[]).filter(c=>c.name);
-  if(!meu.length&&!ext.length&&!elite.length){
+  if(!meu.length&&!elite.length){
     out.innerHTML='<div class="panel" style="color:var(--text3);font-size:13px">Adicione chatters antes de gerar</div>';return;
   }
   const dateStr=dataVal?dataVal.split('-').reverse().join('/'):'--/--/----';
-
-  // Collect ext hours per model to exclude from meu reports
-  const extTimes={};
-  ext.forEach(c=>{
-    const sales=gerSalesFor(c,null)||[];
-    if(!extTimes[c.model])extTimes[c.model]=new Set();
-    sales.forEach(s=>extTimes[c.model].add(s.hora));
-  });
 
   // Collect elite sale hours per model to subtract from meu
   const eliteTimes={};
@@ -6001,15 +5992,12 @@ function gerarRelatorios(){
   let html='';
   const allTexts=[];
 
-  const renderGroup=(list,title,useExcl,useEliteExcl)=>{
+  const renderGroup=(list,title,useEliteExcl)=>{
     if(!list.length)return;
     html+=`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 8px">${title}</div>`;
     list.forEach((c,idx)=>{
-      const excl=new Set([
-        ...(useExcl?(extTimes[c.model]||[]):[]),
-        ...(useEliteExcl?(eliteTimes[c.model]||[]):[])
-      ]);
-      const r=gerBuildText(c,dateStr,canal,excl.size?excl:null);
+      const excl=useEliteExcl?(eliteTimes[c.model]||null):null;
+      const r=gerBuildText(c,dateStr,canal,excl&&excl.size?excl:null);
       if(r.warn){
         html+=`<div class="panel" style="border-color:var(--warn);padding:10px 14px;font-size:12.5px"><strong>${c.name}</strong> — ⚠️ ${r.warn}</div>`;
         return;
@@ -6074,8 +6062,7 @@ function gerarRelatorios(){
   }
 
   window._gerAllTexts=allTexts.join('\n\n');
-  renderGroup(meu,'👥 Meu time',true,true);
-  renderGroup(ext,'🌐 Time externo',false,false);
+  renderGroup(meu,'👥 Meu time',true);
 
   if(allTexts.length){
     html+=`<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -6137,11 +6124,6 @@ function gerAddChatterMeu(){
 function gerAddMeu(){
   gerAddChatterMeu();
 }
-function gerAddChatterExt(){
-  S.geradorExt.push({name:'',model:S.models[0]?.name.toUpperCase()||'',intervals:[{s:'',e:'',extra:false}]});
-  save();renderGerExtCards();
-}
-function gerAddExt(){ gerAddChatterExt(); }
 
 // Interpret entire Discord log at once → populate meu time cards
 function gerInterpretar(){
@@ -6237,7 +6219,6 @@ function renderGerador(){
   const dt=document.getElementById('ger-data');
   if(dt&&!dt.value)dt.value=todayKey();
   renderGerMeuCards();
-  renderGerExtCards();
 }
 
 function renderGerMeuCards(){
@@ -6324,37 +6305,6 @@ function gerParseDiscord(txt){
   }
   if(pending)intervals.push(pending); // open-ended
   return intervals;
-}
-
-function renderGerExtCards(){
-  const el=document.getElementById('ger-ext-cards');
-  if(!el)return;
-  const list=S.geradorExt||[];
-  if(!list.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:4px 0">Clique em + chatter para adicionar</div>';return;}
-  el.innerHTML=list.map((c,ci)=>`
-    <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <input class="finput" style="flex:2" placeholder="Nome" value="${c.name||''}"
-          onblur="S.geradorExt[${ci}].name=this.value;save();">
-        <select class="fselect" style="flex:1" onchange="S.geradorExt[${ci}].model=this.value;save();">
-          ${S.models.map(m=>`<option value="${m.name.toUpperCase()}" ${(c.model||'')===(m.name.toUpperCase())?'selected':''}>${m.name}</option>`).join('')}
-        </select>
-        <button onclick="S.geradorExt.splice(${ci},1);save();renderGerExtCards();"
-          style="background:none;border:none;color:var(--bad);cursor:pointer;font-size:16px">✕</button>
-      </div>
-      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:4px">⏱ Horários trabalhados</div>
-      ${(c.intervals||[]).map((iv,ii)=>`
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
-          <input class="finput" style="width:82px;font-family:var(--font-mono)" placeholder="início" value="${iv.s||''}"
-            onblur="S.geradorExt[${ci}].intervals[${ii}].s=this.value;save();">
-          <span style="color:var(--text3);font-size:12px">às</span>
-          <input class="finput" style="width:82px;font-family:var(--font-mono)" placeholder="fim" value="${iv.e||''}"
-            onblur="S.geradorExt[${ci}].intervals[${ii}].e=this.value;save();">
-          <button onclick="S.geradorExt[${ci}].intervals.splice(${ii},1);save();renderGerExtCards();"
-            style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
-        </div>`).join('')}
-      <button class="btn btn-ghost btn-xs" onclick="S.geradorExt[${ci}].intervals.push({s:'',e:'',extra:false});save();renderGerExtCards();">+ horário</button>
-    </div>`).join('');
 }
 
 /* ===========================================================
