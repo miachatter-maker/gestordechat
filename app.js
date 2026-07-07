@@ -291,6 +291,7 @@ function listenToFirestore(connectTimeout){
           fbSyncStatus='online';updateSyncBadge();
           return;
         }
+        let needsInitialPush=false;
         if(doc.exists){
           const remote=doc.data();
           if(remote&&remote.payload){
@@ -307,14 +308,20 @@ function listenToFirestore(connectTimeout){
               scheduleRerenderAfterSync();
             }catch(e){console.error('Erro ao processar snapshot '+docId,e);}
           }
-        } else if(!fbDocsSeen.has(docId)){
-          // Documento novo (ex: primeira vez rodando com sharding, ou
-          // primeiro uso do app) — cria a partir do S atual (já carregado
-          // do localStorage antes do Firebase conectar)
-          pushToFirestore();
+        } else {
+          needsInitialPush=true; // documento ainda não existe (ex: primeiro uso, ou fatia nova do sharding)
         }
+        // IMPORTANTE: marca como "visto" ANTES de decidir qualquer coisa.
+        // Nunca cria/sobrescreve um documento baseado só no estado local
+        // até termos confirmado o que já existe em TODOS os documentos —
+        // isso evita que um envio precoce (antes da sincronização inicial
+        // terminar) apague dados reais que só existiam no Firestore.
         fbDocsSeen.add(docId);
-        if(fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length)fbHasReceivedFirstSnapshot=true;
+        const wasAllSeenBefore=fbHasReceivedFirstSnapshot;
+        const allSeen=fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length;
+        if(allSeen)fbHasReceivedFirstSnapshot=true;
+        if(needsInitialPush&&allSeen)pushToFirestore();
+        else if(allSeen&&!wasAllSeenBefore)pushToFirestore(); // sincronização inicial completa agora — envia qualquer mudança que ficou represada esperando
         fbSyncStatus='online';
         updateSyncBadge();
         runAutoBackupIfNeeded();
@@ -331,6 +338,14 @@ function listenToFirestore(connectTimeout){
 let lastSizeWarningAt=0;
 function pushToFirestore(){
   if(!fbDb||!fbReady)return;
+  if(fbDocsSeen.size<ALL_SYNC_DOC_IDS.length){
+    // Ainda não confirmamos o que já existe em TODOS os documentos —
+    // nunca escreve nada antes disso, pra nunca sobrescrever dados reais
+    // com um estado local que ainda não incorporou o que está no Firestore.
+    // A próxima ação do usuário (ou o fim da sincronização inicial) vai
+    // disparar um novo save() e tentar de novo.
+    return;
+  }
   const core={};
   Object.keys(S).forEach(k=>{if(!SHARD_FIELDS.includes(k))core[k]=S[k];});
   const jobs=[{id:FIREBASE_DOC_ID,data:core}];
@@ -5349,6 +5364,7 @@ function getFichaAndDiagnosisInsights(chatterId){
   const insights=[];
   const f=S.chatterFichas[chatterId];
   if(f){
+    if(f.evolucaoNotes)insights.push(`Observação do gestor: ${f.evolucaoNotes}`);
     if(f.risk?.riscos)insights.push(`Risco observado na ficha: ${f.risk.riscos}`);
     if(f.potential?.proximos)insights.push(`Próximo passo (ficha): ${f.potential.proximos}`);
     else if(f.tech?.evolucao)insights.push(`Evolução observada na ficha: ${f.tech.evolucao}`);
@@ -5378,6 +5394,8 @@ function suggestTrainingText(chatterId){
   if(insights.length)parts.push(...insights.slice(0,2));
   return parts.join(' · ');
 }
+    // Data-driven personalized recommendations
+    const recs=[];
     if(peakHour)recs.push(`Rende mais entre <strong>${peakHour}</strong> — concentre os leads quentes e ofertas nesse horário`);
     if(bestDay&&worstDay&&bestDay!==worstDay){
       const diff=analytics[bestDay].chatterTotal-analytics[worstDay].chatterTotal;
@@ -5442,6 +5460,7 @@ function suggestTrainingText(chatterId){
       <div style="background:var(--bg-soft);border-radius:8px;padding:10px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">💡 ONDE MELHORAR</div>
         ${recs.map(r=>`<div style="font-size:12.5px;color:var(--text);padding:3px 0;border-bottom:1px solid var(--line)">• ${r}</div>`).join('')}
+        <textarea class="ftext" style="min-height:44px;font-size:12.5px;background:#fff;margin-top:8px" placeholder="Adicione ou corrija algo sobre ${c.name}..." onblur="saveEvolucaoNote('${c.id}',this.value)">${S.chatterFichas[c.id]?.evolucaoNotes||''}</textarea>
       </div>
       ${(()=>{
         // Diagnostic square — latest ChatLab analysis
@@ -5946,6 +5965,11 @@ async function rodarChatLab(){
    =========================================================== */
 function saveChatterTraining(cid,val){
   S.chatterTraining[cid]=val;
+  save();
+}
+function saveEvolucaoNote(cid,val){
+  if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[cid].evolucaoNotes=val;
   save();
 }
 function sendTrainingToWeek(cid){
