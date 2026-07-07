@@ -22,6 +22,7 @@ function migrateState(s){
   if(!s.horaExtraSlots)s.horaExtraSlots={};
   if(!s.swaps)s.swaps=[];
   if(!s.morningRoutine)s.morningRoutine=[];
+  if(!s.morningRoutineDone)s.morningRoutineDone={}; // dateKey -> [itemId,...] — feito/dia (campo próprio, seguro para salvar)
   if(!s.problemsToday||!Array.isArray(s.problemsToday))s.problemsToday=[];
   if(!s.demandas)s.demandas={};
   if(!s.trainings)s.trainings=[];
@@ -234,10 +235,20 @@ function listenToFirestore(connectTimeout){
   );
 }
 
+let lastSizeWarningAt=0;
 function pushToFirestore(){
   if(!fbDb||!fbReady)return;
+  const payload=JSON.stringify(S);
+  // O Firestore tem limite de ~1MB por documento. Como todo o app guarda
+  // tudo num único documento, avisamos ANTES de estourar — não só quando
+  // já falhou — para dar tempo de agir (ex: remover fotos grandes).
+  const sizeKB=Math.round(payload.length/1024);
+  if(sizeKB>850&&Date.now()-lastSizeWarningAt>60000){
+    lastSizeWarningAt=Date.now();
+    toast(`⚠️ Dados ocupando ${sizeKB}KB de ~1024KB permitidos no Firestore — se passar do limite, a sincronização para de funcionar. Fale comigo se precisar liberar espaço.`,8000);
+  }
   fbDb.collection('gestorpro').doc(FIREBASE_DOC_ID).set({
-    payload:JSON.stringify(S),
+    payload,
     schemaVersion:SCHEMA_VERSION,
     updatedAt:firebase.firestore.FieldValue.serverTimestamp()
   }).then(()=>{
@@ -247,6 +258,11 @@ function pushToFirestore(){
     fbSyncStatus='offline';
     fbLastErrorMessage=(err&&err.code)?`${err.code}: ${err.message||''}`:'Erro ao salvar';
     updateSyncBadge();
+    // Erro de tamanho é o mais crítico: dados deixam de sincronizar entre
+    // dispositivos até isso ser resolvido. Avisa de forma bem visível.
+    if(err&&(err.code==='invalid-argument'||/exceed|too large|longer than/i.test(err.message||''))){
+      toast('🚨 Dados grandes demais para sincronizar! Fale comigo urgente para resolver — por enquanto está tudo salvo só neste aparelho.',10000);
+    }
   });
 }
 
@@ -278,6 +294,7 @@ function currentViewName(){
   return active?active.id.replace('v-',''):'home';
 }
 
+let localSaveFailCount=0;
 function save(){
   try{
     const payload=JSON.stringify(S);
@@ -285,7 +302,15 @@ function save(){
     // Always keep a rolling backup in a separate key
     localStorage.setItem('gestorpro_backup',payload);
     localStorage.setItem('gestorpro_backup_ts',Date.now().toString());
-  }catch(e){}
+    localSaveFailCount=0;
+  }catch(e){
+    localSaveFailCount++;
+    console.error('Falha ao salvar localmente',e);
+    // Nunca falha em silêncio: avisa o usuário que o cache local não gravou.
+    // O Firestore (abaixo) é a rede de segurança nesse caso — se ele também
+    // falhar, o badge de sincronização já mostra isso separadamente.
+    toast(`⚠️ Não foi possível salvar localmente (${e.name||'erro'}) — verifique o espaço de armazenamento do navegador`,6000);
+  }
   fbIgnoreSnapshotsUntil=Date.now()+3000;
   clearTimeout(fbSaveTimer);
   fbSaveTimer=setTimeout(()=>pushToFirestore(),600);
@@ -339,6 +364,7 @@ let S={
   horaExtraSlots:{},     // weekKey -> [{...}]
   swaps:[],              // [{id, date, covererId, originalId, ...}]
   morningRoutine:[],     // [{id, text, done}] — repeats daily
+  morningRoutineDone:{}, // dateKey -> [itemId,...] — marcação diária de feito (campo próprio, JSON-safe)
   problemsToday:[],      // persistent list [{id, text, done}] — does NOT reset daily
   demandas:{},           // dateKey -> [{id, text, done}]
   trainings:[],          // [{id, title, date, days:[{day, script}]}]
@@ -434,6 +460,7 @@ function setWeekOffset(o){
   if(v==='semana')renderSemana();
   if(v==='report')renderReport_Weekly();
   if(v==='evolucao')renderEvolucao();
+  if(v==='fichas'){const sel=document.getElementById('ficha-chatter-select');if(sel&&sel.value)renderFichaChatter(sel.value);}
   renderWeekNav();
 }
 function renderWeekNav(){
@@ -884,12 +911,15 @@ function toggleMidnight(dateKey,id){
    HOME
    =========================================================== */
 /* ===========================================================
-   FOLGAS — manual day-off registrations.
-   A panel appears on the home screen after 22h showing who
-   is off tomorrow, so the manager can plan extra coverage.
+   JANELAS DE HORÁRIO — registro manual de folga com 48h de
+   antecedência, para dar tempo de postar/anunciar a vaga de
+   hora extra a tempo. Painel sempre visível na Home.
    =========================================================== */
 function getTomorrowKey(){
   const d=new Date();d.setDate(d.getDate()+1);return fmt(d);
+}
+function getWindow48hKey(){
+  const d=new Date();d.setDate(d.getDate()+2);return fmt(d);
 }
 function getFolgasForDate(dateKey){
   return(S.folgas[dateKey]||[]).map(id=>S.chatters.find(c=>c.id===id)).filter(Boolean);
@@ -902,53 +932,50 @@ function toggleFolga(chatterId,dateKey){
   save();renderFolgaPanel();
 }
 function isFolgaActive(){
-  // Show the panel from 22h of today until end of tomorrow
-  const now=new Date();
-  return now.getHours()>=22||now.getHours()<6;
+  // Painel de Janelas de horário agora fica sempre visível (48h de antecedência)
+  return true;
 }
 function renderFolgaPanel(){
   const panel=document.getElementById('home-folga-panel');
   if(!panel)return;
   const el=document.getElementById('home-folga-content');
   if(!panel||!el)return;
-  const tomorrow=getTomorrowKey();
-  const tomorrowDate=new Date();tomorrowDate.setDate(tomorrowDate.getDate()+1);
-  const dayName=DAYS[tomorrowDate.getDay()];
-  const folgasAmanha=S.folgas[tomorrow]||[];
-  // Show if it's after 22h OR if there are folgas registered for tomorrow
-  const shouldShow=isFolgaActive()||folgasAmanha.length>0;
-  if(!shouldShow||!S.chatters.length){panel.style.display='none';return;}
+  const target=getWindow48hKey();
+  const targetDate=new Date();targetDate.setDate(targetDate.getDate()+2);
+  const dayName=DAYS[targetDate.getDay()];
+  const folgasTarget=S.folgas[target]||[];
+  if(!S.chatters.length){panel.style.display='none';return;}
   panel.style.display='block';
-  const chattersOff=getFolgasForDate(tomorrow);
-  const chattersOn=S.chatters.filter(c=>!folgasAmanha.includes(c.id));
+  const chattersOff=getFolgasForDate(target);
+  const chattersOn=S.chatters.filter(c=>!folgasTarget.includes(c.id));
   el.innerHTML=`
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-      <span style="font-size:20px">🌙</span>
+      <span style="font-size:20px">🗓️</span>
       <div>
-        <div style="font-weight:700;font-size:14px">Folgas de amanhã · ${dayName}</div>
-        <div style="font-size:11.5px;color:var(--text2)">Programe as janelas de hora extra</div>
+        <div style="font-weight:700;font-size:14px">Janelas de horário · ${dayName} (${target.slice(8,10)}/${target.slice(5,7)})</div>
+        <div style="font-size:11.5px;color:var(--text2)">Defina com 48h de antecedência para dar tempo de postar</div>
       </div>
     </div>
-    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar de folga amanhã</div>
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">Marcar folga (abre janela de hora extra)</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
       ${S.chatters.map(c=>{
-        const onFolga=folgasAmanha.includes(c.id);
+        const onFolga=folgasTarget.includes(c.id);
         const color=getComputedLevelColor(c.level);
-        return`<button onclick="toggleFolga('${c.id}','${tomorrow}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid ${onFolga?'var(--bad)':'var(--line)'};background:${onFolga?'var(--bad-soft)':'var(--bg-soft)'};cursor:pointer;font-family:var(--font-display);font-size:12.5px;font-weight:${onFolga?'700':'500'};color:${onFolga?'var(--bad)':'var(--text2)'}">
+        return`<button onclick="toggleFolga('${c.id}','${target}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid ${onFolga?'var(--bad)':'var(--line)'};background:${onFolga?'var(--bad-soft)':'var(--bg-soft)'};cursor:pointer;font-family:var(--font-display);font-size:12.5px;font-weight:${onFolga?'700':'500'};color:${onFolga?'var(--bad)':'var(--text2)'}">
           ${onFolga?'🏖️':''}${c.name}
         </button>`;
       }).join('')}
     </div>
     ${chattersOff.length?`
       <div style="background:var(--bad-soft);border:1px solid rgba(180,35,52,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ De folga amanhã (${chattersOff.length})</div>
+        <div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">⛱ Janela aberta em ${dayName} (${chattersOff.length})</div>
         ${chattersOff.map(c=>`<div style="font-size:13px;font-weight:600;color:var(--text);padding:3px 0">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>`).join('')}
       </div>
       ${chattersOn.length?`<div style="margin-top:9px;background:var(--ok-soft);border:1px solid rgba(23,115,80,.2);border-radius:10px;padding:11px 13px">
-        <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">✅ Disponíveis amanhã (${chattersOn.length})</div>
+        <div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">✅ Escalados normalmente (${chattersOn.length})</div>
         ${chattersOn.map(c=>`<div style="font-size:13px;font-weight:600;color:var(--text);padding:3px 0">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>`).join('')}
       </div>`:''}
-    `:'<div style="font-size:12.5px;color:var(--text3);text-align:center;padding:8px 0">Nenhuma folga marcada para amanhã</div>'}
+    `:'<div style="font-size:12.5px;color:var(--text3);text-align:center;padding:8px 0">Nenhuma janela de horário aberta ainda para essa data — marque acima com 48h de antecedência</div>'}
   `;
 }
 
@@ -1271,6 +1298,7 @@ function renderHome(){
   renderUrgentPanel();
   renderSmartAlerts();
   renderJanelaPanel();
+  renderFolgaPanel();
   renderMotivacionalHome();
   render48hAlerts();
   renderMidnightPreviewHome();
@@ -2409,8 +2437,9 @@ function openChatterDetail(id){
     </div>
     <div class="field"><label class="flabel">Time</label>
       <div style="display:flex;gap:8px">
-        <button id="dl-time-basico-${id}" onclick="setChatterTime('${id}','basico')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${(c.time||'basico')==='basico'?'var(--info)':'var(--line)'};background:${(c.time||'basico')==='basico'?'var(--info-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${(c.time||'basico')==='basico'?'var(--info)':'var(--text2)'}">Time Básico</button>
+        <button id="dl-time-basico-${id}" onclick="setChatterTime('${id}','basico')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${(c.time||'basico')==='basico'?'var(--info)':'var(--line)'};background:${(c.time||'basico')==='basico'?'var(--info-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${(c.time||'basico')==='basico'?'var(--info)':'var(--text2)'}">Time Base</button>
         <button id="dl-time-elite-${id}" onclick="setChatterTime('${id}','elite')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${c.time==='elite'?'var(--warn)':'var(--line)'};background:${c.time==='elite'?'var(--warn-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${c.time==='elite'?'var(--warn)':'var(--text2)'}">⭐ Elite</button>
+        <button id="dl-time-tester-${id}" onclick="setChatterTime('${id}','tester')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${c.time==='tester'?'var(--bad)':'var(--line)'};background:${c.time==='tester'?'var(--bad-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${c.time==='tester'?'var(--bad)':'var(--text2)'}">🧪 Novatos</button>
       </div>
     </div>
     <div class="field"><label class="flabel">⏰ Alarme de checagem de login</label>
@@ -3222,8 +3251,8 @@ function getWeekExtraRevenue(){
   const wkey=getWeekKey();
   return (S.horaExtraSlots[wkey]||[]).filter(x=>x.shiftId==='parsed').reduce((s,x)=>s+(parseFloat(x.revenue)||0),0);
 }
-function getChatterExtraRevenue(chatterId){
-  const wkey=getWeekKey();
+function getChatterExtraRevenue(chatterId,offset){
+  const wkey=getWeekKey(offset);
   return (S.horaExtraSlots[wkey]||[]).filter(x=>x.shiftId==='parsed'&&x.chatterId===chatterId).reduce((s,x)=>s+(parseFloat(x.revenue)||0),0);
 }
 
@@ -3695,7 +3724,7 @@ function parseTeamReportsCore(forceExtra){
       // Auto-fill ficha técnica from analytics
       const f=S.chatterFichas[chatter.id];
       // Valor/hora: 0.3=regular, 0.5=bom, 0.8=ótimo, 1+=excelente
-      const scoreLabel=n=>n>=5?'5 - Excelente':n>=4?'4 - Ótimo':n>=3?'3 - Bom':n>=2?'2 - Regular':'1 - Fraco';
+      const scoreLabel=n=>n>=5?'Excelente':n>=4?'Ótimo':n>=3?'Bom':n>=2?'Regular':'Fraco';
       const convScore=vendasPorHora>=30?5:vendasPorHora>=20?4:vendasPorHora>=10?3:vendasPorHora>=5?2:1; // R$/hora scale
       const ticketScore=ticketMedio>=150?5:ticketMedio>=80?4:ticketMedio>=40?3:ticketMedio>=20?2:1;
       f.tech.conversao=scoreLabel(convScore);
@@ -3854,8 +3883,8 @@ function renderMorningRoutine(){
   if(!el)return;
   const today=todayKey();
   // Clone routine items with today's done state
-  if(!S.problemsToday[today+'_routine'])S.problemsToday[today+'_routine']=[];
-  const doneIds=new Set(S.problemsToday[today+'_routine']);
+  if(!S.morningRoutineDone[today])S.morningRoutineDone[today]=[];
+  const doneIds=new Set(S.morningRoutineDone[today]);
   if(!S.morningRoutine.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Adicione itens da rotina abaixo</div>';return;}
   el.innerHTML=S.morningRoutine.map(item=>{
     const done=doneIds.has(item.id);
@@ -3867,10 +3896,10 @@ function renderMorningRoutine(){
   }).join('');
 }
 function toggleRoutineItem(id){
-  const today=todayKey();const key=today+'_routine';
-  if(!S.problemsToday[key])S.problemsToday[key]=[];
-  const idx=S.problemsToday[key].indexOf(id);
-  if(idx===-1)S.problemsToday[key].push(id);else S.problemsToday[key].splice(idx,1);
+  const today=todayKey();
+  if(!S.morningRoutineDone[today])S.morningRoutineDone[today]=[];
+  const idx=S.morningRoutineDone[today].indexOf(id);
+  if(idx===-1)S.morningRoutineDone[today].push(id);else S.morningRoutineDone[today].splice(idx,1);
   save();renderMorningRoutine();
 }
 function addMorningRoutine(){
@@ -4121,13 +4150,14 @@ function setChatterTime(chatterId,time){
   if(basicoBtn){basicoBtn.style.borderColor=time==='basico'?'var(--info)':'var(--line)';basicoBtn.style.background=time==='basico'?'var(--info-soft)':'transparent';basicoBtn.style.color=time==='basico'?'var(--info)':'var(--text2)';}
   if(eliteBtn){eliteBtn.style.borderColor=time==='elite'?'var(--warn)':'var(--line)';eliteBtn.style.background=time==='elite'?'var(--warn-soft)':'transparent';eliteBtn.style.color=time==='elite'?'var(--warn)':'var(--text2)';}
   if(testerBtn){testerBtn.style.borderColor=time==='tester'?'var(--bad)':'var(--line)';testerBtn.style.background=time==='tester'?'var(--bad-soft)':'transparent';testerBtn.style.color=time==='tester'?'var(--bad)':'var(--text2)';}
-  toast(`✅ ${c.name} → ${time==='elite'?'⭐ Elite':time==='tester'?'🧪 Tester':'Time Básico'}`);
+  toast(`✅ ${c.name} → ${time==='elite'?'⭐ Elite':time==='tester'?'🧪 Novatos':'Time Base'}`);
   renderTeam(teamFilter);
 }
 
 
 
 function renderFichas(){
+  renderWeekNav();
   const sel=document.getElementById('ficha-chatter-select');
   if(!sel)return;
   if(!S.chatters.length){
@@ -4136,6 +4166,73 @@ function renderFichas(){
   }
   sel.innerHTML=S.chatters.filter(c=>c.time!=='tester').map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   renderFichaChatter(sel.value);
+}
+// Cruza os dados semanais (faturamento/ticket/valor-hora) e os snapshots de
+// ficha para descrever, em texto, como foi a evolução do chatter — sempre
+// respeitando a semana selecionada no navegador de semana (weekOffset).
+function renderFichaCruzamento(chatterId){
+  const f=S.chatterFichas[chatterId]||{};
+  const analytics=f.analytics?.weeklyData||{};
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  if(!c)return'';
+  const weekGroups={};
+  Object.keys(analytics).forEach(dk=>{
+    const d=new Date(dk+'T12:00:00');
+    const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());
+    const wk=fmt(sun);
+    if(!weekGroups[wk])weekGroups[wk]={rev:0,tickets:[],vphs:[]};
+    const a=analytics[dk];
+    weekGroups[wk].rev+=a.chatterTotal||0;
+    if(a.ticketMedio>0){weekGroups[wk].tickets.push(a.ticketMedio);weekGroups[wk].vphs.push(a.vendasPorHora||0);}
+  });
+  const weekKeysSorted=Object.keys(weekGroups).sort();
+  if(!weekKeysSorted.length){
+    return`<div class="panel" style="margin-top:14px;border:2px solid var(--info)">
+      <div class="panel-head"><div class="panel-title">🔎 Evolução — cruzamento semanal</div></div>
+      <div style="font-size:12.5px;color:var(--text3)">Ainda não há dados semanais suficientes para cruzar. Continue processando relatórios e salvando snapshots.</div>
+    </div>`;
+  }
+  const avg=arr=>arr.length?arr.reduce((s,v)=>s+v,0)/arr.length:0;
+  const curWk=getWeekKey(); // respeita a semana selecionada no topo
+  const curIdx=weekKeysSorted.indexOf(curWk);
+  const effIdx=curIdx!==-1?curIdx:weekKeysSorted.length-1;
+  const thisWeek=weekGroups[weekKeysSorted[effIdx]];
+  const prevWeek=effIdx>0?weekGroups[weekKeysSorted[effIdx-1]]:null;
+
+  let narrative;
+  if(!prevWeek){
+    narrative=`Essa é a primeira semana com dados registrados para ${c.name.split(' ')[0]} — ainda não há semana anterior para comparar a evolução.`;
+  } else {
+    const revDiff=prevWeek.rev>0?Math.round((thisWeek.rev-prevWeek.rev)/prevWeek.rev*100):null;
+    const ticketDiff=avg(prevWeek.tickets)>0?Math.round((avg(thisWeek.tickets)-avg(prevWeek.tickets))/avg(prevWeek.tickets)*100):null;
+    const vphDiff=avg(prevWeek.vphs)>0?Math.round((avg(thisWeek.vphs)-avg(prevWeek.vphs))/avg(prevWeek.vphs)*100):null;
+    const parts=[];
+    if(revDiff!==null)parts.push(revDiff>=10?`o faturamento melhorou bastante (${money(thisWeek.rev)} contra ${money(prevWeek.rev)} da semana anterior)`:revDiff>=0?`o faturamento ficou estável, com leve alta (${money(thisWeek.rev)})`:revDiff>=-15?`o faturamento caiu um pouco (${money(thisWeek.rev)} contra ${money(prevWeek.rev)})`:`o faturamento caiu bastante (${money(thisWeek.rev)} contra ${money(prevWeek.rev)}) — vale uma conversa`);
+    if(ticketDiff!==null)parts.push(ticketDiff>=10?'o ticket médio subiu de forma consistente':ticketDiff>=-10?'o ticket médio ficou estável':'o ticket médio caiu — vale reforçar a técnica de venda de valor mais alto');
+    if(vphDiff!==null)parts.push(vphDiff>=10?'o valor por hora melhorou':vphDiff>=-10?'o valor por hora ficou parecido':'o valor por hora caiu — pode ser volume de leads ou abordagem');
+    narrative=parts.length?`Cruzando as fichas semanais: ${parts.join('; ')}.`:'Ainda não há métricas suficientes nas duas semanas para uma comparação completa.';
+  }
+
+  // Cruzamento qualitativo — compara o snapshot mais antigo com o mais recente
+  const hist=[...(f.history||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  let qualNote='';
+  if(hist.length>=2){
+    const first=hist[0],last=hist[hist.length-1];
+    const changed=[];
+    ['tech','behavior'].forEach(store=>{
+      Object.keys(last[store]||{}).forEach(k=>{
+        const beforeVal=first[store]?.[k];
+        const afterVal=last[store]?.[k];
+        if(beforeVal&&afterVal&&beforeVal!==afterVal)changed.push(`${k} passou de "${beforeVal}" para "${afterVal}"`);
+      });
+    });
+    qualNote=changed.length?` Nas fichas registradas, ${changed.slice(0,3).join('; ')}.`:'';
+  }
+
+  return`<div class="panel" style="margin-top:14px;border:2px solid var(--info)">
+    <div class="panel-head"><div class="panel-title">🔎 Evolução — cruzamento semanal</div></div>
+    <div style="font-size:13px;color:var(--text);line-height:1.6">${narrative}${qualNote}</div>
+  </div>`;
 }
 function renderFichaChatter(chatterId){
   const el=document.getElementById('ficha-content');if(!el)return;
@@ -4219,6 +4316,8 @@ function renderFichaChatter(chatterId){
           ${Object.entries(snap).filter(([k])=>k!=='date').map(([k,v])=>v?`<div style="margin-bottom:4px"><span style="font-size:10.5px;font-weight:700;color:var(--text3)">${k.toUpperCase()}</span><div style="font-size:12.5px;color:var(--text2)">${v}</div></div>`:'').join('')}
         </div>`).join('')}
     </div>`:''}
+
+    ${renderFichaCruzamento(chatterId)}
   `;
 }
 function formatFichaSnapshot(snap){
@@ -4456,8 +4555,32 @@ function getTodayTotalRevenue(){
   return t;
 }
 // Revenue for META calculation — EXCLUDES hora extra (extra doesn't count toward goal)
-function getChatterWeekRevenue(id){
-  let t=0;getWeekDates().forEach(d=>S.models.forEach(m=>{t+=parseFloat(S.revenues[`${id}_${m.id}_${fmt(d)}`])||0;}));
+// Estimativa automática do valor em R$ de vendas high-ticket na semana,
+// a partir do % médio de high-ticket já calculado pelos relatórios processados.
+function getChatterWeekHighTicket(chatterId,offset){
+  const f=S.chatterFichas[chatterId];
+  const analytics=f?.analytics?.weeklyData||{};
+  const wd=getWeekDates(offset);
+  let htPctSum=0,days=0,weekRev=0;
+  wd.forEach(d=>{
+    const dk=fmt(d);
+    const a=analytics[dk];
+    S.models.forEach(m=>{weekRev+=parseFloat(S.revenues[`${chatterId}_${m.id}_${dk}`])||0;});
+    if(a&&a.ticketMedio>0){htPctSum+=a.highTicketPct||0;days++;}
+  });
+  const avgHtPct=days>0?htPctSum/days:0;
+  return{avgHtPct:Math.round(avgHtPct),htTotal:weekRev*(avgHtPct/100)};
+}
+// Medalha automática — baseada no % da meta semanal batida (mesmos degraus do prêmio)
+function autoMedalForPct(pct){
+  if(pct>=130)return 4; // 💎 Diamante
+  if(pct>=100)return 3; // 🥇 Ouro
+  if(pct>=85)return 2;  // 🥈 Prata
+  if(pct>=70)return 1;  // 🥉 Bronze
+  return 0;             // Sem medalha
+}
+function getChatterWeekRevenue(id,offset){
+  let t=0;getWeekDates(offset).forEach(d=>S.models.forEach(m=>{t+=parseFloat(S.revenues[`${id}_${m.id}_${fmt(d)}`])||0;}));
   return t;
 }
 // Revenue for DISPLAY — INCLUDES hora extra
@@ -4566,10 +4689,28 @@ function loadManagerPhoto(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
   reader.onload=e=>{
-    const preview=document.getElementById('mgr-photo-preview');
-    if(preview)preview.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
-    if(!S.managerProfile)S.managerProfile={};
-    S.managerProfile.photoUrl=e.target.result;
+    // Redimensiona e comprime antes de salvar — uma foto de celular sem
+    // compressão pode passar de 1MB sozinha e travar a sincronização de
+    // TODOS os dados no Firestore (o app guarda tudo em um único documento
+    // com limite de 1MB). Limitando a 240px + JPEG 0.7 fica bem abaixo disso.
+    const img=new Image();
+    img.onload=()=>{
+      const maxDim=240;
+      const scale=Math.min(1,maxDim/Math.max(img.width,img.height));
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.round(img.width*scale);
+      canvas.height=Math.round(img.height*scale);
+      const ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      const compressed=canvas.toDataURL('image/jpeg',0.7);
+      const preview=document.getElementById('mgr-photo-preview');
+      if(preview)preview.innerHTML=`<img src="${compressed}" style="width:100%;height:100%;object-fit:cover">`;
+      if(!S.managerProfile)S.managerProfile={};
+      S.managerProfile.photoUrl=compressed;
+      toast(`📷 Foto otimizada (${Math.round(compressed.length/1024)}KB)`);
+    };
+    img.onerror=()=>toast('⚠️ Não foi possível processar essa imagem');
+    img.src=e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -4783,6 +4924,7 @@ function saveModelRequestSplit(modelId){
    =========================================================== */
 const CHAT_METRICS=['conexao','conducao','engajamento','conversao','resposta','naturalidade'];
 const CHAT_METRIC_LABELS={conexao:'Conexão',conducao:'Condução',engajamento:'Engajamento',conversao:'Conversão',resposta:'Resposta',naturalidade:'Naturalidade'};
+const SCORE_WORD={1:'Fraco',2:'Regular',3:'Bom',4:'Ótimo',5:'Excelente'};
 
 function openChatAnalysis(){
   if(!S.chatters.length){toast('⚠️ Cadastre chatters primeiro');return;}
@@ -4837,10 +4979,9 @@ function updateFichaFromAnalysis(chatterId){
   const avg=key=>Math.round(allAnalyses.reduce((s,a)=>s+(a[key]||0),0)/allAnalyses.length);
   // Map to ficha fields
   const scores={conversao:avg('conversao'),resposta:avg('resposta'),evolucao:avg('engajamento')};
-  const labels={1:'1 - Fraco',2:'2 - Regular',3:'3 - Bom',4:'4 - Ótimo',5:'5 - Excelente'};
-  Object.entries(scores).forEach(([k,v])=>{if(v>0)f.tech[k]=labels[v]||String(v);});
+  Object.entries(scores).forEach(([k,v])=>{if(v>0)f.tech[k]=SCORE_WORD[v]||String(v);});
   const behavScores={intensidade:avg('conexao'),comunicacao:avg('conducao'),energia:avg('naturalidade')};
-  Object.entries(behavScores).forEach(([k,v])=>{if(v>0)f.behavior[k]=labels[v]||String(v);});
+  Object.entries(behavScores).forEach(([k,v])=>{if(v>0)f.behavior[k]=SCORE_WORD[v]||String(v);});
 }
 function renderChatAnalysisList(){
   const el=document.getElementById('chat-analysis-list');
@@ -4866,7 +5007,7 @@ function renderChatAnalysisList(){
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px">
         ${CHAT_METRICS.map(m=>`<div style="text-align:center;background:var(--bg);border-radius:7px;padding:5px 3px">
           <div style="font-size:9px;color:var(--text3)">${CHAT_METRIC_LABELS[m]}</div>
-          <div style="font-size:17px;font-weight:800;color:${(a[m]||0)>=4?'var(--ok)':(a[m]||0)>=3?'var(--warn)':'var(--bad)'}">${a[m]||'—'}</div>
+          <div style="font-size:13px;font-weight:800;color:${(a[m]||0)>=4?'var(--ok)':(a[m]||0)>=3?'var(--warn)':'var(--bad)'}">${SCORE_WORD[a[m]]||'—'}</div>
         </div>`).join('')}
       </div>
       ${a.fortes?`<div style="font-size:12px;margin-bottom:4px"><strong style="color:var(--ok)">✅</strong> ${a.fortes}</div>`:''}
@@ -5169,7 +5310,7 @@ function renderEvolucao(){
         const avgM=analyses.reduce((s,a)=>s+(a[m]||0),0)/analyses.length;
         if(avgM>0&&avgM<low){low=avgM;lowM=m;}
       });
-      if(lowM&&low<4)weakestMetric={name:CHAT_METRIC_LABELS[lowM],score:Math.round(low*10)/10};
+      if(lowM&&low<4)weakestMetric={name:CHAT_METRIC_LABELS[lowM],score:SCORE_WORD[Math.round(low)]||Math.round(low)};
     }
 
     // Data-driven personalized recommendations
@@ -5183,7 +5324,7 @@ function renderEvolucao(){
     if(avgVph>0&&avgVph<10)recs.push(`${money(avgVph)}/hora está abaixo do mínimo (R$10/h) — revisar abordagem ou volume de leads`);
     else if(avgVph>=10&&avgVph<20)recs.push(`${money(avgVph)}/hora é regular — meta: chegar a R$20/h aumentando conversão nos horários fortes`);
     if(maxGap>90)recs.push(`Ficou <strong>${maxGap}min sem vender</strong> — mapear o que aconteceu nesse intervalo (pausa? lead frio? falta de fila?)`);
-    if(weakestMetric)recs.push(`Ponto mais fraco nas análises de chat: <strong>${weakestMetric.name}</strong> (${weakestMetric.score}/5) — prioridade de treinamento`);
+    if(weakestMetric)recs.push(`Ponto mais fraco nas análises de chat: <strong>${weakestMetric.name}</strong> (${weakestMetric.score}) — prioridade de treinamento`);
     if(pct!==null&&pct<50){
       const falta=meta-getChatterWeekRevenue(c.id);
       recs.push(`${pct}% da meta — faltam ${money(falta)}; com valor/hora atual precisa de ~${avgVph>0?Math.ceil(falta/avgVph)+'h':'mais dados'} de chat focado`);
@@ -5191,7 +5332,7 @@ function renderEvolucao(){
     if(!recs.length&&rev>0)recs.push(`Desempenho sólido (${money(rev)}, ${totalVendas} vendas) — manter ritmo e testar aumento de ticket`);
     if(!recs.length)recs.push('Sem dados suficientes — processe os relatórios de vendas desta semana');
 
-    const timeLabel=c.time==='elite'?'<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>':c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Tester</span>':'';
+    const timeLabel=c.time==='elite'?'<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>':c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>':'';
 
     html+=`<div class="panel" style="margin-bottom:10px;border-left:3px solid ${pct===null?'var(--line)':pct>=80?'var(--ok)':pct>=50?'var(--warn)':'var(--bad)'}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -5231,7 +5372,7 @@ function renderEvolucao(){
           <div style="font-size:13px;font-weight:700;color:var(--accent)">${peakHour||'—'}</div>
         </div>
       </div>`:'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Processe relatórios para ver métricas</div>'}
-      ${avgScore!==null?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Análise do chat: <strong style="color:${avgScore>=4?'var(--ok)':avgScore>=3?'var(--warn)':'var(--bad)'}">${avgScore}/5</strong> (${analyses.length} análise${analyses.length>1?'s':''})</div>`:''}
+      ${avgScore!==null?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Análise do chat: <strong style="color:${avgScore>=4?'var(--ok)':avgScore>=3?'var(--warn)':'var(--bad)'}">${SCORE_WORD[Math.round(avgScore)]||avgScore}</strong> (${analyses.length} análise${analyses.length>1?'s':''})</div>`:''}
       <div style="background:var(--bg-soft);border-radius:8px;padding:10px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">💡 ONDE MELHORAR</div>
         ${recs.map(r=>`<div style="font-size:12.5px;color:var(--text);padding:3px 0;border-bottom:1px solid var(--line)">• ${r}</div>`).join('')}
@@ -6460,7 +6601,7 @@ function renderTesters(){
   }
 
   if(!testers.length){
-    el.innerHTML=`<div class="empty"><div class="empty-ic">🧪</div><div class="empty-ttl">Sem testers</div><div class="empty-sub">Vá em Equipe e marque chatters como 🧪 Tester</div></div>`;
+    el.innerHTML=`<div class="empty"><div class="empty-ic">🧪</div><div class="empty-ttl">Sem novatos em teste</div><div class="empty-sub">Vá em Equipe e marque chatters como 🧪 Novatos</div></div>`;
     return;
   }
 
@@ -6749,10 +6890,14 @@ function calcChatterPagamento(fat, medalha, cat, htTotal, extraFat){
   const htBonus=(htTotal||0)*0.08;
   const extraBonus=(extraFat||0)*0.10;
   const total=comissao+premio+htBonus+extraBonus;
+  // O "piso" é só uma referência informativa (mínimo garantido pela empresa,
+  // política salarial separada) — NÃO soma nem substitui o valor calculado.
+  // O que é efetivamente pago vem SEMPRE só do resultado da própria pessoa:
+  // comissão sobre o faturamento + prêmio de meta + bônus de high ticket/hora extra.
   const piso=PAG_PISO[medalha]||1000;
   const pisoComp=Math.max(0,piso-total);
 
-  return{comissao,premio,htBonus,extraBonus,total,piso,pisoComp,totalComPiso:Math.max(total,piso)};
+  return{comissao,premio,htBonus,extraBonus,total,piso,pisoComp,totalComPiso:total};
 }
 
 function pagSwitchTab(tab){
@@ -6783,7 +6928,7 @@ function renderPagamento(){
   renderPagChattersAll();
   // Gerente chatters config
   renderGerChattersConfig();
-  renderPagPreview();
+  renderGerPreview();
 }
 
 function renderPagChattersAll(){
@@ -6791,62 +6936,62 @@ function renderPagChattersAll(){
   if(!el)return;
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   if(!chatters.length){el.innerHTML='';return;}
-  const wkey=getWeekKey();
-  const wd=getWeekDates();
+  const wkey=getWeekKey(0); // Pagamento é sempre a semana atual, nunca segue a navegação de outras abas
 
   el.innerHTML=`<div class="panel">
-    <div class="panel-head"><div class="panel-title">📋 Todos os chatters — semana atual</div><div class="panel-note">Edite faturamento, medalha e categoria para recalcular</div></div>
+    <div class="panel-head"><div class="panel-title">📋 Todos os chatters — semana atual</div><div class="panel-note">Faturamento, medalha, high ticket e "falta pra meta" são automáticos. Só escolha a categoria.</div></div>
     ${chatters.map(c=>{
-      // Get real week revenue
-      const weekRev=getChatterWeekRevenue(c.id);
-      const weekExtra=getChatterExtraRevenue(c.id);
-      // Get stored medal (from ficha or default)
-      const medal=parseInt(S.chatterFichas?.[c.id]?.medal||0);
-      // Get stored category (from goals)
+      // Tudo automático a partir dos dados reais — sempre semana atual (offset 0)
+      const weekRev=getChatterWeekRevenue(c.id,0);
+      const weekExtra=getChatterExtraRevenue(c.id,0);
+      const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,0);
+      // Categoria: única escolha manual (padrão sugerido pela meta cadastrada)
       const goals=S.chatterWeekGoals[wkey]||{};
       const metaVal=parseFloat(goals[c.id])||0;
-      // Find category from meta
-      const cat=Object.entries(PAG_CATS).find(([k,v])=>metaVal>0&&metaVal<=v.n100)?.[0]||'B';
-      const ht=0; // no direct HT data per chatter easily, let user fill
-      const r=calcChatterPagamento(weekRev,medal,cat,ht,weekExtra);
-      const pct=weekRev>0&&PAG_CATS[cat]?Math.round(weekRev/PAG_CATS[cat].n100*100):0;
+      const savedCat=S.chatterFichas?.[c.id]?.pagCategoria;
+      const cat=savedCat||Object.entries(PAG_CATS).find(([k,v])=>metaVal>0&&metaVal<=v.n100)?.[0]||'B';
+      const metaCat=PAG_CATS[cat].n100;
+      const pct=weekRev>0&&PAG_CATS[cat]?Math.round(weekRev/metaCat*100):0;
+      const falta=Math.max(0,metaCat-weekRev);
+      const medal=autoMedalForPct(pct);
+      const r=calcChatterPagamento(weekRev,medal,cat,htTotal,weekExtra);
       const col=pct>=100?'var(--ok)':pct>=85?'var(--warn)':pct>=70?'var(--info)':'var(--bad)';
       return`<div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div style="font-weight:700;font-size:14px">${c.name} <span style="font-size:11px;color:var(--text3)">${c.level}</span></div>
           <div style="font-size:18px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(r.totalComPiso)}</div>
         </div>
+        <div style="background:var(--line);border-radius:4px;height:7px;overflow:hidden;margin-bottom:5px">
+          <div style="height:7px;border-radius:4px;background:${col};width:${Math.min(100,pct)}%;transition:width .3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:10px">
+          <span style="color:${col};font-weight:700">${pct}% da meta (${money(weekRev)} de ${money(metaCat)})</span>
+          ${falta>0?`<span style="color:var(--bad);font-weight:700">falta ${money(falta)}</span>`:`<span style="color:var(--ok);font-weight:700">✅ meta batida!</span>`}
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-          <div class="field" style="margin:0">
-            <label class="flabel">Faturamento (R$)</label>
-            <input type="number" class="finput" style="font-size:12px;padding:6px 8px"
-              value="${weekRev>0?Math.round(weekRev):''}" placeholder="${money(weekRev)||'0'}"
-              id="pag-c-fat-${c.id}" oninput="recalcChatterPag('${c.id}')">
+          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
+            <div style="font-size:9px;color:var(--text3)">Faturamento (auto)</div>
+            <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(weekRev)}</div>
           </div>
-          <div class="field" style="margin:0">
-            <label class="flabel">Medalha</label>
-            <select class="fselect" style="font-size:12px;padding:6px 8px" id="pag-c-med-${c.id}" onchange="recalcChatterPag('${c.id}')">
-              ${[0,1,2,3,4].map(m=>`<option value="${m}" ${medal===m?'selected':''}>${PAG_MEDAL_LABEL[m]}</option>`).join('')}
-            </select>
+          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
+            <div style="font-size:9px;color:var(--text3)">Medalha (auto)</div>
+            <div style="font-size:12.5px;font-weight:700">${PAG_MEDAL_LABEL[medal]}</div>
           </div>
           <div class="field" style="margin:0">
             <label class="flabel">Categoria</label>
-            <select class="fselect" style="font-size:12px;padding:6px 8px" id="pag-c-cat-${c.id}" onchange="recalcChatterPag('${c.id}')">
+            <select class="fselect" style="font-size:12px;padding:6px 8px" id="pag-c-cat-${c.id}" onchange="saveChatterPagCategoria('${c.id}',this.value);renderPagChattersAll()">
               ${['A','B','C','D','E'].map(k=>`<option value="${k}" ${cat===k?'selected':''}>${k} — meta ${money(PAG_CATS[k].n100)}</option>`).join('')}
             </select>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
-          <div class="field" style="margin:0">
-            <label class="flabel">High ticket (R$)</label>
-            <input type="number" class="finput" style="font-size:12px;padding:6px 8px" placeholder="soma das vendas ≥R$300"
-              id="pag-c-ht-${c.id}" oninput="recalcChatterPag('${c.id}')">
+          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
+            <div style="font-size:9px;color:var(--text3)">High ticket (auto, ${avgHtPct}%)</div>
+            <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(htTotal)}</div>
           </div>
-          <div class="field" style="margin:0">
-            <label class="flabel">Hora extra (R$)</label>
-            <input type="number" class="finput" style="font-size:12px;padding:6px 8px"
-              value="${weekExtra>0?Math.round(weekExtra):''}" placeholder="${money(weekExtra)||'0'}"
-              id="pag-c-ext-${c.id}" oninput="recalcChatterPag('${c.id}')">
+          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
+            <div style="font-size:9px;color:var(--text3)">Hora extra (auto)</div>
+            <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(weekExtra)}</div>
           </div>
         </div>
         <div id="pag-c-result-${c.id}" style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
@@ -6855,6 +7000,11 @@ function renderPagChattersAll(){
       </div>`;
     }).join('')}
   </div>`;
+}
+function saveChatterPagCategoria(cid,cat){
+  if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[cid].pagCategoria=cat;
+  save();
 }
 
 function renderChatterPagCells(r,pct,col){
@@ -6871,84 +7021,15 @@ function renderChatterPagCells(r,pct,col){
       <div style="font-size:9px;color:var(--text3)">% meta</div>
       <div style="font-size:12px;font-weight:800;color:${col}">${pct}%</div>
     </div>
-    <div style="background:${r.pisoComp>0?'var(--warn-soft)':'var(--ok-soft)'};border-radius:7px;padding:7px;text-align:center">
-      <div style="font-size:9px;color:var(--text3)">Total</div>
-      <div style="font-size:12px;font-weight:800;color:${r.pisoComp>0?'var(--warn)':'var(--ok)'}">${money(r.totalComPiso)}</div>
+    <div style="background:var(--ok-soft);border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:var(--text3)">Total (real)</div>
+      <div style="font-size:12px;font-weight:800;color:var(--ok)">${money(r.totalComPiso)}</div>
     </div>`;
 }
 
-function recalcChatterPag(cid){
-  const fat=parseFloat(document.getElementById('pag-c-fat-'+cid)?.value)||getChatterWeekRevenue(cid);
-  const medal=parseInt(document.getElementById('pag-c-med-'+cid)?.value||0);
-  const cat=document.getElementById('pag-c-cat-'+cid)?.value||'B';
-  const ht=parseFloat(document.getElementById('pag-c-ht-'+cid)?.value)||0;
-  const ext=parseFloat(document.getElementById('pag-c-ext-'+cid)?.value)||getChatterExtraRevenue(cid);
-  const r=calcChatterPagamento(fat,medal,cat,ht,ext);
-  const pct=fat>0&&PAG_CATS[cat]?Math.round(fat/PAG_CATS[cat].n100*100):0;
-  const col=pct>=100?'var(--ok)':pct>=85?'var(--warn)':pct>=70?'var(--info)':'var(--bad)';
-  const el=document.getElementById('pag-c-result-'+cid);
-  if(el)el.innerHTML=renderChatterPagCells(r,pct,col);
-  // Update header total
-  const cards=document.querySelectorAll(`[id="pag-c-result-${cid}"]`);
-  // Also update the big total at top of card
-  const parent=el?.closest('div[style*="background:var(--bg-soft)"]');
-  if(parent){
-    const totalEl=parent.querySelector('[style*="font-size:18px"]');
-    if(totalEl)totalEl.textContent=money(r.totalComPiso);
-  }
-}
 
-function renderPagPreview(){
-  const el=document.getElementById('pag-preview');
-  if(!el)return;
-  const medalha=parseInt(document.getElementById('pag-medalha')?.value||0);
-  const cat=document.getElementById('pag-cat')?.value||'A';
-  const fat=parseFloat(document.getElementById('pag-fat')?.value)||0;
-  const ht=parseFloat(document.getElementById('pag-ht')?.value)||0;
-  const extra=parseFloat(document.getElementById('pag-extra')?.value)||0;
-  if(!fat){el.innerHTML='<div style="color:var(--text3);font-size:13px;padding:8px 0">Informe o faturamento para calcular</div>';return;}
 
-  const r=calcChatterPagamento(fat,medalha,cat,ht,extra);
-  const c=PAG_CATS[cat];
-  const pct=fat/c.n100*100;
-  const colPct=pct>=100?'var(--ok)':pct>=85?'var(--warn)':'var(--bad)';
 
-  el.innerHTML=`<div class="panel" style="border-color:var(--accent)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div>
-        <div style="font-size:13px;font-weight:700">Resultado estimado</div>
-        <div style="font-size:11.5px;color:var(--text2)">${PAG_MEDAL_LABEL[medalha]} · Cat ${cat} · ${money(fat)} faturado</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:24px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(r.totalComPiso)}</div>
-        <div style="font-size:11px;color:var(--text3)">total estimado</div>
-      </div>
-    </div>
-    <div style="background:var(--line);border-radius:4px;height:6px;overflow:hidden;margin-bottom:10px">
-      <div style="height:6px;border-radius:4px;background:${colPct};width:${Math.min(100,pct)}%"></div>
-    </div>
-    <div style="font-size:11.5px;color:var(--text2);margin-bottom:12px">${Math.round(pct)}% da meta cat ${cat} (${money(c.n100)})</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div style="background:var(--bg-soft);border-radius:8px;padding:10px">
-        <div style="font-size:10px;color:var(--text3)">Comissão (${PAG_COM_LABEL[medalha]})</div>
-        <div style="font-size:15px;font-weight:700;font-family:var(--font-mono)">${money(r.comissao)}</div>
-      </div>
-      <div style="background:var(--bg-soft);border-radius:8px;padding:10px">
-        <div style="font-size:10px;color:var(--text3)">Prêmio meta${r.premio>c.p100?' 🚀':''}</div>
-        <div style="font-size:15px;font-weight:700;font-family:var(--font-mono);color:${r.premio>c.p100?'var(--ok)':'inherit'}">${money(r.premio)}</div>
-      </div>
-      ${ht>0?`<div style="background:var(--bg-soft);border-radius:8px;padding:10px">
-        <div style="font-size:10px;color:var(--text3)">High ticket (8%)</div>
-        <div style="font-size:15px;font-weight:700;font-family:var(--font-mono)">${money(r.htBonus)}</div>
-      </div>`:''}
-      ${extra>0?`<div style="background:var(--bg-soft);border-radius:8px;padding:10px">
-        <div style="font-size:10px;color:var(--text3)">Hora extra (10%)</div>
-        <div style="font-size:15px;font-weight:700;font-family:var(--font-mono)">${money(r.extraBonus)}</div>
-      </div>`:''}
-    </div>
-    ${r.pisoComp>0?`<div style="background:var(--warn-soft);border-radius:8px;padding:10px;margin-top:8px;font-size:12.5px;color:var(--warn)">⚠️ Piso complementa +${money(r.pisoComp)} (total garantido: ${money(r.piso)})</div>`:''}
-  </div>`;
-}
 
 /* ===========================================================
    GERÊNCIA — calculadora de premiação por chatter
@@ -6978,6 +7059,18 @@ function calcGerPremio(fat, meta){
   return Math.round(premio);
 }
 
+// Faturamento real da operação no mês corrente, até hoje (soma real, não projeção)
+function getCompanyMonthToDateRevenue(){
+  const today=new Date();
+  const year=today.getFullYear(),month=today.getMonth();
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  let total=0;
+  for(let d=1;d<=today.getDate();d++){
+    const key=fmt(new Date(year,month,d));
+    chatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;}));
+  }
+  return total;
+}
 function calcGerMeta2(metaGlobal, fatGlobal){
   if(!metaGlobal||!fatGlobal)return 0;
   const pct=fatGlobal/metaGlobal;
@@ -6990,57 +7083,56 @@ function calcGerMeta2(metaGlobal, fatGlobal){
 }
 
 function renderGerChattersConfig(){
+  // Config manual removida — meta e faturamento de cada chatter agora vêm
+  // automáticos (categoria escolhida em Faturamento + resultado real da
+  // semana). Ver renderGerPreview().
   const el=document.getElementById('ger-chatters-config');
-  if(!el)return;
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
-  if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre chatters na aba Equipe</div>';return;}
-  el.innerHTML=`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Meta e faturamento por chatter</div>`+
-    chatters.map((c,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="font-size:13px;font-weight:700;min-width:90px;flex-shrink:0">${c.name}</div>
-      <input type="number" class="finput" style="flex:1" placeholder="Meta (R$)" id="ger-meta-${c.id}" oninput="renderGerPreview()">
-      <input type="number" class="finput" style="flex:1" placeholder="Faturou (R$)" id="ger-fat-${c.id}" oninput="renderGerPreview()">
-    </div>`).join('');
+  if(el)el.innerHTML='';
 }
 
 function renderGerPreview(){
   const el=document.getElementById('ger-preview');
   if(!el)return;
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
-  const metaGlobal=parseFloat(document.getElementById('ger-meta-global')?.value)||0;
-  const fatGlobal=parseFloat(document.getElementById('ger-fat-global')?.value)||0;
+  if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre chatters na aba Equipe</div>';return;}
 
   let frente1=0;
   const rows=chatters.map(c=>{
-    const meta=parseFloat(document.getElementById('ger-meta-'+c.id)?.value)||0;
-    const fat=parseFloat(document.getElementById('ger-fat-'+c.id)?.value)||0;
-    if(!meta||!fat)return null;
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const meta=PAG_CATS[cat].n100;
+    const fat=getChatterWeekRevenue(c.id,0); // sempre semana atual, automático
     const premio=calcGerPremio(fat,meta);
     frente1+=premio;
-    const pct=fat/meta*100;
+    const pct=meta>0?fat/meta*100:0;
     const col=pct>=100?'var(--ok)':pct>=85?'var(--warn)':'var(--bad)';
     return`<tr>
-      <td style="padding:6px 10px;font-weight:600;border-bottom:1px solid var(--line)">${c.name}</td>
+      <td style="padding:6px 10px;font-weight:600;border-bottom:1px solid var(--line)">${c.name} <span style="font-size:9.5px;color:var(--text3)">(cat ${cat})</span></td>
       <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);font-family:var(--font-mono);font-size:11.5px">${money(meta)}</td>
       <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);font-family:var(--font-mono);font-size:11.5px">${money(fat)}</td>
       <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);color:${col};font-weight:700">${Math.round(pct)}%</td>
       <td style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--line);font-family:var(--font-mono);font-weight:800;color:var(--ok)">${money(premio)}</td>
     </tr>`;
-  }).filter(Boolean);
+  });
 
-  if(!rows.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;margin-top:8px">Preencha meta e faturamento de cada chatter</div>';return;}
-
+  // Meta global do mês = soma das metas semanais de cada chatter (pela categoria escolhida) × ~4,3 semanas
+  const metaGlobal=chatters.reduce((s,c)=>{
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    return s+PAG_CATS[cat].n100*(30/7);
+  },0);
+  const fatGlobal=getCompanyMonthToDateRevenue(); // faturamento real do mês, automático
   const frente2=calcGerMeta2(metaGlobal,fatGlobal);
-  const total=frente1+frente2;
-  const piso=3000;
-  const totalFinal=Math.max(total,piso);
+  const total=frente1+frente2; // vem só do resultado real — sem piso artificial
 
   el.innerHTML=`
+    <div style="background:var(--bg-soft);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--text2)">
+      📊 <strong>Automático:</strong> meta global do mês ${money(metaGlobal)} (soma das categorias de cada chatter) · faturamento real do mês até hoje ${money(fatGlobal)} (${metaGlobal>0?Math.round(fatGlobal/metaGlobal*100):0}%)
+    </div>
     <div style="overflow-x:auto;margin:12px 0">
       <table style="width:100%;border-collapse:collapse;font-size:12.5px">
         <thead><tr style="background:var(--bg-soft)">
           <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--line)">Chatter</th>
-          <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">Meta</th>
-          <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">Faturou</th>
+          <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">Meta (sem.)</th>
+          <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">Faturou (sem.)</th>
           <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">%</th>
           <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)">Sua premiação</th>
         </tr></thead>
@@ -7050,17 +7142,16 @@ function renderGerPreview(){
           <td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:var(--ok)">${money(frente1)}</td>
         </tr>
         ${frente2>0?`<tr style="background:var(--bg-soft)">
-          <td colspan="4" style="padding:8px 10px;font-weight:700">Frente 2 — meta global${metaGlobal?` (${Math.round(fatGlobal/metaGlobal*100)}%)`:''}</td>
+          <td colspan="4" style="padding:8px 10px;font-weight:700">Frente 2 — meta global (${metaGlobal>0?Math.round(fatGlobal/metaGlobal*100):0}%)</td>
           <td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);font-weight:700;color:var(--info)">${money(frente2)}</td>
         </tr>`:''}
         <tr style="background:var(--accent-soft)">
-          <td colspan="4" style="padding:10px;font-weight:800;font-size:14px;color:var(--accent)">Total do mês</td>
-          <td style="padding:10px;text-align:right;font-family:var(--font-mono);font-weight:800;font-size:18px;color:var(--accent)">${money(totalFinal)}</td>
+          <td colspan="4" style="padding:10px;font-weight:800;font-size:14px;color:var(--accent)">Total do mês (real)</td>
+          <td style="padding:10px;text-align:right;font-family:var(--font-mono);font-weight:800;font-size:18px;color:var(--accent)">${money(total)}</td>
         </tr>
         </tbody>
       </table>
-    </div>
-    ${total<piso?`<div style="background:var(--warn-soft);border-radius:8px;padding:10px;font-size:12.5px;color:var(--warn)">⚠️ Piso garante R$3.000 (+${money(piso-total)} complementado)</div>`:''}`;
+    </div>`;
 }
 
 /* ===========================================================
@@ -7091,6 +7182,28 @@ function renderProjecao(){
   }
 }
 
+// Média semanal recente (até 4 semanas) de faturamento de um chatter, a partir das analytics
+function getChatterAvgWeeklyRevenue(cid){
+  const f=S.chatterFichas[cid]||{};
+  const analytics=f.analytics?.weeklyData||{};
+  const weekGroups={};
+  Object.keys(analytics).forEach(dk=>{
+    const d=new Date(dk+'T12:00:00');
+    const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());
+    const wk=fmt(sun);
+    weekGroups[wk]=(weekGroups[wk]||0)+(analytics[dk].chatterTotal||0);
+  });
+  const recentWeeks=Object.keys(weekGroups).sort().reverse().slice(0,4);
+  const weekRevs=recentWeeks.map(wk=>weekGroups[wk]).filter(v=>v>0);
+  return weekRevs.length?weekRevs.reduce((s,v)=>s+v,0)/weekRevs.length:0;
+}
+// Projeção mensal (30 dias) somada de toda a empresa, no ritmo atual de cada chatter
+function getCompanyMonthlyProjection(){
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  let total=0;
+  chatters.forEach(c=>{total+=getChatterAvgWeeklyRevenue(c.id)*(30/7);});
+  return total;
+}
 function renderProjecaoChatter(cid,containerId){
   const el=document.getElementById(containerId||'proj-content');
   if(!el)return;
@@ -7155,21 +7268,48 @@ function renderProjecaoChatter(cid,containerId){
       </div>
     </div>`;
 
-  // ---- Projeção motivacional: quanto vai ganhar em 30 dias no ritmo atual ----
+  // ---- Projeção motivacional: empresa + chatter + análise curta de desenvolvimento ----
   {
-    const weekKeysSorted=Object.keys(weekGroups).sort().reverse();
-    const recentWeeks=weekKeysSorted.slice(0,4); // últimas até 4 semanas com dados
-    const weekRevs=recentWeeks.map(wk=>weekGroups[wk].reduce((s,d)=>s+(d.chatterTotal||0),0)).filter(v=>v>0);
-    const avgWeekRev=weekRevs.length?weekRevs.reduce((s,v)=>s+v,0)/weekRevs.length:0;
+    const avgWeekRev=getChatterAvgWeeklyRevenue(cid);
     const projMonth=avgWeekRev*(30/7);
-    if(avgWeekRev>0){
+    const companyProjMonth=getCompanyMonthlyProjection();
+
+    // Análise curta de desenvolvimento pessoal: compara o mês mais antigo com o mais recente
+    let devText;
+    if(months.length>=2){
+      const oldest=monthGroups[months[months.length-1]];
+      const newest=monthGroups[months[0]];
+      const ticketOld=avg(oldest.tickets),ticketNew=avg(newest.tickets);
+      const vphOld=avg(oldest.vphs),vphNew=avg(newest.vphs);
+      if(ticketOld>0&&vphOld>0){
+        const ticketDiff=Math.round((ticketNew-ticketOld)/ticketOld*100);
+        const vphDiff=Math.round((vphNew-vphOld)/vphOld*100);
+        if(ticketDiff>=5||vphDiff>=5)devText=`📈 Evoluindo bem: ticket médio ${ticketDiff>=0?'subiu':'variou'} ${ticketDiff}% e valor/hora ${vphDiff>=0?'subiu':'variou'} ${vphDiff}% desde o início.`;
+        else if(ticketDiff<=-10||vphDiff<=-10)devText=`⚠️ Queda no período: ticket médio ${ticketDiff}% e valor/hora ${vphDiff}% — vale uma conversa de reforço.`;
+        else devText=`➡️ Desempenho estável (ticket médio ${ticketDiff>=0?'+':''}${ticketDiff}%, valor/hora ${vphDiff>=0?'+':''}${vphDiff}%) — foco agora é destravar o próximo salto.`;
+      } else devText='Ainda sem métricas suficientes de ticket/valor-hora em mais de um mês para medir evolução.';
+    } else devText='Ainda não há dados de meses anteriores para comparar — continue processando relatórios para essa análise aparecer aqui.';
+
+    if(avgWeekRev>0||companyProjMonth>0){
       html+=`<div class="panel" style="margin-bottom:16px;border:2px solid var(--accent);background:linear-gradient(135deg,var(--accent-soft),var(--bg-soft))">
-        <div style="text-align:center">
+        <div style="text-align:center;margin-bottom:12px">
           <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🚀 Projeção para os próximos 30 dias</div>
-          <div style="font-size:32px;font-weight:800;font-family:var(--font-mono);color:var(--accent)">${money(projMonth)}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:4px">no ritmo atual — média de ${money(avgWeekRev)}/semana (últimas ${weekRevs.length} semana${weekRevs.length>1?'s':''})</div>
-          <div style="font-size:12.5px;color:var(--text);margin-top:10px;line-height:1.5">💪 Continue nesse ritmo e ${c.name.split(' ')[0]} pode fechar o mês com <strong>${money(projMonth)}</strong>! Cada venda extra hoje ajuda a bater essa marca ainda mais rápido.</div>
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div style="text-align:center;background:var(--bg);border-radius:10px;padding:10px">
+            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Faturamento da empresa</div>
+            <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(companyProjMonth)}</div>
+          </div>
+          <div style="text-align:center;background:var(--bg);border-radius:10px;padding:10px">
+            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Faturamento de ${c.name.split(' ')[0]}</div>
+            <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--accent)">${money(projMonth)}</div>
+          </div>
+        </div>
+        ${avgWeekRev>0?`<div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:10px">no ritmo atual — média de ${money(avgWeekRev)}/semana (${c.name.split(' ')[0]})</div>`:''}
+        <div style="font-size:12.5px;color:var(--text);line-height:1.5;background:var(--bg);border-radius:8px;padding:9px 11px;margin-bottom:8px">
+          <strong>🧠 Desenvolvimento:</strong> ${devText}
+        </div>
+        ${avgWeekRev>0?`<div style="font-size:12.5px;color:var(--text);text-align:center;line-height:1.5">💪 Continue nesse ritmo e ${c.name.split(' ')[0]} pode fechar o mês com <strong>${money(projMonth)}</strong>! Cada venda extra hoje ajuda a bater essa marca ainda mais rápido.</div>`:''}
       </div>`;
     }
   }
