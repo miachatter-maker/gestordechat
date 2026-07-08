@@ -617,6 +617,23 @@ const DAY_KEYS=['dom','seg','ter','qua','qui','sex','sab'];
 const LVLCLASS={treinamento:'lvl-treinamento',teste:'lvl-teste',junior:'lvl-junior',pleno:'lvl-pleno',senior:'lvl-senior'};
 const LVLEMOJI={treinamento:'◆',teste:'○',junior:'▲',pleno:'●',senior:'★'};
 
+// Tabela de metas semanais por categoria (Pagamento) — precisa vir logo no
+// início do arquivo porque o Painel (Home) e outras telas já usam isso na
+// primeira renderização, antes do resto do script terminar de carregar.
+// ATENÇÃO: NÃO mover este bloco pra mais longe no arquivo — isso já causou
+// o mesmo bug de "tela travada" 2 vezes nesta sessão.
+const PAG_CATS={
+  A:{n70:2500,p70:100, n85:3000,p85:120, n100:3500,p100:140},
+  B:{n70:3500,p70:175, n85:4000,p85:210, n100:5000,p100:250},
+  C:{n70:5000,p70:350, n85:6000,p85:425, n100:7000,p100:500},
+  D:{n70:7000,p70:560, n85:8500,p85:680, n100:10000,p100:800},
+  E:{n70:10000,p70:900,n85:12000,p85:1100,n100:14000,p100:1300},
+};
+const PAG_COM={0:0.04,1:0.04,2:0.045,3:0.05,4:0.06};
+const PAG_COM_LABEL={0:'4%',1:'4%',2:'4,5%',3:'5%',4:'6%'};
+const PAG_PISO={0:1000,1:1200,2:1500,3:1800,4:2500};
+const PAG_MEDAL_LABEL={0:'Sem medalha',1:'🥉 Bronze',2:'🥈 Prata',3:'🥇 Ouro',4:'💎 Diamante'};
+
 // ---------- HELPERS ----------
 function p2(n){return String(n).padStart(2,'0');}
 function fmt(d){return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
@@ -7204,21 +7221,6 @@ function importBackup(){
 /* ===========================================================
    PAGAMENTO — sistema de remuneração Seduct
    =========================================================== */
-
-// Tabela de metas semanais por categoria
-const PAG_CATS={
-  A:{n70:2500,p70:100, n85:3000,p85:120, n100:3500,p100:140},
-  B:{n70:3500,p70:175, n85:4000,p85:210, n100:5000,p100:250},
-  C:{n70:5000,p70:350, n85:6000,p85:425, n100:7000,p100:500},
-  D:{n70:7000,p70:560, n85:8500,p85:680, n100:10000,p100:800},
-  E:{n70:10000,p70:900,n85:12000,p85:1100,n100:14000,p100:1300},
-};
-
-// Comissão % por medalha
-const PAG_COM={0:0.04,1:0.04,2:0.045,3:0.05,4:0.06};
-const PAG_COM_LABEL={0:'4%',1:'4%',2:'4,5%',3:'5%',4:'6%'};
-const PAG_PISO={0:1000,1:1200,2:1500,3:1800,4:2500};
-const PAG_MEDAL_LABEL={0:'Sem medalha',1:'🥉 Bronze',2:'🥈 Prata',3:'🥇 Ouro',4:'💎 Diamante'};
 
 // Boost multipliers: % acima da meta → multiplicador do prêmio
 function pagBoost(pctAcima){
