@@ -398,6 +398,8 @@ body{
   <div class="eyebrow">status ao vivo</div>
 
   <!-- ESCRITÓRIO + PRÓXIMO TURNO -->
+  <div class="panel" id="home-meta-risk" style="display:none"></div>
+
   <div class="panel" id="home-escritorio"></div>
 
   <!-- JANELAS DISPONÍVEIS NA SEMANA -->
@@ -502,6 +504,11 @@ body{
     <div class="week-nav" id="week-nav-semana"></div>
   </div>
   <div id="semana-range" style="color:var(--text3);font-size:13px;margin-bottom:20px"></div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🏆 Ranking da semana</div></div>
+    <div id="week-ranking-board"></div>
+  </div>
 
   <div class="panel">
     <div class="panel-head">
@@ -895,6 +902,11 @@ body{
   <div class="panel">
     <div class="panel-head"><div class="panel-title">📝 Requisições para modelos</div></div>
     <div id="model-requests-split-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <select class="fselect" id="model-req-model" style="flex:0 0 auto;width:140px"></select>
+      <input class="finput" id="model-req-text" placeholder="Pedido..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addModelRequest()">+</button>
+    </div>
   </div>
 
   <!-- REQUISIÇÕES DE HORÁRIOS -->
@@ -908,15 +920,10 @@ body{
     </div>
   </div>
 
-  <!-- ANÁLISE DIÁRIA DO CHAT -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">🔍 Análise diária do chat</div><button class="btn btn-primary btn-xs" onclick="openChatAnalysis()">+ nova análise</button></div>
-    <div style="margin-bottom:10px">
-      <select class="fselect" id="chat-analysis-chatter" onchange="renderChatAnalysisList()">
-        <option value="">— selecionar chatter —</option>
-      </select>
-    </div>
-    <div id="chat-analysis-list"></div>
+  <!-- ANÁLISE SEMANAL DE CHATTER (baseada nas fichas, dividida pelos dias da semana) -->
+  <div class="panel" style="padding:10px 14px">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🔍 Análise de hoje</div>
+    <div id="weekly-analysis-board" style="font-size:12.5px"></div>
   </div>
 
   <!-- ORIENTAÇÕES -->
@@ -1181,28 +1188,6 @@ body{
   </div>
 </div></div>
 
-<!-- CHAT ANALYSIS MODAL -->
-<div class="modalbg" id="m-chat-analysis"><div class="modal">
-  <div class="modal-handle"></div>
-  <div class="modal-title">🔍 Análise do Chat</div>
-  <div class="field"><label class="flabel">Chatter</label>
-    <select class="fselect" id="ca-chatter"></select>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-    <div><label class="flabel">Conexão</label><select class="fselect" id="ca-conexao"><option value="">—</option><option value="1">Fraco</option><option value="2">Regular</option><option value="3">Bom</option><option value="4">Ótimo</option><option value="5">Excelente</option></select></div>
-    <div><label class="flabel">Condução</label><select class="fselect" id="ca-conducao"><option value="">—</option><option value="1">Fraco</option><option value="2">Regular</option><option value="3">Bom</option><option value="4">Ótimo</option><option value="5">Excelente</option></select></div>
-    <div><label class="flabel">Engajamento</label><select class="fselect" id="ca-engajamento"><option value="">—</option><option value="1">Fraco</option><option value="2">Regular</option><option value="3">Bom</option><option value="4">Ótimo</option><option value="5">Excelente</option></select></div>
-    <div><label class="flabel">Conversão</label><select class="fselect" id="ca-conversao"><option value="">—</option><option value="1">Fraco</option><option value="2">Regular</option><option value="3">Bom</option><option value="4">Ótimo</option><option value="5">Excelente</option></select></div>
-    <div><label class="flabel">Resposta</label><select class="fselect" id="ca-resposta"><option value="">—</option><option value="1">Fraco</option><option value="2">Regular</option><option value="3">Bom</option><option value="4">Ótimo</option><option value="5">Excelente</option></select></div>
-    <div><label class="flabel">Naturalidade</label><select class="fselect" id="ca-naturalidade"><option value="">—</option><option value="1">Fraco</option><option value="2">Regular</option><option value="3">Bom</option><option value="4">Ótimo</option><option value="5">Excelente</option></select></div>
-  </div>
-  <div class="field"><label class="flabel">Pontos fortes</label><textarea class="ftext" id="ca-fortes" placeholder="O que foi bem..." style="min-height:60px"></textarea></div>
-  <div class="field"><label class="flabel">Pontos fracos</label><textarea class="ftext" id="ca-fracos" placeholder="O que melhorar..." style="min-height:60px"></textarea></div>
-  <div class="modalbtns">
-    <button class="btn btn-ghost btn-block" onclick="closeModal('m-chat-analysis')">Cancelar</button>
-    <button class="btn btn-primary btn-block" onclick="saveChatAnalysis()">Salvar análise</button>
-  </div>
-</div></div>
 
 <div class="modalbg" id="m-model"><div class="modal">
   <div class="modal-handle"></div><div class="modal-title">Novo modelo</div>
