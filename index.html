@@ -385,6 +385,7 @@ body{
     <button class="toptab" data-go="evolucao">Evolução</button>
     <button class="toptab" data-go="chatlab">ChatLab</button>
     <button class="toptab" data-go="testers">Testers</button>
+    <button class="toptab" data-go="reservas">Reservas</button>
     <button class="toptab" data-go="pagamento">Pagamento</button>
     <button class="toptab" data-go="projecao">Projeção</button>
     
@@ -398,8 +399,6 @@ body{
   <div class="eyebrow">status ao vivo</div>
 
   <!-- ESCRITÓRIO + PRÓXIMO TURNO -->
-  <div class="panel" id="home-meta-risk" style="display:none"></div>
-
   <div class="panel" id="home-escritorio"></div>
 
   <!-- JANELAS DISPONÍVEIS NA SEMANA -->
@@ -422,6 +421,7 @@ body{
       <div><div class="panel-title">🔔 Atenção necessária</div></div>
       <span id="smart-alerts-badge" class="pill pill-bad" style="font-size:10px"></span>
     </div>
+    <div id="home-critical-meta"></div>
     <div id="home-smart-alerts"></div>
   </div>
 
@@ -504,6 +504,16 @@ body{
     <div class="week-nav" id="week-nav-semana"></div>
   </div>
   <div id="semana-range" style="color:var(--text3);font-size:13px;margin-bottom:20px"></div>
+
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🎯 Metas da Semana</div><div class="panel-note">Defina a meta de cada chatter e acompanhe o progresso</div></div></div>
+    <div id="chatter-goals-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">⚠️ Risco de não bater a meta</div></div>
+    <div id="week-meta-risk-board"></div>
+  </div>
 
   <div class="panel">
     <div class="panel-head"><div class="panel-title">🏆 Ranking da semana</div></div>
@@ -601,25 +611,10 @@ body{
     <div id="revenue-table"></div>
   </div>
 
-    <!-- METAS DOS CHATTERS -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">🎯 Metas da semana</div></div>
-    <div id="fat-meta-progress"></div>
-  </div>
-
   <!-- HORA EXTRA -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">⚡ Hora extra acumulada</div></div>
     <div id="fat-extra-progress"></div>
-  </div>
-
-  <!-- ANÁLISE DO CHATTER -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">📊 Análise do chatter</div></div>
-    <select class="fselect" id="fat-analysis-chatter" style="margin-bottom:10px" onchange="renderChatterAnalysis()">
-      <option value="">— selecionar chatter —</option>
-    </select>
-    <div id="fat-chatter-analysis"></div>
   </div>
 
 <div class="panel">
@@ -630,11 +625,6 @@ body{
   <div class="panel">
     <div class="panel-head"><div><div class="panel-title">📅 Diário por Chatter</div><div class="panel-note">Faturamento dia a dia, semana atual</div></div></div>
     <div id="daily-by-chatter"></div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">🎯 Metas da Semana</div><div class="panel-note">Defina a meta de cada chatter e acompanhe o progresso</div></div></div>
-    <div id="chatter-goals-list"></div>
   </div>
 
   <div class="panel">
@@ -1021,6 +1011,14 @@ body{
     </select>
   </div>
   <div id="tester-content"></div>
+</section>
+
+<!-- ===================== RESERVAS ===================== -->
+<section class="view" id="v-reservas">
+  <div class="eyebrow">cobertura de turno</div>
+  <div class="view-title">🔵 Reservas</div>
+  <div class="view-sub">Cobrem turno quando falta chatter disponível · pagamento só por hora extra</div>
+  <div id="reservas-content"></div>
 </section>
 
 
