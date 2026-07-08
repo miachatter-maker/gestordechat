@@ -5405,6 +5405,78 @@ function calcEvolutionPct(chatterId){
   return result;
 }
 
+/* ===========================================================
+   ANÁLISE COMPARATIVA DA EQUIPE (IA) — Evolução
+   Compara resultado mensal de cada chatter (oscila vs constante)
+   e comenta se os talentos estão bem distribuídos entre modelos.
+   =========================================================== */
+function getChatterMonthlyStats(cid){
+  const f=S.chatterFichas[cid]||{};
+  const analytics=f.analytics?.weeklyData||{};
+  const weekKeys=Object.keys(analytics).sort();
+  const monthGroups={};
+  weekKeys.forEach(dk=>{
+    const mo=dk.slice(0,7);
+    if(!monthGroups[mo])monthGroups[mo]={totalRev:0,tickets:[],vphs:[]};
+    const a=analytics[dk];
+    monthGroups[mo].totalRev+=a.chatterTotal||0;
+    if(a.ticketMedio>0)monthGroups[mo].tickets.push(a.ticketMedio);
+    if(a.vendasPorHora>0)monthGroups[mo].vphs.push(a.vendasPorHora);
+  });
+  const avg=arr=>arr.length?Math.round(arr.reduce((s,v)=>s+v,0)/arr.length*10)/10:0;
+  return Object.keys(monthGroups).sort().map(mo=>({mo,rev:Math.round(monthGroups[mo].totalRev),avgTicket:avg(monthGroups[mo].tickets),avgVph:avg(monthGroups[mo].vphs)}));
+}
+function getChatterModelRevenue(cid){
+  const byModel={};
+  S.models.forEach(m=>{
+    let tot=0;
+    Object.keys(S.revenues).forEach(key=>{
+      if(key.startsWith(`${cid}_${m.id}_`))tot+=parseFloat(S.revenues[key])||0;
+    });
+    if(tot>0)byModel[m.name]=Math.round(tot);
+  });
+  return byModel;
+}
+async function rodarAnaliseComparativaEquipe(){
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  if(chatters.length<2){toast('⚠️ Precisa de pelo menos 2 chatters no time base');return;}
+  const btn=document.getElementById('team-analysis-btn');
+  const resEl=document.getElementById('team-analysis-result');
+  btn.disabled=true;btn.textContent='Analisando…';
+  resEl.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px">⏳ A IA está comparando a equipe…</div>';
+
+  let dataText='';
+  chatters.forEach(c=>{
+    const stats=getChatterMonthlyStats(c.id);
+    const modelRev=getChatterModelRevenue(c.id);
+    dataText+=`\n### ${c.name} (nível ${c.level})\n`;
+    if(stats.length){
+      dataText+=stats.map(s=>`- ${s.mo}: faturou ${money(s.rev)}, ticket médio ${money(s.avgTicket)}, valor/hora ${money(s.avgVph)}`).join('\n')+'\n';
+    } else dataText+='- Sem dados mensais suficientes ainda.\n';
+    const modelEntries=Object.entries(modelRev);
+    dataText+=modelEntries.length?`Faturamento por modelo: ${modelEntries.map(([n,v])=>`${n}: ${money(v)}`).join(', ')}\n`:'Sem faturamento por modelo registrado.\n';
+  });
+
+  const system='Você é a Gerente Sênior de Performance de uma operação de vendas por chat (chatters atendendo modelos de conteúdo adulto). Analisa dados mensais agregados do time inteiro e escreve com clareza, direto ao ponto, sem enrolação, em português do Brasil.';
+  const prompt=`Aqui estão os dados mensais de faturamento, ticket médio e valor/hora de cada chatter do time, além do faturamento de cada um por modelo:\n${dataText}\n\nEscreva uma análise comparativa curta (use Markdown) com:\n## 📊 Quem é constante vs quem oscila\nAponte quem tem resultado mensal estável e quem tem altos e baixos, com números.\n## 🎭 Equilíbrio de talentos entre modelos\nDiga se os melhores chatters estão concentrados em poucas modelos (desequilíbrio) ou bem distribuídos, e se algum chatter parece mais talentoso pra uma modelo específica.\n## 💡 Sugestões\n2-4 sugestões práticas de realocação ou ajuste, se fizer sentido. Se os dados forem insuficientes para alguma conclusão, diga isso claramente em vez de inventar.`;
+
+  try{
+    const res=await fetch(AI_PROXY_URL,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system,messages:[{role:'user',content:prompt}]})
+    });
+    const data=await res.json();
+    const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    resEl.innerHTML=`<div class="cl-md">${clMd(text)}</div>`;
+    toast('✅ Análise comparativa gerada!');
+  }catch(err){
+    resEl.innerHTML=`<div style="color:var(--bad);font-size:13px">❌ ${err.message}</div>`;
+  }finally{
+    btn.disabled=false;btn.textContent='⚡ Gerar análise';
+  }
+}
+
 function renderEvolucao(){
   renderWeekNav();
   const el=document.getElementById('evolucao-content');
