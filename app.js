@@ -617,21 +617,6 @@ const DAY_KEYS=['dom','seg','ter','qua','qui','sex','sab'];
 const LVLCLASS={treinamento:'lvl-treinamento',teste:'lvl-teste',junior:'lvl-junior',pleno:'lvl-pleno',senior:'lvl-senior'};
 const LVLEMOJI={treinamento:'◆',teste:'○',junior:'▲',pleno:'●',senior:'★'};
 
-// Tabela de metas semanais por categoria (Pagamento) — precisa vir logo no
-// início do arquivo porque o Painel (Home) já usa isso na primeira
-// renderização, antes do resto do script terminar de carregar.
-const PAG_CATS={
-  A:{n70:2500,p70:100, n85:3000,p85:120, n100:3500,p100:140},
-  B:{n70:3500,p70:175, n85:4000,p85:210, n100:5000,p100:250},
-  C:{n70:5000,p70:350, n85:6000,p85:425, n100:7000,p100:500},
-  D:{n70:7000,p70:560, n85:8500,p85:680, n100:10000,p100:800},
-  E:{n70:10000,p70:900,n85:12000,p85:1100,n100:14000,p100:1300},
-};
-const PAG_COM={0:0.04,1:0.04,2:0.045,3:0.05,4:0.06};
-const PAG_COM_LABEL={0:'4%',1:'4%',2:'4,5%',3:'5%',4:'6%'};
-const PAG_PISO={0:1000,1:1200,2:1500,3:1800,4:2500};
-const PAG_MEDAL_LABEL={0:'Sem medalha',1:'🥉 Bronze',2:'🥈 Prata',3:'🥇 Ouro',4:'💎 Diamante'};
-
 // ---------- HELPERS ----------
 function p2(n){return String(n).padStart(2,'0');}
 function fmt(d){return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
@@ -683,7 +668,7 @@ function money(n){return 'R$ '+ (n||0).toLocaleString('pt-BR',{minimumFractionDi
 function moneyShort(n){return 'R$'+(n||0).toLocaleString('pt-BR',{maximumFractionDigits:0});}
 
 // ---------- NAV ----------
-const VIEWS=['home','turno','semana','time','fat','report','extra','gerador','gestao','fichas','estudos','evolucao','chatlab','testers','pagamento','projecao'];
+const VIEWS=['home','turno','semana','time','fat','report','extra','gerador','gestao','fichas','estudos','evolucao','chatlab','testers','reservas','pagamento','projecao'];
 // Render timestamp cache — debounce rapid re-renders (Firebase sync spam)
 const _rts={};
 
@@ -719,6 +704,7 @@ function renderView(v){
   else if(v==='evolucao')renderEvolucao();
   else if(v==='chatlab')renderChatLab();
   else if(v==='testers')renderTesters();
+  else if(v==='reservas')renderReservas();
   else if(v==='pagamento')renderPagamento();
   else if(v==='projecao')renderProjecao();
 }
@@ -947,12 +933,14 @@ function deleteTask(id){
 function renderSemana(){
   renderWeekNav();
   renderWeekOrients();
+  renderMetaRiskBoard();
   renderWeeklyRanking();
   const wk=getWeekDates();
   document.getElementById('semana-range').textContent=`${wk[0].getDate()}/${wk[0].getMonth()+1} – ${wk[6].getDate()}/${wk[6].getMonth()+1}`;
   const notesEl=document.getElementById('week-notes');
   if(notesEl&&!notesEl.value)notesEl.value=S.weekNotes[getWeekKey()]||'';
   renderGoals();
+  renderChatterGoals();
   renderSemanaRevenue();
   renderSemanaDesenvolvimento();
 }
@@ -1549,7 +1537,7 @@ function renderSmartAlerts(){
 
 function renderHome(){
   renderWatchBanner();
-  renderMetaRiskPanel();
+  renderCriticalMetaNotice();
   renderEscritorioPanel();
   renderUrgentPanel();
   renderSmartAlerts();
@@ -1558,18 +1546,14 @@ function renderHome(){
   render48hAlerts();
   renderMidnightPreviewHome();
 }
-// Sempre mostra quem está em risco de não bater a meta essa semana, pra
-// o gestor conseguir auxiliar a tempo — considera risco quem já passou
-// da metade da semana (quinta em diante) e está bem abaixo do ritmo
-// necessário pra bater a meta até sábado.
-function renderMetaRiskPanel(){
-  const el=document.getElementById('home-meta-risk');
-  if(!el)return;
+// Calcula quem está em risco de não bater a meta essa semana — considera
+// risco quem está bem abaixo do ritmo esperado pro dia da semana atual.
+function getChattersAtMetaRisk(){
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   const wkey=getWeekKey(0);
   const goals=S.chatterWeekGoals[wkey]||{};
   const todayDow=new Date().getDay(); // 0=dom...6=sab
-  const daysElapsed=todayDow===0?7:todayDow; // seg=1..sab=6, dom conta como fim da semana
+  const daysElapsed=todayDow===0?7:todayDow;
   const atRisk=[];
   chatters.forEach(c=>{
     const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
@@ -1578,21 +1562,36 @@ function renderMetaRiskPanel(){
     if(!meta)return;
     const rev=getChatterWeekRevenue(c.id,0);
     const pct=rev/meta*100;
-    const expectedPct=(daysElapsed/7)*100; // ritmo esperado se distribuído igual pela semana
-    if(pct<expectedPct*0.6&&pct<85){ // bem atrás do ritmo esperado e ainda não bateu
+    const expectedPct=(daysElapsed/7)*100;
+    if(pct<expectedPct*0.6&&pct<85){
       atRisk.push({c,pct:Math.round(pct),falta:meta-rev});
     }
   });
-  if(!atRisk.length){el.style.display='none';return;}
-  el.style.display='block';
-  atRisk.sort((a,b)=>a.pct-b.pct);
-  el.innerHTML=`
-    <div class="panel-head"><div><div class="panel-title">⚠️ Risco de não bater a meta</div><div class="panel-note">Ainda dá tempo de ajudar</div></div></div>
-    ${atRisk.map(x=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)">
-      <div><span style="font-weight:700">${x.c.name}</span><span style="font-size:11.5px;color:var(--text3);margin-left:8px">${x.pct}% da meta</span></div>
+  return atRisk.sort((a,b)=>a.pct-b.pct);
+}
+// Painel: só um aviso pequeno e discreto, do caso MAIS crítico apenas —
+// o quadro completo com todo mundo em risco fica na aba Semana.
+function renderCriticalMetaNotice(){
+  const el=document.getElementById('home-critical-meta');
+  if(!el)return;
+  const atRisk=getChattersAtMetaRisk();
+  if(!atRisk.length){el.innerHTML='';return;}
+  const worst=atRisk[0];
+  el.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bad-soft);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
+    <span>🔴 <strong>${worst.c.name}</strong> está em situação crítica na meta (${worst.pct}%)${atRisk.length>1?` +${atRisk.length-1} outro${atRisk.length>2?'s':''}`:''}</span>
+    <button class="btn btn-ghost btn-xs" onclick="navTo('semana')">ver →</button>
+  </div>`;
+}
+// Semana: quadro completo com todos os chatters em risco de meta.
+function renderMetaRiskBoard(){
+  const el=document.getElementById('week-meta-risk-board');
+  if(!el)return;
+  const atRisk=getChattersAtMetaRisk();
+  if(!atRisk.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Ninguém em risco crítico essa semana 👍</div>';return;}
+  el.innerHTML=atRisk.map(x=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)">
+      <div><span style="font-weight:700">${x.c.name}</span><span style="font-size:11.5px;color:var(--text3);margin-left:8px">${x.pct}% da meta · falta ${money(x.falta)}</span></div>
       <button class="btn btn-ghost btn-xs" onclick="openChatterDetail('${x.c.id}')">ver →</button>
-    </div>`).join('')}
-  `;
+    </div>`).join('');
 }
 
 function renderEscritorioPanel(){
@@ -3237,13 +3236,10 @@ function renderFat(){
   const dateLb=document.getElementById('fat-date-lb');
   if(dateLb)dateLb.textContent=selectedFatDate===todayKey()?'Hoje · '+selectedFatDate:selectedFatDate;
   renderRevenueTable();
-  renderMetaProgress();
   renderExtraProgress();
-  renderChatterAnalysis();
   renderReport('week');
   renderDailyByModel();
   renderDailyByChatter();
-  renderChatterGoals();
 }
 function changeFatDate(offset){
   const d=new Date(selectedFatDate+'T12:00:00');
@@ -3524,6 +3520,8 @@ function getWeekExtraRevenue(){
 }
 function getChatterExtraRevenue(chatterId,offset){
   const wkey=getWeekKey(offset);
+  const isReserva=S.chatterFichas?.[chatterId]?.testerDecision==='espera';
+  if(isReserva)return getChatterWeekRevenue(chatterId,offset); // reserva: 100% do faturamento conta como hora extra
   return (S.horaExtraSlots[wkey]||[]).filter(x=>x.shiftId==='parsed'&&x.chatterId===chatterId).reduce((s,x)=>s+(parseFloat(x.revenue)||0),0);
 }
 
@@ -5158,11 +5156,12 @@ const CHAT_METRIC_LABELS={conexao:'Conexão',conducao:'Condução',engajamento:'
 const SCORE_WORD={1:'Fraco',2:'Regular',3:'Bom',4:'Ótimo',5:'Excelente'};
 
 /* ===========================================================
-   ANÁLISE SEMANAL DE CHATTER — divide todos os chatters pelos 7
-   dias da semana (baseado na ficha de cada um). Quadro pequeno e
-   discreto: mostra só quem falta analisar HOJE; ao marcar feito,
-   o nome some (some da semana, não some todo dia de novo).
+   ANÁLISE SEMANAL DE CHATTER — divide toda a equipe pelos 7 dias
+   da semana. Mostra os 7 dias de uma vez, cada um com seus nomes;
+   ao marcar feito, o nome some; se o dia ficar vazio, o dia
+   inteiro some também.
    =========================================================== */
+const DAY_LABELS_FULL={dom:'Domingo',seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta',sex:'Sexta',sab:'Sábado'};
 function getWeeklyAnalysisAssignment(){
   const chatters=S.chatters.filter(c=>c.time!=='elite');
   const byDay={};
@@ -5173,16 +5172,20 @@ function getWeeklyAnalysisAssignment(){
 function renderWeeklyChatAnalysisBoard(){
   const el=document.getElementById('weekly-analysis-board');
   if(!el)return;
-  const todayDk=DAY_KEYS[new Date().getDay()];
   const wkey=getWeekKey();
   if(!S.weeklyAnalysisDone[wkey])S.weeklyAnalysisDone[wkey]=[];
   const doneList=S.weeklyAnalysisDone[wkey];
-  const todays=(getWeeklyAnalysisAssignment()[todayDk]||[]).filter(c=>!doneList.includes(c.id));
-  if(!todays.length){el.innerHTML='<span style="color:var(--text3)">Nenhuma pendente hoje 👍</span>';return;}
-  el.innerHTML=todays.map(c=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-soft);border-radius:6px;padding:3px 8px;margin:2px 4px 2px 0">
-    ${c.name}
-    <button onclick="markWeeklyAnalysisDone('${c.id}')" style="background:none;border:none;color:var(--ok);cursor:pointer;font-size:12px;padding:0">✓</button>
-  </span>`).join('');
+  const assignment=getWeeklyAnalysisAssignment();
+  const todayDk=DAY_KEYS[new Date().getDay()];
+  const days=DAY_KEYS.map(dk=>({dk,pending:(assignment[dk]||[]).filter(c=>!doneList.includes(c.id))})).filter(d=>d.pending.length);
+  if(!days.length){el.innerHTML='<span style="color:var(--text3)">Todo mundo analisado essa semana 👍</span>';return;}
+  el.innerHTML=days.map(d=>`<div style="margin-bottom:8px">
+    <div style="font-size:10.5px;font-weight:700;color:${d.dk===todayDk?'var(--accent)':'var(--text3)'};text-transform:uppercase;margin-bottom:3px">${DAY_LABELS_FULL[d.dk]}${d.dk===todayDk?' · hoje':''}</div>
+    <div>${d.pending.map(c=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-soft);border-radius:6px;padding:3px 8px;margin:2px 4px 2px 0">
+      ${c.name}
+      <button onclick="markWeeklyAnalysisDone('${c.id}')" style="background:none;border:none;color:var(--ok);cursor:pointer;font-size:12px;padding:0">✓</button>
+    </span>`).join('')}</div>
+  </div>`).join('');
 }
 function markWeeklyAnalysisDone(cid){
   const wkey=getWeekKey();
@@ -5665,40 +5668,8 @@ function deleteShift(shiftId){
 }
 
 /* ===========================================================
-   FATURAMENTO — meta progress + chatter analysis
+   FATURAMENTO — hora extra
    =========================================================== */
-function renderMetaProgress(){
-  const el=document.getElementById('fat-meta-progress');
-  if(!el)return;
-  const wkey=getWeekKey();
-  const goals=S.chatterWeekGoals[wkey]||{};
-  const ativos=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
-  if(!ativos.length){el.innerHTML='';return;}
-  el.innerHTML=`<div style="margin-bottom:4px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Metas da semana</div>`+
-  ativos.map(c=>{
-    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
-    const metaManual=parseFloat(goals[c.id])||0;
-    const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0); // auto a partir da categoria de Pagamento, se não tiver meta manual
-    const rev=getChatterWeekRevenue(c.id);
-    const extra=getChatterExtraRevenue(c.id);
-    const pct=meta>0?Math.min(100,Math.round((rev/meta)*100)):0;
-    const falta=meta>0?Math.max(0,meta-rev):0;
-    return`<div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <div style="font-weight:600;font-size:13px">${c.name}</div>
-        <div style="font-size:12px;font-family:var(--font-mono)">${moneyShort(rev)}${meta>0?` / ${moneyShort(meta)}`:''}</div>
-      </div>
-      ${meta>0?`<div style="background:var(--line);border-radius:4px;height:8px;overflow:hidden;margin-bottom:3px">
-        <div style="height:8px;border-radius:4px;background:${pct>=100?'var(--ok)':pct>=60?'var(--warn)':'var(--bad)'};width:${pct}%;transition:width .3s"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">
-        <span>${pct}%${metaManual===0?' · auto (categoria '+cat+')':''}${extra>0?` · +${moneyShort(extra)} extra`:''}</span>
-        ${falta>0?`<span style="color:var(--bad)">falta ${moneyShort(falta)}</span>`:`<span style="color:var(--ok)">✅ meta batida!</span>`}
-      </div>`:`<div style="font-size:11px;color:var(--text3)">Sem meta definida${extra>0?` · extra: ${moneyShort(extra)}`:''}</div>`}
-    </div>`;
-  }).join('');
-}
-
 function renderExtraProgress(){
   const el=document.getElementById('fat-extra-progress');
   if(!el)return;
@@ -6799,6 +6770,51 @@ function getTesterAllWorkDays(chatterId){
   });
   return Object.keys(dateTotals).sort().map(dk=>({date:dk,revenue:dateTotals[dk]}));
 }
+// Reserva "permanente": já passou 3 dias desde que entrou pra fila de
+// Reservas — sai do fluxo de decisão de Testers e passa a viver na
+// aba Reservas de forma fixa, cobrindo turno quando necessário.
+function daysSinceDecision(cid){
+  const dt=S.chatterFichas?.[cid]?.testerDecisionDate;
+  if(!dt)return 0;
+  return Math.floor((new Date(todayKey()+'T12:00:00')-new Date(dt+'T12:00:00'))/86400000);
+}
+function isPermanentReserva(cid){
+  return S.chatterFichas?.[cid]?.testerDecision==='espera'&&daysSinceDecision(cid)>=3;
+}
+function renderReservas(){
+  const el=document.getElementById('reservas-content');
+  if(!el)return;
+  const reservas=S.chatters.filter(c=>isPermanentReserva(c.id));
+  if(!reservas.length){
+    el.innerHTML=`<div class="empty"><div class="empty-ic">🔵</div><div class="empty-tx">Nenhuma reserva permanente ainda.<br>Testers marcados "Reservas" entram aqui automaticamente depois de 3 dias.</div></div>`;
+    return;
+  }
+  el.innerHTML=reservas.map(c=>{
+    const workDays=getTesterAllWorkDays(c.id);
+    const totalAll=workDays.reduce((s,d)=>s+d.revenue,0);
+    const extraWeek=getChatterExtraRevenue(c.id,0);
+    const extraBonusWeek=extraWeek*0.10;
+    const daysAsReserva=daysSinceDecision(c.id);
+    return`<div class="panel" style="border-left:3px solid var(--bad)">
+      <div class="panel-head"><div><div class="panel-title">${c.name}</div><div class="panel-note">Reserva há ${daysAsReserva} dias</div></div>
+        <button class="btn btn-ghost btn-xs" onclick="openAddShiftForChatter('${c.id}')">🔁 Realocar em turno</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:var(--bg-soft);border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:9px;color:var(--text3)">Faturamento total coberto</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(totalAll)}</div>
+        </div>
+        <div style="background:var(--bad-soft);border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:9px;color:var(--bad)">Hora extra essa semana</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono);color:var(--bad)">${money(extraBonusWeek)}</div>
+        </div>
+      </div>
+      ${workDays.length?`<div style="max-height:140px;overflow-y:auto">${workDays.slice().reverse().slice(0,10).map(d=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:12px">
+        <span>${d.date.split('-').reverse().join('/')}</span><span style="font-weight:700">${money(d.revenue)}</span>
+      </div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--text3)">Ainda não cobriu nenhum turno</div>'}
+    </div>`;
+  }).join('');
+}
 function setTesterDecision(chatterId,decision){
   const c=S.chatters.find(ch=>ch.id===chatterId);
   if(!c)return;
@@ -6843,7 +6859,7 @@ function renderTesters(){
   }
 
   const decided=testers.filter(c=>['aprovado','reprovado'].includes(S.chatterFichas?.[c.id]?.testerDecision));
-  const pending=testers.filter(c=>!decided.includes(c));
+  const pending=testers.filter(c=>!decided.includes(c)&&!isPermanentReserva(c.id));
 
   // Build score for each pending tester based on their 3-day test window
   const scored=pending.map(c=>{
@@ -6897,10 +6913,7 @@ function renderTesters(){
           const isAprov=f.testerDecision==='aprovado';
           return`<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px">
             <div><strong>${c.name}</strong> <span style="color:${isAprov?'var(--ok)':'var(--bad)'}">${isAprov?'✅ aprovado':'❌ reprovado'}</span></div>
-            <div style="display:flex;align-items:center;gap:8px">
-              ${!isAprov?`<button onclick="setTesterDecision('${c.id}','espera')" class="btn btn-ghost btn-xs">🔵 Reservar</button>`:''}
-              <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
-            </div>
+            <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
           </div>`;
         }).join('')}
       </div>`:''}
@@ -7119,6 +7132,21 @@ function importBackup(){
 /* ===========================================================
    PAGAMENTO — sistema de remuneração Seduct
    =========================================================== */
+
+// Tabela de metas semanais por categoria
+const PAG_CATS={
+  A:{n70:2500,p70:100, n85:3000,p85:120, n100:3500,p100:140},
+  B:{n70:3500,p70:175, n85:4000,p85:210, n100:5000,p100:250},
+  C:{n70:5000,p70:350, n85:6000,p85:425, n100:7000,p100:500},
+  D:{n70:7000,p70:560, n85:8500,p85:680, n100:10000,p100:800},
+  E:{n70:10000,p70:900,n85:12000,p85:1100,n100:14000,p100:1300},
+};
+
+// Comissão % por medalha
+const PAG_COM={0:0.04,1:0.04,2:0.045,3:0.05,4:0.06};
+const PAG_COM_LABEL={0:'4%',1:'4%',2:'4,5%',3:'5%',4:'6%'};
+const PAG_PISO={0:1000,1:1200,2:1500,3:1800,4:2500};
+const PAG_MEDAL_LABEL={0:'Sem medalha',1:'🥉 Bronze',2:'🥈 Prata',3:'🥇 Ouro',4:'💎 Diamante'};
 
 // Boost multipliers: % acima da meta → multiplicador do prêmio
 function pagBoost(pctAcima){
@@ -7562,14 +7590,14 @@ function renderProjecaoChatter(cid,containerId){
       </div>
     </div>`;
 
-  // ---- Projeção motivacional: empresa + ganho REAL do chatter (todas as formas de pagamento) + análise curta de desenvolvimento ----
+  // ---- Projeção motivacional: faturamento e ganho REAL do próprio chatter (todas as formas de pagamento) + análise curta de desenvolvimento ----
   {
     const avgWeekRev=getChatterAvgWeeklyRevenue(cid);
-    const companyProjMonth=getCompanyMonthlyProjection();
 
     // Ganho real projetado — mesma fórmula da aba Pagamento, com TODAS as
     // formas: comissão sobre faturamento + prêmio de meta + high ticket
-    // (8%) + hora extra (10%). Não é só faturamento, é o que ele recebe.
+    // (8%) + hora extra (10%). Não é faturamento da empresa, é o que ELE
+    // recebe, considerando só a % que cabe a ele segundo a categoria dele.
     const weekRev=getChatterWeekRevenue(cid,0);
     const weekExtra=getChatterExtraRevenue(cid,0);
     const {htTotal}=getChatterWeekHighTicket(cid,0);
@@ -7582,7 +7610,7 @@ function renderProjecaoChatter(cid,containerId){
     const medalNow=autoMedalForPct(pctNow);
     const pag=calcChatterPagamento(weekRev,medalNow,cat,htTotal,weekExtra,metaManual);
     const projGanhoMonth=pag.totalComPiso*(30/7);
-    const projMonth=avgWeekRev*(30/7); // faturamento gerado (referência, não é o ganho dele)
+    const projMonth=avgWeekRev*(30/7); // faturamento QUE ELE GERA, projetado pro mês
 
     // Análise curta de desenvolvimento pessoal: compara o mês mais antigo com o mais recente
     let devText;
@@ -7600,18 +7628,18 @@ function renderProjecaoChatter(cid,containerId){
       } else devText='Ainda sem métricas suficientes de ticket/valor-hora em mais de um mês para medir evolução.';
     } else devText='Ainda não há dados de meses anteriores para comparar — continue processando relatórios para essa análise aparecer aqui.';
 
-    if(avgWeekRev>0||companyProjMonth>0){
+    if(avgWeekRev>0||projGanhoMonth>0){
       html+=`<div class="panel" style="margin-bottom:16px;border:2px solid var(--accent);background:linear-gradient(135deg,var(--accent-soft),var(--bg-soft))">
         <div style="text-align:center;margin-bottom:12px">
           <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🚀 Projeção para os próximos 30 dias</div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
           <div style="text-align:center;background:var(--bg);border-radius:10px;padding:10px">
-            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Faturamento da empresa</div>
-            <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(companyProjMonth)}</div>
+            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Faturamento gerado</div>
+            <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(projMonth)}</div>
           </div>
           <div style="text-align:center;background:var(--bg);border-radius:10px;padding:10px">
-            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Ganho de ${c.name.split(' ')[0]}</div>
+            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Salário de ${c.name.split(' ')[0]}</div>
             <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--accent)">${money(projGanhoMonth)}</div>
           </div>
         </div>
