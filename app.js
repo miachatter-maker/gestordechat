@@ -375,7 +375,7 @@ function listenToFirestore(connectTimeout){
         const allSeen=fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length;
         if(allSeen)fbHasReceivedFirstSnapshot=true;
         if(needsInitialPush&&allSeen)pushToFirestore();
-        else if(allSeen&&!wasAllSeenBefore)pushToFirestore(); // sincronização inicial completa agora — envia qualquer mudança que ficou represada esperando
+        else if(allSeen&&!wasAllSeenBefore){pruneHeavyData(S);pushToFirestore();} // sincronização inicial completa agora — limpa qualquer lixo que veio junto e envia a versão corrigida
         fbSyncStatus='online';
         updateSyncBadge();
         runAutoBackupIfNeeded();
@@ -4819,6 +4819,11 @@ document.querySelectorAll('.chip').forEach(chip=>chip.addEventListener('click',(
 
 // ---------- INIT ----------
 load();
+// Limpa duplicatas/lixo acumulado e salva uma vez logo na abertura do app —
+// não espera nenhuma ação do usuário, pra nunca depender de "clicar em algo"
+// pra corrigir o documento.
+pruneHeavyData(S);
+save();
 initFirebaseWithRetry();
 document.getElementById('abs-date').value=todayKey();
 
