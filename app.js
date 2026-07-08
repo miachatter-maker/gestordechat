@@ -37,6 +37,7 @@ function migrateState(s){
   if(!s.trainings)s.trainings=[];
   if(!s.weekEvolutions)s.weekEvolutions={};
   if(!s.modelRequests)s.modelRequests={};
+  if(!s.weeklyAnalysisDone)s.weeklyAnalysisDone={};
   if(!s.weekPrize)s.weekPrize={};
   if(!s.motivational)s.motivational={};
   if(!s.scheduleRequests)s.scheduleRequests={};
@@ -548,7 +549,8 @@ let S={
   demandas:{},           // dateKey -> [{id, text, done}]
   trainings:[],          // [{id, title, date, days:[{day, script}]}]
   weekEvolutions:{},     // weekKey -> [{id, label, done, missed}]
-  modelRequests:{},      // weekKey -> [{id, text}]
+  modelRequests:{},      // weekKey -> [{id, modelId, text}]
+  weeklyAnalysisDone:{}, // weekKey -> [chatterId,...] — quem já foi analisado essa semana
   weekPrize:{},          // weekKey -> {goal, winner, prize}
   motivational:{},       // weekKey -> {idea, chatters:{id:{issue, help}}}
   scheduleRequests:{},   // weekKey -> [{id, chatterId, text}]
@@ -930,6 +932,7 @@ function deleteTask(id){
 function renderSemana(){
   renderWeekNav();
   renderWeekOrients();
+  renderWeeklyRanking();
   const wk=getWeekDates();
   document.getElementById('semana-range').textContent=`${wk[0].getDate()}/${wk[0].getMonth()+1} – ${wk[6].getDate()}/${wk[6].getMonth()+1}`;
   const notesEl=document.getElementById('week-notes');
@@ -937,6 +940,51 @@ function renderSemana(){
   renderGoals();
   renderSemanaRevenue();
   renderSemanaDesenvolvimento();
+}
+// Ranking da semana: maior ticket médio, quem mais lucrou de hora extra,
+// quem tá mais perto da meta, e quem vende mais rápido (valor/hora).
+function renderWeeklyRanking(){
+  const el=document.getElementById('week-ranking-board');
+  if(!el)return;
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem chatters no time</div>';return;}
+  const wkey=getWeekKey(0);
+  const goals=S.chatterWeekGoals[wkey]||{};
+  const rows=chatters.map(c=>{
+    const f=S.chatterFichas[c.id];
+    const wd=getWeekDates(0);
+    const analytics=f?.analytics?.weeklyData||{};
+    let ticketSum=0,vphSum=0,days=0;
+    wd.forEach(d=>{const a=analytics[fmt(d)];if(a&&a.ticketMedio>0){ticketSum+=a.ticketMedio;vphSum+=a.vendasPorHora||0;days++;}});
+    const avgTicket=days>0?ticketSum/days:0;
+    const avgVph=days>0?vphSum/days:0;
+    const rev=getChatterWeekRevenue(c.id,0);
+    const extraFat=getChatterExtraRevenue(c.id,0);
+    const extraBonus=extraFat*0.10;
+    const cat=f?.pagCategoria||'B';
+    const metaManual=parseFloat(goals[c.id])||0;
+    const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
+    const pct=meta>0?(rev/meta*100):0;
+    return{c,avgTicket,avgVph,extraBonus,pct};
+  });
+  const top=(key,fmtFn)=>{
+    const sorted=[...rows].filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
+    if(!sorted.length)return null;
+    return{name:sorted[0].c.name,val:fmtFn(sorted[0][key])};
+  };
+  const cards=[
+    {label:'🎫 Maior ticket',data:top('avgTicket',v=>money(v))},
+    {label:'⚡ Mais lucro em hora extra',data:top('extraBonus',v=>money(v))},
+    {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
+    {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
+  ].filter(x=>x.data);
+  if(!cards.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem dados suficientes essa semana ainda</div>';return;}
+  el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${cards.map(x=>`
+    <div style="background:var(--bg-soft);border-radius:9px;padding:9px">
+      <div style="font-size:10px;color:var(--text3);margin-bottom:3px">${x.label}</div>
+      <div style="font-size:13px;font-weight:700">${x.data.name}</div>
+      <div style="font-size:11.5px;color:var(--ok);font-weight:600">${x.data.val}</div>
+    </div>`).join('')}</div>`;
 }
 function renderGoals(){
   const el=document.getElementById('goals-list');
@@ -1486,6 +1534,7 @@ function renderSmartAlerts(){
 
 function renderHome(){
   renderWatchBanner();
+  renderMetaRiskPanel();
   renderEscritorioPanel();
   renderUrgentPanel();
   renderSmartAlerts();
@@ -1493,6 +1542,42 @@ function renderHome(){
   renderMotivacionalHome();
   render48hAlerts();
   renderMidnightPreviewHome();
+}
+// Sempre mostra quem está em risco de não bater a meta essa semana, pra
+// o gestor conseguir auxiliar a tempo — considera risco quem já passou
+// da metade da semana (quinta em diante) e está bem abaixo do ritmo
+// necessário pra bater a meta até sábado.
+function renderMetaRiskPanel(){
+  const el=document.getElementById('home-meta-risk');
+  if(!el)return;
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const wkey=getWeekKey(0);
+  const goals=S.chatterWeekGoals[wkey]||{};
+  const todayDow=new Date().getDay(); // 0=dom...6=sab
+  const daysElapsed=todayDow===0?7:todayDow; // seg=1..sab=6, dom conta como fim da semana
+  const atRisk=[];
+  chatters.forEach(c=>{
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaManual=parseFloat(goals[c.id])||0;
+    const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
+    if(!meta)return;
+    const rev=getChatterWeekRevenue(c.id,0);
+    const pct=rev/meta*100;
+    const expectedPct=(daysElapsed/7)*100; // ritmo esperado se distribuído igual pela semana
+    if(pct<expectedPct*0.6&&pct<85){ // bem atrás do ritmo esperado e ainda não bateu
+      atRisk.push({c,pct:Math.round(pct),falta:meta-rev});
+    }
+  });
+  if(!atRisk.length){el.style.display='none';return;}
+  el.style.display='block';
+  atRisk.sort((a,b)=>a.pct-b.pct);
+  el.innerHTML=`
+    <div class="panel-head"><div><div class="panel-title">⚠️ Risco de não bater a meta</div><div class="panel-note">Ainda dá tempo de ajudar</div></div></div>
+    ${atRisk.map(x=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)">
+      <div><span style="font-weight:700">${x.c.name}</span><span style="font-size:11.5px;color:var(--text3);margin-left:8px">${x.pct}% da meta</span></div>
+      <button class="btn btn-ghost btn-xs" onclick="openChatterDetail('${x.c.id}')">ver →</button>
+    </div>`).join('')}
+  `;
 }
 
 function renderEscritorioPanel(){
@@ -1892,7 +1977,7 @@ function renderTurnoDay(){
 
   let html='';
   if(!basico.length){
-    html='<div style="color:var(--text3);font-size:13px;padding:12px 0;text-align:center">Nenhum chatter do Time Básico escalado hoje</div>';
+    html='<div style="color:var(--text3);font-size:13px;padding:12px 0;text-align:center">Nenhum chatter do Time Base escalado hoje</div>';
   } else {
     html+=basico.map(renderRow).join('');
   }
@@ -2427,18 +2512,19 @@ function renderTeam(filter){
   const basicoGroup=chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
 
   const renderCard=c=>{
-    const color=getComputedLevelColor(c.level);
+    const isReserva=S.chatterFichas?.[c.id]?.testerDecision==='espera';
+    const color=isReserva?'var(--bad)':getComputedLevelColor(c.level);
     const revWeek=getChatterWeekRevenue(c.id,0);
     const extraWeek=getChatterExtraRevenue(c.id,0);
     const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,0);
     const status=getChatterStatus(c.id,todayKey());
     const otMins=getChatterOvertimeOn(c.id,todayKey());
     const dotColor=status==='online'?'var(--ok)':status==='overtime'?'var(--warn)':'var(--text3)';
-    const timeBadge=c.time==='elite'?`<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>`:c.time==='tester'?`<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>`:`<span class="pill pill-flat" style="font-size:9px">Básico</span>`;
-    return`<div class="teamcard" onclick="openChatterDetail('${c.id}')">
+    const timeBadge=c.time==='elite'?`<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>`:c.time==='tester'?`<span class="pill ${isReserva?'pill-bad':'pill-bad'}" style="font-size:9px">${isReserva?'🔵 Reserva':'🧪 Novatos'}</span>`:`<span class="pill pill-flat" style="font-size:9px">Base</span>`;
+    return`<div class="teamcard" onclick="openChatterDetail('${c.id}')" style="${isReserva?'border-left:3px solid var(--bad)':''}">
       <div class="ravatar" style="width:42px;height:42px;background:${color}22;color:${color}">${c.name.slice(0,2).toUpperCase()}</div>
       <div class="rinfo">
-        <div style="display:flex;align-items:center;gap:6px"><span class="rname">${c.name}</span><div class="tc-status" style="background:${dotColor}"></div></div>
+        <div style="display:flex;align-items:center;gap:6px"><span class="rname" style="${isReserva?'color:var(--bad)':''}">${c.name}</span><div class="tc-status" style="background:${dotColor}"></div></div>
         <div class="rmeta">${c.discord||''} · ${moneyShort(revWeek)} semana${extraWeek>0?` · ⚡${moneyShort(extraWeek)} extra`:''}${htTotal>0?` · 🎯${avgHtPct}% HT (${moneyShort(htTotal)})`:''}</div>
         <div class="tmeta-row">${timeBadge}<span class="pill ${LVLCLASS[c.level]}" style="border:1px solid">${c.level}</span>${otMins>0?`<span class="pill pill-warn">+${otMins}min`:''}${c.watchtime?`<span class="pill pill-info">⏰ ${c.watchtime}</span>`:''}</div>
       </div>
@@ -2452,7 +2538,7 @@ function renderTeam(filter){
     html+=eliteGroup.map(renderCard).join('');
   }
   if(basicoGroup.length){
-    html+=`<div style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:${eliteGroup.length?'16px':'4px'} 0 8px">Time Básico (${basicoGroup.length})</div>`;
+    html+=`<div style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:${eliteGroup.length?'16px':'4px'} 0 8px">Time Base (${basicoGroup.length})</div>`;
     html+=basicoGroup.map(renderCard).join('');
   }
   list.innerHTML=html;
@@ -3519,10 +3605,16 @@ function getChatterMonthlyGoalHistory(chatterId){
    CRUD
    =========================================================== */
 function populateChatterSelects(){
-  ['shift-chatter','abs-chatter','orient-chatter','ot-chatter'].forEach(id=>{
+  ['abs-chatter','orient-chatter','ot-chatter'].forEach(id=>{
     const el=document.getElementById(id);if(!el)return;
     el.innerHTML=S.chatters.length?S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''):'<option value="">Nenhum chatter</option>';
   });
+  // Elite é só cadastro — não faz parte da escala/turno
+  const shiftSel=document.getElementById('shift-chatter');
+  if(shiftSel){
+    const notElite=S.chatters.filter(c=>c.time!=='elite');
+    shiftSel.innerHTML=notElite.length?notElite.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''):'<option value="">Nenhum chatter</option>';
+  }
 }
 function saveModel(){
   const name=document.getElementById('model-name').value.trim();if(!name){toast('⚠️ Nome obrigatório');return;}
@@ -4266,13 +4358,6 @@ function saveMotivacional(){
     };
   });save();
 }
-function saveModelRequests(){
-  const wkey=getWeekKey();
-  const el=document.getElementById('model-requests-text');
-  if(!el)return;
-  S.modelRequests[wkey]=el.value||'';
-  save();
-}
 
 // ---- REQUISIÇÕES DE HORÁRIOS ----
 function renderScheduleRequests(){
@@ -5013,27 +5098,41 @@ function render48hAlerts(){
 }
 
 /* ===========================================================
-   MODEL REQUESTS SPLIT
+   MODEL REQUESTS — select model + text, list of requests
    =========================================================== */
 function renderModelRequestsSplit(){
   const el=document.getElementById('model-requests-split-list');
   if(!el)return;
   const wkey=getWeekKey();
-  if(!S.modelRequestsSplit)S.modelRequestsSplit={};
-  if(!S.modelRequestsSplit[wkey])S.modelRequestsSplit[wkey]={};
-  if(!S.models.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre modelos primeiro</div>';return;}
-  el.innerHTML=S.models.map(m=>`
-    <div style="margin-bottom:12px">
-      <label class="flabel">${m.emoji||'🧩'} ${m.name}</label>
-      <textarea class="ftext" id="mr-split-${m.id}" style="min-height:60px" placeholder="Requisições para ${m.name}..." onblur="saveModelRequestSplit('${m.id}')">${S.modelRequestsSplit[wkey][m.id]||''}</textarea>
-    </div>`).join('');
+  if(!Array.isArray(S.modelRequests[wkey]))S.modelRequests[wkey]=[];
+  const items=S.modelRequests[wkey];
+  if(!items.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhuma requisição essa semana</div>';}
+  else{
+    el.innerHTML=items.map(item=>{
+      const m=S.models.find(mo=>mo.id===item.modelId);
+      return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
+        <div style="flex:1"><span style="font-weight:700">${m?`${m.emoji||'🧩'} ${m.name}`:'?'}</span><span style="font-size:12px;color:var(--text2);margin-left:8px">${item.text}</span></div>
+        <button onclick="removeModelRequest('${item.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer">✕</button>
+      </div>`;
+    }).join('');
+  }
+  const sel=document.getElementById('model-req-model');
+  if(sel&&!sel.options.length){sel.innerHTML=S.models.map(m=>`<option value="${m.id}">${m.emoji||'🧩'} ${m.name}</option>`).join('');}
 }
-function saveModelRequestSplit(modelId){
+function addModelRequest(){
+  const mid=document.getElementById('model-req-model')?.value;
+  const text=document.getElementById('model-req-text')?.value.trim();
+  if(!mid||!text)return;
   const wkey=getWeekKey();
-  if(!S.modelRequestsSplit)S.modelRequestsSplit={};
-  if(!S.modelRequestsSplit[wkey])S.modelRequestsSplit[wkey]={};
-  S.modelRequestsSplit[wkey][modelId]=document.getElementById('mr-split-'+modelId)?.value||'';
-  save();
+  if(!Array.isArray(S.modelRequests[wkey]))S.modelRequests[wkey]=[];
+  S.modelRequests[wkey].push({id:'mreq'+Date.now(),modelId:mid,text});
+  document.getElementById('model-req-text').value='';
+  save();renderModelRequestsSplit();
+}
+function removeModelRequest(id){
+  const wkey=getWeekKey();
+  S.modelRequests[wkey]=(S.modelRequests[wkey]||[]).filter(x=>x.id!==id);
+  save();renderModelRequestsSplit();
 }
 
 /* ===========================================================
@@ -5043,93 +5142,38 @@ const CHAT_METRICS=['conexao','conducao','engajamento','conversao','resposta','n
 const CHAT_METRIC_LABELS={conexao:'Conexão',conducao:'Condução',engajamento:'Engajamento',conversao:'Conversão',resposta:'Resposta',naturalidade:'Naturalidade'};
 const SCORE_WORD={1:'Fraco',2:'Regular',3:'Bom',4:'Ótimo',5:'Excelente'};
 
-function openChatAnalysis(){
-  if(!S.chatters.length){toast('⚠️ Cadastre chatters primeiro');return;}
-  const sel=document.getElementById('ca-chatter');
-  if(sel){
-    sel.innerHTML='<option value="">— selecionar chatter —</option>'+
-      S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-    sel.value='';
-  }
-  CHAT_METRICS.forEach(m=>{const el=document.getElementById('ca-'+m);if(el)el.value='';});
-  const f=document.getElementById('ca-fortes');const fr=document.getElementById('ca-fracos');
-  if(f)f.value='';if(fr)fr.value='';
-  openModal('m-chat-analysis');
+/* ===========================================================
+   ANÁLISE SEMANAL DE CHATTER — divide todos os chatters pelos 7
+   dias da semana (baseado na ficha de cada um). Quadro pequeno e
+   discreto: mostra só quem falta analisar HOJE; ao marcar feito,
+   o nome some (some da semana, não some todo dia de novo).
+   =========================================================== */
+function getWeeklyAnalysisAssignment(){
+  const chatters=S.chatters.filter(c=>c.time!=='elite');
+  const byDay={};
+  DAY_KEYS.forEach(dk=>byDay[dk]=[]);
+  chatters.forEach((c,i)=>{byDay[DAY_KEYS[i%7]].push(c);});
+  return byDay;
 }
-function saveChatAnalysis(){
-  const chatterId=document.getElementById('ca-chatter')?.value;
-  if(!chatterId){toast('⚠️ Selecione um chatter primeiro');return;}
-  const analysis={id:'ca'+Date.now(),chatterId,date:todayKey(),
-    fortes:document.getElementById('ca-fortes')?.value||'',
-    fracos:document.getElementById('ca-fracos')?.value||''};
-  let hasScore=false;
-  CHAT_METRICS.forEach(m=>{
-    const v=parseInt(document.getElementById('ca-'+m)?.value)||0;
-    analysis[m]=v;if(v>0)hasScore=true;
-  });
-  if(!hasScore&&!analysis.fortes&&!analysis.fracos){toast('⚠️ Preencha pelo menos um campo');return;}
-  if(!S.chatAnalyses)S.chatAnalyses={};
-  const today=todayKey();
-  if(!S.chatAnalyses[today])S.chatAnalyses[today]=[];
-  S.chatAnalyses[today].push(analysis);
-  updateFichaFromAnalysis(chatterId);
-  save();
-  closeModal('m-chat-analysis');
-  const selEl=document.getElementById('chat-analysis-chatter');
-  if(selEl){
-    selEl.innerHTML='<option value="">— selecionar chatter —</option>'+S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-    selEl.value=chatterId;
-  }
-  renderChatAnalysisList();
-  toast('✅ Análise salva!');
-}
-
-function updateFichaFromAnalysis(chatterId){
-  if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[]};
-  const f=S.chatterFichas[chatterId];
-  // Collect all analyses for this chatter
-  const allAnalyses=[];
-  Object.values(S.chatAnalyses||{}).forEach(dayArr=>{
-    (dayArr||[]).filter(a=>a.chatterId===chatterId).forEach(a=>allAnalyses.push(a));
-  });
-  if(!allAnalyses.length)return;
-  const avg=key=>Math.round(allAnalyses.reduce((s,a)=>s+(a[key]||0),0)/allAnalyses.length);
-  // Map to ficha fields
-  const scores={conversao:avg('conversao'),resposta:avg('resposta'),evolucao:avg('engajamento')};
-  Object.entries(scores).forEach(([k,v])=>{if(v>0)f.tech[k]=SCORE_WORD[v]||String(v);});
-  const behavScores={intensidade:avg('conexao'),comunicacao:avg('conducao'),energia:avg('naturalidade')};
-  Object.entries(behavScores).forEach(([k,v])=>{if(v>0)f.behavior[k]=SCORE_WORD[v]||String(v);});
-}
-function renderChatAnalysisList(){
-  const el=document.getElementById('chat-analysis-list');
-  const sel=document.getElementById('chat-analysis-chatter');
+function renderWeeklyChatAnalysisBoard(){
+  const el=document.getElementById('weekly-analysis-board');
   if(!el)return;
-  // Always repopulate select
-  if(sel){
-    const cur=sel.value;
-    sel.innerHTML='<option value="">— selecionar chatter —</option>'+S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-    if(cur)sel.value=cur;
-  }
-  const chatterId=sel?.value;
-  if(!chatterId){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:8px 0">Selecione um chatter para ver as análises</div>';return;}
-  const analyses=[];
-  Object.entries(S.chatAnalyses||{}).forEach(([date,arr])=>{
-    (arr||[]).filter(a=>a.chatterId===chatterId).forEach(a=>analyses.push({...a,date}));
-  });
-  analyses.sort((a,b)=>b.date.localeCompare(a.date));
-  if(!analyses.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:8px 0">Nenhuma análise para este chatter ainda</div>';return;}
-  el.innerHTML=analyses.slice(0,10).map(a=>`
-    <div style="background:var(--bg-soft);border-radius:9px;padding:10px;margin-bottom:8px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:7px">${a.date}</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px">
-        ${CHAT_METRICS.map(m=>`<div style="text-align:center;background:var(--bg);border-radius:7px;padding:5px 3px">
-          <div style="font-size:9px;color:var(--text3)">${CHAT_METRIC_LABELS[m]}</div>
-          <div style="font-size:13px;font-weight:800;color:${(a[m]||0)>=4?'var(--ok)':(a[m]||0)>=3?'var(--warn)':'var(--bad)'}">${SCORE_WORD[a[m]]||'—'}</div>
-        </div>`).join('')}
-      </div>
-      ${a.fortes?`<div style="font-size:12px;margin-bottom:4px"><strong style="color:var(--ok)">✅</strong> ${a.fortes}</div>`:''}
-      ${a.fracos?`<div style="font-size:12px"><strong style="color:var(--warn)">⚠️</strong> ${a.fracos}</div>`:''}
-    </div>`).join('');
+  const todayDk=DAY_KEYS[new Date().getDay()];
+  const wkey=getWeekKey();
+  if(!S.weeklyAnalysisDone[wkey])S.weeklyAnalysisDone[wkey]=[];
+  const doneList=S.weeklyAnalysisDone[wkey];
+  const todays=(getWeeklyAnalysisAssignment()[todayDk]||[]).filter(c=>!doneList.includes(c.id));
+  if(!todays.length){el.innerHTML='<span style="color:var(--text3)">Nenhuma pendente hoje 👍</span>';return;}
+  el.innerHTML=todays.map(c=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-soft);border-radius:6px;padding:3px 8px;margin:2px 4px 2px 0">
+    ${c.name}
+    <button onclick="markWeeklyAnalysisDone('${c.id}')" style="background:none;border:none;color:var(--ok);cursor:pointer;font-size:12px;padding:0">✓</button>
+  </span>`).join('');
+}
+function markWeeklyAnalysisDone(cid){
+  const wkey=getWeekKey();
+  if(!S.weeklyAnalysisDone[wkey])S.weeklyAnalysisDone[wkey]=[];
+  if(!S.weeklyAnalysisDone[wkey].includes(cid))S.weeklyAnalysisDone[wkey].push(cid);
+  save();renderWeeklyChatAnalysisBoard();
 }
 
 /* ===========================================================
@@ -5617,7 +5661,9 @@ function renderMetaProgress(){
   if(!ativos.length){el.innerHTML='';return;}
   el.innerHTML=`<div style="margin-bottom:4px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Metas da semana</div>`+
   ativos.map(c=>{
-    const meta=parseFloat(goals[c.id])||0;
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaManual=parseFloat(goals[c.id])||0;
+    const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0); // auto a partir da categoria de Pagamento, se não tiver meta manual
     const rev=getChatterWeekRevenue(c.id);
     const extra=getChatterExtraRevenue(c.id);
     const pct=meta>0?Math.min(100,Math.round((rev/meta)*100)):0;
@@ -5631,7 +5677,7 @@ function renderMetaProgress(){
         <div style="height:8px;border-radius:4px;background:${pct>=100?'var(--ok)':pct>=60?'var(--warn)':'var(--bad)'};width:${pct}%;transition:width .3s"></div>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">
-        <span>${pct}%${extra>0?` · +${moneyShort(extra)} extra`:''}</span>
+        <span>${pct}%${metaManual===0?' · auto (categoria '+cat+')':''}${extra>0?` · +${moneyShort(extra)} extra`:''}</span>
         ${falta>0?`<span style="color:var(--bad)">falta ${moneyShort(falta)}</span>`:`<span style="color:var(--ok)">✅ meta batida!</span>`}
       </div>`:`<div style="font-size:11px;color:var(--text3)">Sem meta definida${extra>0?` · extra: ${moneyShort(extra)}`:''}</div>`}
     </div>`;
@@ -5794,6 +5840,7 @@ function renderGestao(){
   if(resEl&&!resEl.value)resEl.value=motiv.results||'';
   renderModelRequestsSplit();
   renderScheduleRequests();
+  renderWeeklyChatAnalysisBoard();
   const sel=document.getElementById('sched-req-chatter');
   if(sel&&!sel.options.length)sel.innerHTML=S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   // Always populate chat analysis chatter select with full team list
@@ -6751,7 +6798,7 @@ function setTesterDecision(chatterId,decision){
   } else if(decision==='reprovado'){
     toast(`${c.name} marcado como reprovado.`);
   } else {
-    toast(`${c.name} colocado em espera.`);
+    toast(`${c.name} colocado nas Reservas — entra quando faltar cobertura de turno.`);
   }
   save();
   renderTesters();
@@ -6795,7 +6842,7 @@ function renderTesters(){
   const fmtBR=dk=>{const[y,mo,d]=dk.split('-');return`${d}/${mo}/${y}`;};
 
   const decisionBtns=(c,current)=>['aprovado','espera','reprovado'].map(op=>{
-    const labels={aprovado:'✅ Aprovado',espera:'⏳ Espera',reprovado:'❌ Reprovado'};
+    const labels={aprovado:'✅ Aprovado',espera:'🔵 Reservas',reprovado:'❌ Reprovado'};
     const colors={aprovado:'var(--ok)',espera:'var(--warn)',reprovado:'var(--bad)'};
     const bgs={aprovado:'var(--ok-soft)',espera:'var(--warn-soft)',reprovado:'var(--bad-soft)'};
     const sel2=current===op;
@@ -6900,7 +6947,33 @@ function renderTesterDetail(cid){
     </div>
   </div>`;
 
-  el.innerHTML=analysisPanel+`
+  const isReserva=S.chatterFichas?.[cid]?.testerDecision==='espera';
+  const reservaPanel=isReserva?(()=>{
+    const workDays=getTesterAllWorkDays(cid);
+    const totalAll=workDays.reduce((s,d)=>s+d.revenue,0);
+    const extraWeek=getChatterExtraRevenue(cid,0);
+    const extraBonusWeek=extraWeek*0.10;
+    return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--bad)">
+      <div class="panel-head"><div class="panel-title">🔵 Reserva — histórico completo</div></div>
+      <div style="font-size:11.5px;color:var(--text2);margin-bottom:10px">Cobre turno quando falta chatter disponível. Pagamento é só por hora extra (10% do faturamento coberto).</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:var(--bg-soft);border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:9px;color:var(--text3)">Faturamento total coberto</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(totalAll)}</div>
+        </div>
+        <div style="background:var(--bad-soft);border-radius:8px;padding:8px;text-align:center">
+          <div style="font-size:9px;color:var(--bad)">Hora extra essa semana</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono);color:var(--bad)">${money(extraBonusWeek)}</div>
+        </div>
+      </div>
+      ${workDays.length?`<div style="max-height:160px;overflow-y:auto">${workDays.slice().reverse().map(d=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:12px">
+        <span>${d.date.split('-').reverse().join('/')}</span><span style="font-weight:700">${money(d.revenue)}</span>
+      </div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--text3)">Sem faturamento lançado ainda</div>'}
+      <button class="btn btn-ghost btn-sm btn-block" style="margin-top:10px" onclick="openAddShiftForChatter('${cid}')">🔁 Realocar em turno</button>
+    </div>`;
+  })():'';
+
+  el.innerHTML=reservaPanel+analysisPanel+`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-weight:800;font-size:16px">${c.name}</div>
@@ -7486,11 +7559,27 @@ function renderProjecaoChatter(cid,containerId){
       </div>
     </div>`;
 
-  // ---- Projeção motivacional: empresa + chatter + análise curta de desenvolvimento ----
+  // ---- Projeção motivacional: empresa + ganho REAL do chatter (todas as formas de pagamento) + análise curta de desenvolvimento ----
   {
     const avgWeekRev=getChatterAvgWeeklyRevenue(cid);
-    const projMonth=avgWeekRev*(30/7);
     const companyProjMonth=getCompanyMonthlyProjection();
+
+    // Ganho real projetado — mesma fórmula da aba Pagamento, com TODAS as
+    // formas: comissão sobre faturamento + prêmio de meta + high ticket
+    // (8%) + hora extra (10%). Não é só faturamento, é o que ele recebe.
+    const weekRev=getChatterWeekRevenue(cid,0);
+    const weekExtra=getChatterExtraRevenue(cid,0);
+    const {htTotal}=getChatterWeekHighTicket(cid,0);
+    const wkeyNow=getWeekKey(0);
+    const goalsNow=S.chatterWeekGoals[wkeyNow]||{};
+    const cat=f.pagCategoria||'B';
+    const metaManual=parseFloat(goalsNow[cid])||0;
+    const metaCat=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
+    const pctNow=weekRev>0&&metaCat>0?Math.round(weekRev/metaCat*100):0;
+    const medalNow=autoMedalForPct(pctNow);
+    const pag=calcChatterPagamento(weekRev,medalNow,cat,htTotal,weekExtra,metaManual);
+    const projGanhoMonth=pag.totalComPiso*(30/7);
+    const projMonth=avgWeekRev*(30/7); // faturamento gerado (referência, não é o ganho dele)
 
     // Análise curta de desenvolvimento pessoal: compara o mês mais antigo com o mais recente
     let devText;
@@ -7513,21 +7602,39 @@ function renderProjecaoChatter(cid,containerId){
         <div style="text-align:center;margin-bottom:12px">
           <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🚀 Projeção para os próximos 30 dias</div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
           <div style="text-align:center;background:var(--bg);border-radius:10px;padding:10px">
             <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Faturamento da empresa</div>
             <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(companyProjMonth)}</div>
           </div>
           <div style="text-align:center;background:var(--bg);border-radius:10px;padding:10px">
-            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Faturamento de ${c.name.split(' ')[0]}</div>
-            <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--accent)">${money(projMonth)}</div>
+            <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">Ganho de ${c.name.split(' ')[0]}</div>
+            <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:var(--accent)">${money(projGanhoMonth)}</div>
           </div>
         </div>
-        ${avgWeekRev>0?`<div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:10px">no ritmo atual — média de ${money(avgWeekRev)}/semana (${c.name.split(' ')[0]})</div>`:''}
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">
+          <div style="text-align:center;background:var(--bg);border-radius:7px;padding:6px 3px">
+            <div style="font-size:8.5px;color:var(--text3)">Comissão</div>
+            <div style="font-size:11.5px;font-weight:700">${money(pag.comissao*(30/7))}</div>
+          </div>
+          <div style="text-align:center;background:var(--bg);border-radius:7px;padding:6px 3px">
+            <div style="font-size:8.5px;color:var(--text3)">Prêmio meta</div>
+            <div style="font-size:11.5px;font-weight:700">${money(pag.premio*(30/7))}</div>
+          </div>
+          <div style="text-align:center;background:var(--bg);border-radius:7px;padding:6px 3px">
+            <div style="font-size:8.5px;color:var(--text3)">High ticket</div>
+            <div style="font-size:11.5px;font-weight:700">${money(pag.htBonus*(30/7))}</div>
+          </div>
+          <div style="text-align:center;background:var(--bg);border-radius:7px;padding:6px 3px">
+            <div style="font-size:8.5px;color:var(--text3)">Hora extra</div>
+            <div style="font-size:11.5px;font-weight:700">${money(pag.extraBonus*(30/7))}</div>
+          </div>
+        </div>
+        ${avgWeekRev>0?`<div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:10px">no ritmo atual — gerando média de ${money(avgWeekRev)}/semana em faturamento</div>`:''}
         <div style="font-size:12.5px;color:var(--text);line-height:1.5;background:var(--bg);border-radius:8px;padding:9px 11px;margin-bottom:8px">
           <strong>🧠 Desenvolvimento:</strong> ${devText}
         </div>
-        ${avgWeekRev>0?`<div style="font-size:12.5px;color:var(--text);text-align:center;line-height:1.5">💪 Continue nesse ritmo e ${c.name.split(' ')[0]} pode fechar o mês com <strong>${money(projMonth)}</strong>! Cada venda extra hoje ajuda a bater essa marca ainda mais rápido.</div>`:''}
+        ${avgWeekRev>0?`<div style="font-size:12.5px;color:var(--text);text-align:center;line-height:1.5">💪 Continue nesse ritmo e ${c.name.split(' ')[0]} pode fechar o mês recebendo <strong>${money(projGanhoMonth)}</strong> (soma de todas as formas de pagamento)!</div>`:''}
       </div>`;
     }
   }
