@@ -199,6 +199,17 @@ function hideInitialLoadOverlay(){
   const el=document.getElementById('initial-load-overlay');
   if(el)el.remove();
 }
+function showLoadOverlayError(err){
+  const el=document.getElementById('initial-load-overlay');
+  if(!el)return; // já foi liberado — não sobrescreve a tela normal
+  const msg=(err&&(err.code?`${err.code} — ${err.message||''}`:err.message))||'Erro desconhecido ao conectar';
+  el.innerHTML=`<div style="max-width:320px;text-align:center;padding:0 20px">
+    <div style="font-size:28px;margin-bottom:10px">⚠️</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:6px">Não consegui conectar ao banco de dados</div>
+    <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:16px;word-break:break-word">${msg}</div>
+    <button onclick="hideInitialLoadOverlay()" class="btn btn-primary btn-sm">Continuar mesmo assim</button>
+  </div>`;
+}
 let fbLastErrorMessage='';
 let fbInitAttempts=0;
 
@@ -211,6 +222,7 @@ function initFirebaseWithRetry(){
   if(typeof firebase==='undefined'){
     fbSyncStatus='offline';
     updateSyncBadge();
+    showLoadOverlayError({message:'O script do Firebase (firebase-bundle.js) não carregou. Verifique se o arquivo está no ar e se o navegador não está bloqueando o script.'});
     return;
   }
   initFirebase();
@@ -230,14 +242,19 @@ function initFirebase(){
     const app=firebase.apps&&firebase.apps.length?firebase.app():firebase.initializeApp(firebaseConfig);
     fbDb=firebase.firestore();
     fbReady=true;
-    // Timeout: if no response in 8s, give up silently
+    // Se não vier nenhuma resposta (nem sucesso, nem erro) em 8s — rede
+    // bloqueada, CORS, etc — mostra isso na tela em vez de falhar em silêncio.
     const t=setTimeout(()=>{
-      if(fbSyncStatus!=='online'){fbSyncStatus='offline';updateSyncBadge();}
+      if(fbSyncStatus!=='online'){
+        fbSyncStatus='offline';updateSyncBadge();
+        showLoadOverlayError({message:'O Firestore não respondeu em 8 segundos. Pode ser bloqueio de rede/firewall, ou as regras de segurança do Firebase.'});
+      }
     },8000);
     listenToFirestore(t);
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
+    showLoadOverlayError(e);
   }
 }
 
@@ -393,6 +410,7 @@ function listenToFirestore(connectTimeout){
         if(connectTimeout)clearTimeout(connectTimeout);
         fbSyncStatus='offline';
         updateSyncBadge();
+        showLoadOverlayError(err);
       }
     );
   });
@@ -1549,6 +1567,7 @@ function renderSmartAlerts(){
 }
 
 function renderHome(){
+  renderMorningRoutine();
   renderWatchBanner();
   renderCriticalMetaNotice();
   renderEscritorioPanel();
@@ -4202,7 +4221,7 @@ function renderMorningRoutine(){
   if(!S.morningRoutineDone[today])S.morningRoutineDone[today]=[];
   const doneIds=new Set(S.morningRoutineDone[today]);
   if(!S.morningRoutine.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Adicione itens da rotina abaixo</div>';return;}
-  const sorted=[...S.morningRoutine].sort((a,b)=>(a.time||'99:99').localeCompare(b.time||'99:99'));
+  const sorted=[...S.morningRoutine].sort((a,b)=>taskSortKey(a,true).localeCompare(taskSortKey(b,true)));
   el.innerHTML=sorted.map(item=>taskRowHtml(item,`morning|_|${item.id}`,doneIds.has(item.id),{
     toggleDone:`toggleRoutineItem('${item.id}')`,
     togglePriority:`toggleMorningPriority('${item.id}')`,
@@ -4226,7 +4245,7 @@ function toggleMorningPriority(id){
   save();renderMorningRoutine();
 }
 function swapMorningTime(id,dir){
-  const sorted=[...S.morningRoutine].sort((a,b)=>(a.time||'99:99').localeCompare(b.time||'99:99'));
+  const sorted=[...S.morningRoutine].sort((a,b)=>taskSortKey(a,true).localeCompare(taskSortKey(b,true)));
   const idx=sorted.findIndex(x=>x.id===id);
   const swapIdx=idx+dir;
   if(swapIdx<0||swapIdx>=sorted.length)return;
@@ -4988,8 +5007,12 @@ save();
 initFirebaseWithRetry();
 // Segurança: nunca deixa a tela de carregamento travada pra sempre (ex: sem
 // internet) — depois de um tempo, libera o app pra funcionar com o que tiver
-// localmente, mesmo que o Firebase ainda não tenha respondido.
-setTimeout(hideInitialLoadOverlay,7000);
+// localmente, mesmo que o Firebase ainda não tenha respondido. Esse prazo é
+// maior que o timeout do Firebase (8s) de propósito, pra dar tempo da
+// mensagem de erro real aparecer antes de esconder a tela.
+setTimeout(()=>{
+  if(!document.getElementById('initial-load-overlay')?.querySelector('button'))hideInitialLoadOverlay();
+},10000);
 document.getElementById('abs-date').value=todayKey();
 
 if(!S.hasSeededStudies&&!S.studies.length){
@@ -5270,6 +5293,19 @@ let selectedTaskDay=getTodayDayKey();
 // uma tarefa: dá pra editar texto/horário e trocar de lugar com a vizinha
 // (troca de horário) usando as flechinhas. Vale pra rotina da manhã e
 // pros 3 quadros de tarefas (diárias/semanais/mensais).
+// Ordenação por horário: pra tarefas "diárias" e a rotina da manhã, um
+// horário de madrugada (antes das 6h) conta como continuação do dia
+// anterior, não como o começo de um novo dia — assim, se você trabalha até
+// 1h da manhã, uma tarefa marcada pra 00:30 fica no FIM da lista, não volta
+// pro topo quando passa da meia-noite.
+function taskSortKey(t,treatEarlyAsLateNight){
+  let time=t.time||'99:99';
+  if(treatEarlyAsLateNight&&t.time){
+    const[h,m]=t.time.split(':').map(Number);
+    if(!isNaN(h)&&h<6)time=String(h+24).padStart(2,'0')+':'+String(m).padStart(2,'0');
+  }
+  return(t.date||'')+time;
+}
 let editingTaskKey=null;
 let _taskLpTimer=null;
 function taskLongPressStart(editKey){
@@ -5339,7 +5375,8 @@ function deleteTask(scope,key,id){
 }
 function swapTaskTime(scope,key,id,dir){
   const list=getTaskStore(scope,key);
-  const sorted=[...list].sort((a,b)=>((a.date||'')+(a.time||'99:99')).localeCompare((b.date||'')+(b.time||'99:99')));
+  const late=scope==='daily';
+  const sorted=[...list].sort((a,b)=>taskSortKey(a,late).localeCompare(taskSortKey(b,late)));
   const idx=sorted.findIndex(x=>x.id===id);
   const swapIdx=idx+dir;
   if(swapIdx<0||swapIdx>=sorted.length)return;
@@ -5358,7 +5395,8 @@ function renderTaskBoard(containerId,scope,key){
   const el=document.getElementById(containerId);
   if(!el)return;
   const list=getTaskStore(scope,key);
-  const sorted=[...list].sort((a,b)=>((a.date||'')+(a.time||'99:99')).localeCompare((b.date||'')+(b.time||'99:99')));
+  const late=scope==='daily';
+  const sorted=[...list].sort((a,b)=>taskSortKey(a,late).localeCompare(taskSortKey(b,late)));
   if(!sorted.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:6px 0">Nenhuma tarefa</div>';return;}
   el.innerHTML=sorted.map(t=>taskRowHtml(t,`${scope}|${key}|${t.id}`,t.done,{
     toggleDone:`toggleTaskDone('${scope}','${key}','${t.id}')`,
@@ -6115,8 +6153,8 @@ function saveJustificativa2(chatterId,text,datesStr){
 
 function renderGestao(){
   renderManagerProfile();
-  renderMorningRoutine();
   renderTaskBoards();
+  renderDailyList('problemsToday','daily-problems-list','daily-problems-badge');
   renderTrainings();
   renderPrizePanel();
   const wkey=getWeekKey();
