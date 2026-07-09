@@ -372,7 +372,7 @@ body{
   </div>
   <nav class="toptabs" id="toptabs">
     <button class="toptab active" data-go="home">Painel</button>
-    <button class="toptab" data-go="gestao">Gestão</button>
+    <button class="toptab" data-go="gestao">Agenda</button>
     <button class="toptab" data-go="fat">Faturamento</button>
     <button class="toptab" data-go="turno">Turno</button>
     <button class="toptab" data-go="time">Equipe</button>
@@ -819,7 +819,7 @@ body{
 <!-- ===================== GESTÃO ===================== -->
 <section class="view" id="v-gestao">
   <div class="eyebrow">operação</div>
-  <div class="view-title">Gestão</div>
+  <div class="view-title">Agenda</div>
 
   <!-- PERFIL DO GESTOR -->
   <div class="panel" id="manager-profile-panel" style="background:var(--accent-soft);border:none;position:relative">
@@ -837,26 +837,39 @@ body{
     </div>
   </div>
 
-  <!-- PROBLEMAS PRA RESOLVER HOJE -->
+  <!-- TAREFAS DIÁRIAS (recorrentes por dia da semana, com horário) -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">📋 Tarefas do dia</div><span class="pill pill-bad" style="font-size:10px" id="problems-badge"></span></div>
-    <div id="problems-list"></div>
+    <div class="panel-head"><div><div class="panel-title">📆 Tarefas Diárias</div><div class="panel-note">Clique na tarefa pra marcar urgente (fica vermelha)</div></div></div>
+    <div id="daily-task-day-selector" style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap"></div>
+    <div id="daily-tasks-list"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
-      <input class="finput" id="problems-input" placeholder="Descreva o problema..." style="flex:1">
-      <button class="btn btn-primary btn-sm" onclick="addProblem()">+</button>
+      <input type="time" class="finput" id="daily-task-time" style="flex:0 0 auto;width:100px">
+      <input class="finput" id="daily-task-input" placeholder="Nova tarefa..." style="flex:1" onkeydown="if(event.key==='Enter')addDailyTask()">
+      <button class="btn btn-primary btn-sm" onclick="addDailyTask()">+</button>
     </div>
   </div>
 
-  <!-- DEMANDAS DO KAIQUE -->
+  <!-- TAREFAS SEMANAIS -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">📌 Demandas do Kaique</div></div>
-    <div id="demandas2-list"></div>
-    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-      <input class="finput" id="demandas2-text" placeholder="Nova demanda...">
-      <div style="display:flex;gap:8px">
-        <input type="date" class="finput" id="demandas2-date" style="flex:1">
-        <button class="btn btn-primary btn-sm" onclick="addDemanda2()">+</button>
-      </div>
+    <div class="panel-head"><div class="panel-title">🗓 Tarefas Semanais</div></div>
+    <div id="weekly-tasks-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="date" class="finput" id="weekly-task-date" style="flex:0 0 auto;width:130px">
+      <input type="time" class="finput" id="weekly-task-time" style="flex:0 0 auto;width:90px">
+      <input class="finput" id="weekly-task-input" placeholder="Nova tarefa..." style="flex:1" onkeydown="if(event.key==='Enter')addWeeklyTask()">
+      <button class="btn btn-primary btn-sm" onclick="addWeeklyTask()">+</button>
+    </div>
+  </div>
+
+  <!-- TAREFAS MENSAIS -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📅 Tarefas Mensais</div></div>
+    <div id="monthly-tasks-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="date" class="finput" id="monthly-task-date" style="flex:0 0 auto;width:130px">
+      <input type="time" class="finput" id="monthly-task-time" style="flex:0 0 auto;width:90px">
+      <input class="finput" id="monthly-task-input" placeholder="Nova tarefa..." style="flex:1" onkeydown="if(event.key==='Enter')addMonthlyTask()">
+      <button class="btn btn-primary btn-sm" onclick="addMonthlyTask()">+</button>
     </div>
   </div>
 
@@ -909,6 +922,12 @@ body{
   <div class="panel" style="padding:10px 14px">
     <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🔍 Análise de hoje</div>
     <div id="weekly-analysis-board" style="font-size:12.5px"></div>
+  </div>
+
+  <!-- NECESSIDADE DE ORIENTAÇÃO — foco em 1 chatter por vez -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🎯 Necessidade de orientação</div><div class="panel-note">Ao marcar como feito, passa pro próximo</div></div></div>
+    <div id="orient-need-board"></div>
   </div>
 
   <!-- ORIENTAÇÕES -->
@@ -1141,7 +1160,7 @@ body{
 
 <nav class="bottomnav" id="bottomnav">
   <button class="navbtn active" data-go="home"><span class="navbtn-ic">⌂</span><span class="navbtn-lb">Painel</span></button>
-  <button class="navbtn" data-go="gestao"><span class="navbtn-ic">📋</span><span class="navbtn-lb">Gestão</span></button>
+  <button class="navbtn" data-go="gestao"><span class="navbtn-ic">🗓</span><span class="navbtn-lb">Agenda</span></button>
   <button class="navbtn" data-go="fat"><span class="navbtn-ic">¤</span><span class="navbtn-lb">Fat.</span></button>
   <button class="navbtn" data-go="turno"><span class="navbtn-ic">⇄</span><span class="navbtn-lb">Turno</span><span class="navbtn-dot" id="nav-dot-turno" style="display:none"></span></button>
   <button class="navbtn" data-go="time"><span class="navbtn-ic">▦</span><span class="navbtn-lb">Equipe</span></button>
@@ -1409,15 +1428,6 @@ body{
   <div class="modal-handle"></div><div class="modal-title">Relatório semanal</div>
   <div id="revreport-body"></div>
   <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="closeModal('m-revreport')">Fechar</button>
-</div></div>
-
-<div class="modalbg" id="m-task"><div class="modal">
-  <div class="modal-handle"></div><div class="modal-title">Nova tarefa de hoje</div>
-  <div class="field"><label class="flabel">Tarefa</label><input class="finput" id="task-text" placeholder="O que precisa ser feito..."></div>
-  <div class="field"><label class="flabel">Prioridade</label>
-    <select class="fselect" id="task-prio"><option value="alta">Alta</option><option value="media" selected>Média</option><option value="baixa">Baixa</option></select>
-  </div>
-  <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-task')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveTask()">Adicionar</button></div>
 </div></div>
 
 <div class="modalbg" id="m-goal"><div class="modal">
