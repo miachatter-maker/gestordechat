@@ -195,6 +195,10 @@ let fbSaveTimer=null;
 let fbSyncStatus='connecting';
 let fbIgnoreSnapshotsUntil=0; // timestamp — ignore all snapshots before this time
 let fbHasReceivedFirstSnapshot=false;
+function hideInitialLoadOverlay(){
+  const el=document.getElementById('initial-load-overlay');
+  if(el)el.remove();
+}
 let fbLastErrorMessage='';
 let fbInitAttempts=0;
 
@@ -345,8 +349,8 @@ function listenToFirestore(connectTimeout){
         if(connectTimeout)clearTimeout(connectTimeout);
         if(Date.now()<fbIgnoreSnapshotsUntil){
           fbDocsSeen.add(docId);
-          if(fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length)fbHasReceivedFirstSnapshot=true;
-          fbSyncStatus='online';updateSyncBadge();
+          if(fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length){fbHasReceivedFirstSnapshot=true;hideInitialLoadOverlay();}
+          fbSyncStatus=fbHasReceivedFirstSnapshot?'online':'connecting';updateSyncBadge();
           return;
         }
         let needsInitialPush=false;
@@ -378,12 +382,12 @@ function listenToFirestore(connectTimeout){
         fbDocsSeen.add(docId);
         const wasAllSeenBefore=fbHasReceivedFirstSnapshot;
         const allSeen=fbDocsSeen.size>=ALL_SYNC_DOC_IDS.length;
-        if(allSeen)fbHasReceivedFirstSnapshot=true;
+        if(allSeen){fbHasReceivedFirstSnapshot=true;hideInitialLoadOverlay();}
         if(needsInitialPush&&allSeen)pushToFirestore();
         else if(allSeen&&!wasAllSeenBefore){pruneHeavyData(S);pushToFirestore();} // sincronização inicial completa agora — limpa qualquer lixo que veio junto e envia a versão corrigida
-        fbSyncStatus='online';
+        fbSyncStatus=fbHasReceivedFirstSnapshot?'online':'connecting';
         updateSyncBadge();
-        runAutoBackupIfNeeded();
+        if(fbHasReceivedFirstSnapshot)runAutoBackupIfNeeded();
       },
       (err)=>{
         if(connectTimeout)clearTimeout(connectTimeout);
@@ -4198,14 +4202,16 @@ function renderMorningRoutine(){
   if(!S.morningRoutineDone[today])S.morningRoutineDone[today]=[];
   const doneIds=new Set(S.morningRoutineDone[today]);
   if(!S.morningRoutine.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Adicione itens da rotina abaixo</div>';return;}
-  el.innerHTML=S.morningRoutine.map(item=>{
-    const done=doneIds.has(item.id);
-    return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
-      <button onclick="toggleRoutineItem('${item.id}')" style="width:22px;height:22px;border-radius:5px;border:2px solid ${done?'var(--ok)':'var(--line)'};background:${done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px">${done?'<span style="color:#fff">✓</span>':''}</button>
-      <span style="flex:1;font-size:13.5px;${done?'text-decoration:line-through;color:var(--text3)':''}">${item.text}</span>
-      <button onclick="removeMorningRoutineItem('${item.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
-    </div>`;
-  }).join('');
+  const sorted=[...S.morningRoutine].sort((a,b)=>(a.time||'99:99').localeCompare(b.time||'99:99'));
+  el.innerHTML=sorted.map(item=>taskRowHtml(item,`morning|_|${item.id}`,doneIds.has(item.id),{
+    toggleDone:`toggleRoutineItem('${item.id}')`,
+    togglePriority:`toggleMorningPriority('${item.id}')`,
+    del:`removeMorningRoutineItem('${item.id}')`,
+    swapUp:`swapMorningTime('${item.id}',-1)`,
+    swapDown:`swapMorningTime('${item.id}',1)`,
+    setTime:`updateMorningField('${item.id}','time',this.value)`,
+    setText:`updateMorningField('${item.id}','text',this.value)`,
+  })).join('');
 }
 function toggleRoutineItem(id){
   const today=todayKey();
@@ -4214,11 +4220,33 @@ function toggleRoutineItem(id){
   if(idx===-1)S.morningRoutineDone[today].push(id);else S.morningRoutineDone[today].splice(idx,1);
   save();renderMorningRoutine();
 }
+function toggleMorningPriority(id){
+  const t=S.morningRoutine.find(x=>x.id===id);
+  if(t)t.urgent=!t.urgent;
+  save();renderMorningRoutine();
+}
+function swapMorningTime(id,dir){
+  const sorted=[...S.morningRoutine].sort((a,b)=>(a.time||'99:99').localeCompare(b.time||'99:99'));
+  const idx=sorted.findIndex(x=>x.id===id);
+  const swapIdx=idx+dir;
+  if(swapIdx<0||swapIdx>=sorted.length)return;
+  const a=S.morningRoutine.find(x=>x.id===sorted[idx].id);
+  const b=S.morningRoutine.find(x=>x.id===sorted[swapIdx].id);
+  const tmp=a.time;a.time=b.time;b.time=tmp;
+  save();renderMorningRoutine();
+}
+function updateMorningField(id,field,value){
+  const t=S.morningRoutine.find(x=>x.id===id);
+  if(t)t[field]=value;
+  save();renderMorningRoutine();
+}
 function addMorningRoutine(){
   const inp=document.getElementById('morning-routine-input');
   const text=inp?.value.trim();if(!text)return;
-  S.morningRoutine.push({id:'mr'+Date.now(),text});
-  inp.value='';save();renderMorningRoutine();
+  const timeInp=document.getElementById('morning-routine-time');
+  const time=timeInp?.value||'';
+  S.morningRoutine.push({id:'mr'+Date.now(),text,time,urgent:false});
+  inp.value='';if(timeInp)timeInp.value='';save();renderMorningRoutine();
 }
 function removeMorningRoutineItem(id){
   S.morningRoutine=S.morningRoutine.filter(x=>x.id!==id);
@@ -4958,6 +4986,10 @@ load();
 pruneHeavyData(S);
 save();
 initFirebaseWithRetry();
+// Segurança: nunca deixa a tela de carregamento travada pra sempre (ex: sem
+// internet) — depois de um tempo, libera o app pra funcionar com o que tiver
+// localmente, mesmo que o Firebase ainda não tenha respondido.
+setTimeout(hideInitialLoadOverlay,7000);
 document.getElementById('abs-date').value=todayKey();
 
 if(!S.hasSeededStudies&&!S.studies.length){
@@ -5234,6 +5266,39 @@ function markWeeklyAnalysisDone(cid){
    no texto marca urgente (fica vermelha).
    =========================================================== */
 let selectedTaskDay=getTodayDayKey();
+// Segurar apertado (mouse ou toque) por ~450ms abre o modo de edição de
+// uma tarefa: dá pra editar texto/horário e trocar de lugar com a vizinha
+// (troca de horário) usando as flechinhas. Vale pra rotina da manhã e
+// pros 3 quadros de tarefas (diárias/semanais/mensais).
+let editingTaskKey=null;
+let _taskLpTimer=null;
+function taskLongPressStart(editKey){
+  clearTimeout(_taskLpTimer);
+  _taskLpTimer=setTimeout(()=>{editingTaskKey=editKey;renderTaskBoards();renderMorningRoutine();},450);
+}
+function taskLongPressCancel(){clearTimeout(_taskLpTimer);}
+function closeTaskEdit(){editingTaskKey=null;renderTaskBoards();renderMorningRoutine();}
+function taskRowHtml(t,editKey,isDone,cb){
+  const isEditing=editingTaskKey===editKey;
+  if(isEditing){
+    return`<div style="display:flex;align-items:center;gap:6px;padding:7px 6px;border-bottom:1px solid var(--line);background:var(--bg-soft);border-radius:6px;margin:2px 0">
+      <div style="display:flex;flex-direction:column">
+        <button onclick="${cb.swapUp}" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:10px;padding:0;line-height:1.3">▲</button>
+        <button onclick="${cb.swapDown}" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:10px;padding:0;line-height:1.3">▼</button>
+      </div>
+      <input type="time" class="finput" value="${t.time||''}" onchange="${cb.setTime}" style="width:82px;flex-shrink:0;padding:4px 6px;font-size:12px">
+      <input class="finput" value="${(t.text||'').replace(/"/g,'&quot;')}" onblur="${cb.setText}" style="flex:1;padding:4px 6px;font-size:13px">
+      <button onclick="closeTaskEdit()" style="background:none;border:none;color:var(--ok);cursor:pointer;font-size:16px">✓</button>
+    </div>`;
+  }
+  return`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);user-select:none"
+    onpointerdown="taskLongPressStart('${editKey}')" onpointerup="taskLongPressCancel()" onpointerleave="taskLongPressCancel()">
+    <button onclick="${cb.toggleDone}" style="width:20px;height:20px;border-radius:5px;border:2px solid ${isDone?'var(--ok)':'var(--line-strong)'};background:${isDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${isDone?'<span style="color:#fff">✓</span>':''}</button>
+    <span style="font-size:10.5px;font-family:var(--font-mono);color:var(--text3);width:${t.date?'72px':'38px'};flex-shrink:0">${t.date?t.date.slice(8,10)+'/'+t.date.slice(5,7)+' ':''}${t.time||'--:--'}</span>
+    <span onclick="${cb.togglePriority}" style="flex:1;font-size:13px;cursor:pointer;${t.urgent?'color:var(--pink);font-weight:700':''}${isDone?'text-decoration:line-through;opacity:.5':''}">${t.text}${t.urgent?' 🌸':''}</span>
+    <button onclick="${cb.del}" style="background:none;border:none;color:var(--text3);cursor:pointer">✕</button>
+  </div>`;
+}
 function getTaskStore(scope,key){
   if(scope==='daily'){if(!S.dailyTasksByDay[key])S.dailyTasksByDay[key]=[];return S.dailyTasksByDay[key];}
   if(scope==='weekly'){if(!S.weeklyTasks[key])S.weeklyTasks[key]=[];return S.weeklyTasks[key];}
@@ -5272,19 +5337,38 @@ function deleteTask(scope,key,id){
   if(idx>-1)list.splice(idx,1);
   save();renderTaskBoards();
 }
+function swapTaskTime(scope,key,id,dir){
+  const list=getTaskStore(scope,key);
+  const sorted=[...list].sort((a,b)=>((a.date||'')+(a.time||'99:99')).localeCompare((b.date||'')+(b.time||'99:99')));
+  const idx=sorted.findIndex(x=>x.id===id);
+  const swapIdx=idx+dir;
+  if(swapIdx<0||swapIdx>=sorted.length)return;
+  const a=list.find(x=>x.id===sorted[idx].id);
+  const b=list.find(x=>x.id===sorted[swapIdx].id);
+  const tmpT=a.time;a.time=b.time;b.time=tmpT;
+  const tmpD=a.date;a.date=b.date;b.date=tmpD;
+  save();renderTaskBoards();
+}
+function updateTaskField(scope,key,id,field,value){
+  const t=getTaskStore(scope,key).find(x=>x.id===id);
+  if(t)t[field]=value;
+  save();renderTaskBoards();
+}
 function renderTaskBoard(containerId,scope,key){
   const el=document.getElementById(containerId);
   if(!el)return;
   const list=getTaskStore(scope,key);
   const sorted=[...list].sort((a,b)=>((a.date||'')+(a.time||'99:99')).localeCompare((b.date||'')+(b.time||'99:99')));
   if(!sorted.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:6px 0">Nenhuma tarefa</div>';return;}
-  el.innerHTML=sorted.map(t=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
-      <button onclick="toggleTaskDone('${scope}','${key}','${t.id}')" style="width:20px;height:20px;border-radius:5px;border:2px solid ${t.done?'var(--ok)':'var(--line-strong)'};background:${t.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${t.done?'<span style="color:#fff">✓</span>':''}</button>
-      <span style="font-size:10.5px;font-family:var(--font-mono);color:var(--text3);width:${t.date?'72px':'38px'};flex-shrink:0">${t.date?t.date.slice(8,10)+'/'+t.date.slice(5,7)+' ':''}${t.time||'--:--'}</span>
-      <span onclick="toggleTaskUrgent('${scope}','${key}','${t.id}')" style="flex:1;font-size:13px;cursor:pointer;${t.urgent?'color:var(--bad);font-weight:700':''}${t.done?'text-decoration:line-through;opacity:.5':''}">${t.text}${t.urgent?' 🔴':''}</span>
-      <button onclick="deleteTask('${scope}','${key}','${t.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer">✕</button>
-    </div>`).join('');
+  el.innerHTML=sorted.map(t=>taskRowHtml(t,`${scope}|${key}|${t.id}`,t.done,{
+    toggleDone:`toggleTaskDone('${scope}','${key}','${t.id}')`,
+    togglePriority:`toggleTaskUrgent('${scope}','${key}','${t.id}')`,
+    del:`deleteTask('${scope}','${key}','${t.id}')`,
+    swapUp:`swapTaskTime('${scope}','${key}','${t.id}',-1)`,
+    swapDown:`swapTaskTime('${scope}','${key}','${t.id}',1)`,
+    setTime:`updateTaskField('${scope}','${key}','${t.id}','time',this.value)`,
+    setText:`updateTaskField('${scope}','${key}','${t.id}','text',this.value)`,
+  })).join('');
 }
 function renderTaskBoards(){
   const daySel=document.getElementById('daily-task-day-selector');
