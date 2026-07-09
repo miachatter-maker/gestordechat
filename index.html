@@ -42,6 +42,8 @@
   --bad-soft:#FBEAEA;
   --info:#1D5FAE;
   --info-soft:#EAF2FB;
+  --pink:#C2255C;
+  --pink-soft:#FCE9F1;
 
   --r-sm:8px;--r-md:10px;--r-lg:14px;--r-xl:16px;
   --font-display:'Inter',system-ui,sans-serif;
@@ -351,6 +353,11 @@ body{
 </style>
 </head>
 <body>
+<div id="initial-load-overlay" style="position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+  <div style="width:36px;height:36px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite"></div>
+  <div style="font-size:13px;color:var(--text2)">Carregando dados…</div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <div id="app">
 
 <header class="topbar">
@@ -829,17 +836,18 @@ body{
 
   <!-- ROTINA DA MANHÃ -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">☀️ Rotina da manhã</div><span class="pill pill-flat" style="font-size:10px">repete todo dia</span></div>
+    <div class="panel-head"><div><div class="panel-title">☀️ Rotina da manhã</div><div class="panel-note">Segure apertado pra editar/trocar horário</div></div><span class="pill pill-flat" style="font-size:10px">repete todo dia</span></div>
     <div id="morning-routine-list"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
-      <input class="finput" id="morning-routine-input" placeholder="Nova tarefa da rotina..." style="flex:1">
+      <input type="time" class="finput" id="morning-routine-time" style="flex:0 0 auto;width:90px">
+      <input class="finput" id="morning-routine-input" placeholder="Nova tarefa da rotina..." style="flex:1" onkeydown="if(event.key==='Enter')addMorningRoutine()">
       <button class="btn btn-primary btn-sm" onclick="addMorningRoutine()">+</button>
     </div>
   </div>
 
   <!-- TAREFAS DIÁRIAS (recorrentes por dia da semana, com horário) -->
   <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">📆 Tarefas Diárias</div><div class="panel-note">Clique na tarefa pra marcar urgente (fica vermelha)</div></div></div>
+    <div class="panel-head"><div><div class="panel-title">📆 Tarefas Diárias</div><div class="panel-note">Toque marca prioridade (🌸) · segure apertado pra editar/trocar horário</div></div></div>
     <div id="daily-task-day-selector" style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap"></div>
     <div id="daily-tasks-list"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
