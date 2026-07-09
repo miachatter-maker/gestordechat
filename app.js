@@ -6989,7 +6989,9 @@ function daysSinceDecision(cid){
   return Math.floor((new Date(todayKey()+'T12:00:00')-new Date(dt+'T12:00:00'))/86400000);
 }
 function isPermanentReserva(cid){
-  return S.chatterFichas?.[cid]?.testerDecision==='espera'&&daysSinceDecision(cid)>=3;
+  // Ao clicar em "Reservas" no Testers, a pessoa sai de lá e aparece na
+  // aba Reservas na hora — não espera mais nenhum prazo.
+  return S.chatterFichas?.[cid]?.testerDecision==='espera';
 }
 function renderReservas(){
   const el=document.getElementById('reservas-content');
