@@ -30,8 +30,6 @@ function migrateState(s){
   if(!s.alertNotes)s.alertNotes={};
   if(!s.horaExtraSlots)s.horaExtraSlots={};
   if(!s.swaps)s.swaps=[];
-  if(!s.morningRoutine)s.morningRoutine=[];
-  if(!s.morningRoutineDone)s.morningRoutineDone={}; // dateKey -> [itemId,...] — feito/dia (campo próprio, seguro para salvar)
   if(!s.problemsToday||!Array.isArray(s.problemsToday))s.problemsToday=[];
   if(!s.demandas)s.demandas={};
   if(!s.trainings)s.trainings=[];
@@ -569,8 +567,6 @@ let S={
   alertNotes:{},         // 'date_alertId' -> text
   horaExtraSlots:{},     // weekKey -> [{...}]
   swaps:[],              // [{id, date, covererId, originalId, ...}]
-  morningRoutine:[],     // [{id, text, done}] — repeats daily
-  morningRoutineDone:{}, // dateKey -> [itemId,...] — marcação diária de feito (campo próprio, JSON-safe)
   problemsToday:[],      // persistent list [{id, text, done}] — does NOT reset daily
   demandas:{},           // dateKey -> [{id, text, done}]
   trainings:[],          // [{id, title, date, days:[{day, script}]}]
@@ -1567,7 +1563,6 @@ function renderSmartAlerts(){
 }
 
 function renderHome(){
-  renderMorningRoutine();
   renderWatchBanner();
   renderCriticalMetaNotice();
   renderEscritorioPanel();
@@ -4208,69 +4203,10 @@ function openManualStatusModal(){
 }
 
 /* ===========================================================
-   GESTÃO — morning routine, problems, demands, training,
+   GESTÃO — problems, demands, training,
    evolutions, prize, motivational, requests, schedules
    =========================================================== */
 
-// ---- ROTINA DA MANHÃ (repeats daily, same tasks) ----
-function renderMorningRoutine(){
-  const el=document.getElementById('morning-routine-list');
-  if(!el)return;
-  const today=todayKey();
-  // Clone routine items with today's done state
-  if(!S.morningRoutineDone[today])S.morningRoutineDone[today]=[];
-  const doneIds=new Set(S.morningRoutineDone[today]);
-  if(!S.morningRoutine.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Adicione itens da rotina abaixo</div>';return;}
-  const sorted=[...S.morningRoutine].sort((a,b)=>taskSortKey(a,true).localeCompare(taskSortKey(b,true)));
-  el.innerHTML=sorted.map(item=>taskRowHtml(item,`morning|_|${item.id}`,doneIds.has(item.id),{
-    toggleDone:`toggleRoutineItem('${item.id}')`,
-    togglePriority:`toggleMorningPriority('${item.id}')`,
-    del:`removeMorningRoutineItem('${item.id}')`,
-    swapUp:`swapMorningTime('${item.id}',-1)`,
-    swapDown:`swapMorningTime('${item.id}',1)`,
-    setTime:`updateMorningField('${item.id}','time',this.value)`,
-    setText:`updateMorningField('${item.id}','text',this.value)`,
-  })).join('');
-}
-function toggleRoutineItem(id){
-  const today=todayKey();
-  if(!S.morningRoutineDone[today])S.morningRoutineDone[today]=[];
-  const idx=S.morningRoutineDone[today].indexOf(id);
-  if(idx===-1)S.morningRoutineDone[today].push(id);else S.morningRoutineDone[today].splice(idx,1);
-  save();renderMorningRoutine();
-}
-function toggleMorningPriority(id){
-  const t=S.morningRoutine.find(x=>x.id===id);
-  if(t)t.urgent=!t.urgent;
-  save();renderMorningRoutine();
-}
-function swapMorningTime(id,dir){
-  const sorted=[...S.morningRoutine].sort((a,b)=>taskSortKey(a,true).localeCompare(taskSortKey(b,true)));
-  const idx=sorted.findIndex(x=>x.id===id);
-  const swapIdx=idx+dir;
-  if(swapIdx<0||swapIdx>=sorted.length)return;
-  const a=S.morningRoutine.find(x=>x.id===sorted[idx].id);
-  const b=S.morningRoutine.find(x=>x.id===sorted[swapIdx].id);
-  const tmp=a.time;a.time=b.time;b.time=tmp;
-  save();renderMorningRoutine();
-}
-function updateMorningField(id,field,value){
-  const t=S.morningRoutine.find(x=>x.id===id);
-  if(t)t[field]=value;
-  save();renderMorningRoutine();
-}
-function addMorningRoutine(){
-  const inp=document.getElementById('morning-routine-input');
-  const text=inp?.value.trim();if(!text)return;
-  const timeInp=document.getElementById('morning-routine-time');
-  const time=timeInp?.value||'';
-  S.morningRoutine.push({id:'mr'+Date.now(),text,time,urgent:false});
-  inp.value='';if(timeInp)timeInp.value='';save();renderMorningRoutine();
-}
-function removeMorningRoutineItem(id){
-  S.morningRoutine=S.morningRoutine.filter(x=>x.id!==id);
-  save();renderMorningRoutine();
-}
 
 // ---- DAILY TASK LIST HELPER (problems + demandas) ----
 function renderDailyList(storeKey,listId,badgeId){
@@ -5310,10 +5246,10 @@ let editingTaskKey=null;
 let _taskLpTimer=null;
 function taskLongPressStart(editKey){
   clearTimeout(_taskLpTimer);
-  _taskLpTimer=setTimeout(()=>{editingTaskKey=editKey;renderTaskBoards();renderMorningRoutine();},450);
+  _taskLpTimer=setTimeout(()=>{editingTaskKey=editKey;renderTaskBoards();},450);
 }
 function taskLongPressCancel(){clearTimeout(_taskLpTimer);}
-function closeTaskEdit(){editingTaskKey=null;renderTaskBoards();renderMorningRoutine();}
+function closeTaskEdit(){editingTaskKey=null;renderTaskBoards();}
 function taskRowHtml(t,editKey,isDone,cb){
   const isEditing=editingTaskKey===editKey;
   if(isEditing){
