@@ -38,6 +38,10 @@ function migrateState(s){
   if(!s.weekEvolutions)s.weekEvolutions={};
   if(!s.modelRequests)s.modelRequests={};
   if(!s.weeklyAnalysisDone)s.weeklyAnalysisDone={};
+  if(!s.dailyTasksByDay)s.dailyTasksByDay={dom:[],seg:[],ter:[],qua:[],qui:[],sex:[],sab:[]};
+  if(!s.weeklyTasks)s.weeklyTasks={};
+  if(!s.monthlyTasks)s.monthlyTasks={};
+  if(!s.orientedThisWeek)s.orientedThisWeek={};
   if(!s.weekPrize)s.weekPrize={};
   if(!s.motivational)s.motivational={};
   if(!s.scheduleRequests)s.scheduleRequests={};
@@ -551,6 +555,10 @@ let S={
   weekEvolutions:{},     // weekKey -> [{id, label, done, missed}]
   modelRequests:{},      // weekKey -> [{id, modelId, text}]
   weeklyAnalysisDone:{}, // weekKey -> [chatterId,...] — quem já foi analisado essa semana
+  dailyTasksByDay:{dom:[],seg:[],ter:[],qua:[],qui:[],sex:[],sab:[]}, // recorrentes por dia da semana
+  weeklyTasks:{},  // weekKey -> [{id,text,time,urgent,done}]
+  monthlyTasks:{}, // monthKey (YYYY-MM) -> [{id,text,time,urgent,done}]
+  orientedThisWeek:{}, // weekKey -> [chatterId,...]
   weekPrize:{},          // weekKey -> {goal, winner, prize}
   motivational:{},       // weekKey -> {idea, chatters:{id:{issue, help}}}
   scheduleRequests:{},   // weekKey -> [{id, chatterId, text}]
@@ -908,41 +916,7 @@ function getComputedLevelColor(level){
 /* ===========================================================
    FEATURE 2 — DAILY TASKS (general checklist, not chatter-bound)
    =========================================================== */
-function renderDailyTasks(){
-  const el=document.getElementById('daily-tasks-list');
-  if(!el)return; // element removed — tasks now managed in Gestão
-  const tasks=S.dailyTasks[today]||[];
-  if(!tasks.length){el.innerHTML='<div class="empty"><div class="empty-ic">✅</div><div class="empty-tx">Nenhuma tarefa para hoje.<br>Adicione itens da sua rotina de gestão.</div></div>';return;}
-  const pb={alta:'pill-bad',media:'pill-warn',baixa:'pill-flat'};
-  el.innerHTML='<div class="tasklist">'+tasks.map(t=>`
-    <div class="taskrow ${t.done?'done':''}">
-      <div class="tcheck ${t.done?'done':''}" onclick="toggleTask('${t.id}')">${t.done?'✓':''}</div>
-      <div class="tbody">
-        <div class="ttext">${t.text}</div>
-        <div class="tmeta-row"><span class="pill ${pb[t.prio]||'pill-flat'}">${t.prio}</span></div>
-      </div>
-      <button class="btn btn-icon btn-line" onclick="deleteTask('${t.id}')" style="font-size:14px">✕</button>
-    </div>`).join('')+'</div>';
-}
-function saveTask(){
-  const text=document.getElementById('task-text').value.trim();
-  if(!text){toast('⚠️ Escreva a tarefa');return;}
-  const today=todayKey();
-  if(!S.dailyTasks[today])S.dailyTasks[today]=[];
-  S.dailyTasks[today].push({id:'dt'+Date.now(),text,prio:document.getElementById('task-prio').value,done:false});
-  save();closeModal('m-task');document.getElementById('task-text').value='';
-  toast('✅ Tarefa adicionada!');renderDailyTasks();updateNavDots();
-}
-function toggleTask(id){
-  const today=todayKey();
-  const t=(S.dailyTasks[today]||[]).find(x=>x.id===id);
-  if(t){t.done=!t.done;save();renderDailyTasks();updateNavDots();}
-}
-function deleteTask(id){
-  const today=todayKey();
-  S.dailyTasks[today]=(S.dailyTasks[today]||[]).filter(x=>x.id!==id);
-  save();renderDailyTasks();toast('Removida');
-}
+
 
 /* ===========================================================
    FEATURE 3 — WEEKLY GOALS (team-level planning)
@@ -1252,6 +1226,25 @@ function getSmartAlerts(){
   const wkey=getWeekKey();
   const goals=S.chatterWeekGoals[wkey]||{};
   const daysLeft=getDaysRemainingInWeek();
+
+  // Tarefas semanais/mensais com data+hora marcadas — avisa a partir de
+  // 24h antes do prazo (e continua avisando se já passou e não foi feita).
+  const in24h=new Date(now.getTime()+24*3600*1000);
+  [{store:S.weeklyTasks[getWeekKey()]||[],scope:'weekly',key:getWeekKey()},
+   {store:S.monthlyTasks[todayKey().slice(0,7)]||[],scope:'monthly',key:todayKey().slice(0,7)}].forEach(({store,scope})=>{
+    store.forEach(t=>{
+      if(t.done||!t.date)return;
+      const dt=new Date(`${t.date}T${t.time||'23:59'}:00`);
+      if(isNaN(dt.getTime()))return;
+      if(dt<=in24h){
+        const overdue=dt<now;
+        alerts.push({id:`task-${scope}-${t.id}`,type:overdue?'bad':'warn',icon:overdue?'⏰':'🗓',
+          title:`${overdue?'Atrasada: ':''}${t.text}`,
+          body:`${scope==='weekly'?'Tarefa semanal':'Tarefa mensal'} — prevista para ${t.date.split('-').reverse().join('/')}${t.time?' às '+t.time:''}${t.urgent?' · marcada como urgente':''}`,
+          priority:overdue?0:1});
+      }
+    });
+  });
 
   S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester').forEach(c=>{
     const id=c.id;
@@ -2882,6 +2875,9 @@ function deleteChatter(id){
   });
   Object.keys(S.weeklyAnalysisDone).forEach(wkey=>{
     S.weeklyAnalysisDone[wkey]=(S.weeklyAnalysisDone[wkey]||[]).filter(cid=>cid!==id);
+  });
+  Object.keys(S.orientedThisWeek||{}).forEach(wkey=>{
+    S.orientedThisWeek[wkey]=(S.orientedThisWeek[wkey]||[]).filter(cid=>cid!==id);
   });
   Object.keys(S.scheduleRequests||{}).forEach(wkey=>{
     S.scheduleRequests[wkey]=(S.scheduleRequests[wkey]||[]).filter(x=>x.chatterId!==id);
@@ -5234,6 +5230,117 @@ function markWeeklyAnalysisDone(cid){
 }
 
 /* ===========================================================
+   TAREFAS (Diárias/Semanais/Mensais) — todas com horário; clicar
+   no texto marca urgente (fica vermelha).
+   =========================================================== */
+let selectedTaskDay=getTodayDayKey();
+function getTaskStore(scope,key){
+  if(scope==='daily'){if(!S.dailyTasksByDay[key])S.dailyTasksByDay[key]=[];return S.dailyTasksByDay[key];}
+  if(scope==='weekly'){if(!S.weeklyTasks[key])S.weeklyTasks[key]=[];return S.weeklyTasks[key];}
+  if(scope==='monthly'){if(!S.monthlyTasks[key])S.monthlyTasks[key]=[];return S.monthlyTasks[key];}
+  return[];
+}
+function selectTaskDay(dk){selectedTaskDay=dk;renderTaskBoards();}
+function addTaskGeneric(scope,key,inputId,timeId,dateId){
+  const inp=document.getElementById(inputId);
+  const text=inp?.value.trim();
+  if(!text){toast('⚠️ Descreva a tarefa');return;}
+  const timeInp=document.getElementById(timeId);
+  const time=timeInp?.value||'';
+  const dateInp=dateId?document.getElementById(dateId):null;
+  const date=dateInp?.value||'';
+  getTaskStore(scope,key).push({id:'tk'+Date.now()+Math.random().toString(36).slice(2,4),text,time,date,urgent:false,done:false});
+  inp.value='';if(timeInp)timeInp.value='';if(dateInp)dateInp.value='';
+  save();renderTaskBoards();
+}
+function addDailyTask(){addTaskGeneric('daily',selectedTaskDay,'daily-task-input','daily-task-time');}
+function addWeeklyTask(){addTaskGeneric('weekly',getWeekKey(),'weekly-task-input','weekly-task-time','weekly-task-date');}
+function addMonthlyTask(){addTaskGeneric('monthly',todayKey().slice(0,7),'monthly-task-input','monthly-task-time','monthly-task-date');}
+function toggleTaskDone(scope,key,id){
+  const t=getTaskStore(scope,key).find(x=>x.id===id);
+  if(t)t.done=!t.done;
+  save();renderTaskBoards();
+}
+function toggleTaskUrgent(scope,key,id){
+  const t=getTaskStore(scope,key).find(x=>x.id===id);
+  if(t)t.urgent=!t.urgent;
+  save();renderTaskBoards();
+}
+function deleteTask(scope,key,id){
+  const list=getTaskStore(scope,key);
+  const idx=list.findIndex(x=>x.id===id);
+  if(idx>-1)list.splice(idx,1);
+  save();renderTaskBoards();
+}
+function renderTaskBoard(containerId,scope,key){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const list=getTaskStore(scope,key);
+  const sorted=[...list].sort((a,b)=>((a.date||'')+(a.time||'99:99')).localeCompare((b.date||'')+(b.time||'99:99')));
+  if(!sorted.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:6px 0">Nenhuma tarefa</div>';return;}
+  el.innerHTML=sorted.map(t=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
+      <button onclick="toggleTaskDone('${scope}','${key}','${t.id}')" style="width:20px;height:20px;border-radius:5px;border:2px solid ${t.done?'var(--ok)':'var(--line-strong)'};background:${t.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${t.done?'<span style="color:#fff">✓</span>':''}</button>
+      <span style="font-size:10.5px;font-family:var(--font-mono);color:var(--text3);width:${t.date?'72px':'38px'};flex-shrink:0">${t.date?t.date.slice(8,10)+'/'+t.date.slice(5,7)+' ':''}${t.time||'--:--'}</span>
+      <span onclick="toggleTaskUrgent('${scope}','${key}','${t.id}')" style="flex:1;font-size:13px;cursor:pointer;${t.urgent?'color:var(--bad);font-weight:700':''}${t.done?'text-decoration:line-through;opacity:.5':''}">${t.text}${t.urgent?' 🔴':''}</span>
+      <button onclick="deleteTask('${scope}','${key}','${t.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer">✕</button>
+    </div>`).join('');
+}
+function renderTaskBoards(){
+  const daySel=document.getElementById('daily-task-day-selector');
+  if(daySel){
+    const labels={dom:'Dom',seg:'Seg',ter:'Ter',qua:'Qua',qui:'Qui',sex:'Sex',sab:'Sáb'};
+    daySel.innerHTML=DAY_KEYS.map(dk=>`<button onclick="selectTaskDay('${dk}')" class="btn ${dk===selectedTaskDay?'btn-primary':'btn-ghost'} btn-xs">${labels[dk]}</button>`).join('');
+  }
+  renderTaskBoard('daily-tasks-list','daily',selectedTaskDay);
+  renderTaskBoard('weekly-tasks-list','weekly',getWeekKey());
+  renderTaskBoard('monthly-tasks-list','monthly',todayKey().slice(0,7));
+}
+
+/* ===========================================================
+   NECESSIDADE DE ORIENTAÇÃO — mostra 1 chatter em foco por vez;
+   ao marcar como orientado, passa pro próximo que precisa.
+   =========================================================== */
+function getChattersNeedingOrientation(){
+  const wk=getWeekKey(0);
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const oriented=S.orientedThisWeek[wk]||[];
+  const candidates=[];
+  chatters.forEach(c=>{
+    if(oriented.includes(c.id))return;
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaManual=parseFloat((S.chatterWeekGoals[wk]||{})[c.id])||0;
+    const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
+    if(!meta)return;
+    const rev=getChatterWeekRevenue(c.id,0);
+    const pct=rev/meta*100;
+    if(pct>=60)return; // não está em dificuldade
+    candidates.push({c,pct:Math.round(pct)});
+  });
+  candidates.sort((a,b)=>a.pct-b.pct);
+  return candidates;
+}
+function renderOrientNeedBoard(){
+  const el=document.getElementById('orient-need-board');
+  if(!el)return;
+  const list=getChattersNeedingOrientation();
+  if(!list.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:6px 0">Ninguém precisa de orientação agora 👍</div>';return;}
+  const top=list[0];
+  el.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px;background:var(--bad-soft);border-radius:9px">
+    <div><div style="font-weight:700">${top.c.name}</div><div style="font-size:11.5px;color:var(--bad)">${top.pct}% da meta essa semana</div></div>
+    <button class="btn btn-primary btn-sm" onclick="markOriented('${top.c.id}')">✅ Já orientei</button>
+  </div>
+  ${list.length>1?`<div style="font-size:11px;color:var(--text3);margin-top:6px">+ ${list.length-1} outro(s) aguardando</div>`:''}`;
+}
+function markOriented(cid){
+  const wk=getWeekKey(0);
+  if(!S.orientedThisWeek[wk])S.orientedThisWeek[wk]=[];
+  if(!S.orientedThisWeek[wk].includes(cid))S.orientedThisWeek[wk].push(cid);
+  save();renderOrientNeedBoard();
+  toast('✅ Marcado como orientado');
+}
+
+/* ===========================================================
    ESTUDOS — updated with 3 fields each
    =========================================================== */
 function saveEstudosDraft(){
@@ -5925,8 +6032,7 @@ function saveJustificativa2(chatterId,text,datesStr){
 function renderGestao(){
   renderManagerProfile();
   renderMorningRoutine();
-  renderDailyList('problemsToday','problems-list','problems-badge');
-  renderDemandas2();
+  renderTaskBoards();
   renderTrainings();
   renderPrizePanel();
   const wkey=getWeekKey();
@@ -5938,16 +6044,9 @@ function renderGestao(){
   renderModelRequestsSplit();
   renderScheduleRequests();
   renderWeeklyChatAnalysisBoard();
+  renderOrientNeedBoard();
   const sel=document.getElementById('sched-req-chatter');
   if(sel&&!sel.options.length)sel.innerHTML=S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-  // Always populate chat analysis chatter select with full team list
-  const casel=document.getElementById('chat-analysis-chatter');
-  if(casel){
-    const prev=casel.value;
-    casel.innerHTML='<option value="">— selecionar chatter —</option>'+S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
-    if(prev)casel.value=prev;
-  }
-  renderChatAnalysisList();
   renderOrientList();
   renderGestaoMissingReports();
 }
