@@ -957,7 +957,6 @@ function renderSemana(){
   const notesEl=document.getElementById('week-notes');
   if(notesEl&&!notesEl.value)notesEl.value=S.weekNotes[getWeekKey()]||'';
   renderGoals();
-  renderChatterGoals();
   renderSemanaRevenue();
   renderSemanaDesenvolvimento();
 }
@@ -1073,7 +1072,7 @@ function saveWeekNotes(){
 function renderSemanaRevenue(){
   const el=document.getElementById('semana-revenue-preview');
   const wd=getWeekDates();
-  const chatters=S.chatters.filter(c=>c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='tester'&&c.time!=='elite');
   let total=0;
   wd.forEach(d=>chatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
   el.innerHTML=`<div style="font-family:var(--font-mono);font-size:30px;font-weight:700;color:var(--ok);text-align:center;padding:8px 0">${money(total)}</div>
@@ -2854,12 +2853,15 @@ function saveChatterDetail(id){
   save();toast('✅ Atualizado!');renderTeam(teamFilter);
 }
 function deleteChatter(id){
-  if(!confirm('Remover chatter? Isso também apaga faltas, orientações, treinamentos e histórico de ponto dele.'))return;
+  if(!confirm('Remover chatter? Isso apaga TUDO relacionado a ele em todas as abas (fichas, faltas, orientações, treinamentos, ponto, hora extra, análises, etc). Se quiser manter o histórico visível em algum lugar, use "Reservas" em vez de excluir.'))return;
   S.chatters=S.chatters.filter(c=>c.id!==id);
   S.shifts=S.shifts.filter(s=>s.chatterId!==id);
   S.absences=S.absences.filter(a=>a.chatterId!==id);
   S.orientations=S.orientations.filter(o=>o.chatterId!==id);
   S.chatterTrainings=S.chatterTrainings.filter(t=>t.chatterId!==id);
+  S.chatlabAnalyses=(S.chatlabAnalyses||[]).filter(a=>a.chatterId!==id);
+  delete S.chatterFichas[id];
+  delete S.testerLogs[id];
   Object.keys(S.turnoLog).forEach(dateKey=>{
     S.turnoLog[dateKey]=S.turnoLog[dateKey].filter(e=>e.chatterId!==id);
   });
@@ -2872,10 +2874,25 @@ function deleteChatter(id){
   Object.keys(S.watchAlerts).forEach(dateKey=>{
     delete S.watchAlerts[dateKey][id];
   });
+  Object.keys(S.folgas).forEach(dateKey=>{
+    S.folgas[dateKey]=(S.folgas[dateKey]||[]).filter(cid=>cid!==id);
+  });
+  Object.keys(S.horaExtraSlots).forEach(wkey=>{
+    S.horaExtraSlots[wkey]=(S.horaExtraSlots[wkey]||[]).filter(x=>x.chatterId!==id);
+  });
+  Object.keys(S.weeklyAnalysisDone).forEach(wkey=>{
+    S.weeklyAnalysisDone[wkey]=(S.weeklyAnalysisDone[wkey]||[]).filter(cid=>cid!==id);
+  });
+  Object.keys(S.scheduleRequests||{}).forEach(wkey=>{
+    S.scheduleRequests[wkey]=(S.scheduleRequests[wkey]||[]).filter(x=>x.chatterId!==id);
+  });
+  Object.keys(S.motivational||{}).forEach(wkey=>{
+    if(S.motivational[wkey]?.chatters)delete S.motivational[wkey].chatters[id];
+  });
   Object.keys(S.revenues).forEach(key=>{
     if(key.startsWith(id+'_'))delete S.revenues[key];
   });
-  save();closeModal('m-chatter-detail');toast('Chatter e histórico removidos');renderTeam(teamFilter);
+  save();closeModal('m-chatter-detail');toast('Chatter e todo histórico removidos de todas as abas');renderTeam(teamFilter);
 }
 
 /* ===========================================================
@@ -3283,8 +3300,9 @@ function renderRevenueTable(){
   if(!S.chatters.length){el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre chatters para lançar faturamento</div></div>';return;}
   const dateKey=selectedFatDate;
 
-  // Show all chatters — always. For past dates show everyone, for today show scheduled + those with revenue
-  const allChatters=S.chatters.filter(c=>c.time!=='elite');
+  // Show all chatters do time base — elite e testers/reservas têm seu
+  // próprio fluxo de faturamento (Gerador Elite / Testers / Reservas)
+  const allChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
 
   // Check if any data exists for this date (from reports or manual)
   const hasReportData=allChatters.some(c=>S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0)>0));
@@ -3402,23 +3420,24 @@ document.getElementById('report-period-tabs').addEventListener('click',e=>{
 function renderReport(period){
   const el=document.getElementById('report-body');
   const wd=getWeekDates();const today=new Date();
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   if(period==='week'){
-    let total=0;wd.forEach(d=>S.chatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
+    let total=0;wd.forEach(d=>teamChatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
     el.innerHTML=`<div style="font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--ok);text-align:center;padding:6px 0">${money(total)}</div>
     <div class="divider"></div><div class="sectionlb">por modelo</div>
-    ${S.models.map(m=>{let r=0;wd.forEach(d=>S.chatters.forEach(c=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;}));return`<div class="reprow"><div class="replb">${m.emoji} ${m.name}</div><div class="repval">${money(r)}</div></div>`;}).join('')}
+    ${S.models.map(m=>{let r=0;wd.forEach(d=>teamChatters.forEach(c=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;}));return`<div class="reprow"><div class="replb">${m.emoji} ${m.name}</div><div class="repval">${money(r)}</div></div>`;}).join('')}
     <div class="divider"></div><div class="sectionlb">por chatter</div>
-    ${S.chatters.map(c=>`<div class="reprow"><div class="replb">${c.name}</div><div class="repval">${money(getChatterWeekRevenueTotal(c.id))}</div></div>`).join('')}`;
+    ${teamChatters.map(c=>`<div class="reprow"><div class="replb">${c.name}</div><div class="repval">${money(getChatterWeekRevenueTotal(c.id))}</div></div>`).join('')}`;
   } else {
     const year=today.getFullYear(),month=today.getMonth();
     const daysInMonthSoFar=Array.from({length:today.getDate()},(_,i)=>new Date(year,month,i+1));
-    let total=0;daysInMonthSoFar.forEach(d=>{const key=fmt(d);S.chatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;}));});
+    let total=0;daysInMonthSoFar.forEach(d=>{const key=fmt(d);teamChatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;}));});
     el.innerHTML=`<div style="font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--ok);text-align:center;padding:6px 0">${money(total)}</div>
     <div style="text-align:center;font-size:12px;color:var(--text2);margin-bottom:8px">${MONTHS[month]} ${year}</div>
     <div class="divider"></div><div class="sectionlb">por modelo</div>
-    ${S.models.map(m=>{let r=0;daysInMonthSoFar.forEach(d=>{const key=fmt(d);S.chatters.forEach(c=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;});});return`<div class="reprow"><div class="replb">${m.emoji} ${m.name}</div><div class="repval">${money(r)}</div></div>`;}).join('')}
+    ${S.models.map(m=>{let r=0;daysInMonthSoFar.forEach(d=>{const key=fmt(d);teamChatters.forEach(c=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;});});return`<div class="reprow"><div class="replb">${m.emoji} ${m.name}</div><div class="repval">${money(r)}</div></div>`;}).join('')}
     <div class="divider"></div><div class="sectionlb">por chatter</div>
-    ${S.chatters.map(c=>{let r=0;daysInMonthSoFar.forEach(d=>{const key=fmt(d);S.models.forEach(m=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;});});return`<div class="reprow"><div class="replb">${c.name}</div><div class="repval">${money(r)}</div></div>`;}).join('')}`;
+    ${teamChatters.map(c=>{let r=0;daysInMonthSoFar.forEach(d=>{const key=fmt(d);S.models.forEach(m=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;});});return`<div class="reprow"><div class="replb">${c.name}</div><div class="repval">${money(r)}</div></div>`;}).join('')}`;
   }
 }
 function buildRevReport(){
@@ -3441,13 +3460,14 @@ function renderDailyByModel(){
   const el=document.getElementById('daily-by-model');
   if(!el)return;
   if(!S.models.length){el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre modelos para ver o diário</div></div>';return;}
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   const wd=getWeekDates();
   const dayLabels=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   let html=`<div style="overflow-x:auto"><table class="rtable"><thead><tr><th>Modelo</th>${dayLabels.map(d=>`<th style="text-align:right">${d}</th>`).join('')}<th style="text-align:right;color:var(--ok)">Total</th></tr></thead><tbody>`;
   S.models.forEach(m=>{
     let rowTotal=0;
     const cells=wd.map(d=>{
-      let v=0;S.chatters.forEach(c=>{v+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;});
+      let v=0;teamChatters.forEach(c=>{v+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;});
       rowTotal+=v;
       return`<td style="text-align:right;font-family:var(--font-mono);font-size:11.5px">${v>0?v.toLocaleString('pt-BR',{maximumFractionDigits:0}):'—'}</td>`;
     }).join('');
@@ -3455,7 +3475,7 @@ function renderDailyByModel(){
   });
   html+='<tr class="rtotalrow"><td>TOTAL</td>';
   wd.forEach(d=>{
-    let dayTotal=0;S.chatters.forEach(c=>S.models.forEach(m=>{dayTotal+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;}));
+    let dayTotal=0;teamChatters.forEach(c=>S.models.forEach(m=>{dayTotal+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;}));
     html+=`<td style="text-align:right;font-size:11.5px">${dayTotal>0?dayTotal.toLocaleString('pt-BR',{maximumFractionDigits:0}):'—'}</td>`;
   });
   html+=`<td style="text-align:right">${moneyShort(getWeekTotalRevenue())}</td></tr></tbody></table></div>`;
@@ -3474,6 +3494,7 @@ function renderDailyByChatter(){
   const dateKey=selectedFatDate||todayKey();
 
   // Build model -> chatters map from shifts
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   const modelChatters={};
   S.models.forEach(m=>{ modelChatters[m.id]=new Set(); });
   S.shifts.forEach(s=>{
@@ -3487,15 +3508,15 @@ function renderDailyByChatter(){
   S.models.forEach(m=>{
     const chatterIds=[...modelChatters[m.id]];
     // Also include chatters who have revenue for this model on the selected date
-    S.chatters.forEach(c=>{
+    teamChatters.forEach(c=>{
       const rev=parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0;
       if(rev>0)chatterIds.push(c.id);
     });
-    const uniqueIds=[...new Set(chatterIds)];
+    const uniqueIds=[...new Set(chatterIds)].filter(cid=>teamChatters.some(c=>c.id===cid));
     if(!uniqueIds.length)return;
 
     const chattersData=uniqueIds.map(cid=>{
-      const c=S.chatters.find(ch=>ch.id===cid);
+      const c=teamChatters.find(ch=>ch.id===cid);
       if(!c)return null;
       const rev=parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0;
       return{c,rev};
@@ -3524,8 +3545,9 @@ function renderDailyByChatter(){
   el.innerHTML=html;
 }
 function getWeekTotalRevenue(){
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   let t=0;
-  getWeekDates().forEach(d=>S.chatters.forEach(c=>S.models.forEach(m=>{t+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
+  getWeekDates().forEach(d=>teamChatters.forEach(c=>S.models.forEach(m=>{t+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
   // Include hora extra from parsed reports in the grand total display
   const wkey=getWeekKey();
   (S.horaExtraSlots[wkey]||[]).filter(x=>x.shiftId==='parsed').forEach(x=>t+=parseFloat(x.revenue)||0);
