@@ -405,6 +405,17 @@ body{
 <section class="view active" id="v-home">
   <div class="eyebrow">status ao vivo</div>
 
+  <!-- ROTINA DA MANHÃ -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">☀️ Rotina da manhã</div><div class="panel-note">Segure apertado pra editar/trocar horário</div></div><span class="pill pill-flat" style="font-size:10px">repete todo dia</span></div>
+    <div id="morning-routine-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="time" class="finput" id="morning-routine-time" style="flex:0 0 auto;width:90px">
+      <input class="finput" id="morning-routine-input" placeholder="Nova tarefa da rotina..." style="flex:1" onkeydown="if(event.key==='Enter')addMorningRoutine()">
+      <button class="btn btn-primary btn-sm" onclick="addMorningRoutine()">+</button>
+    </div>
+  </div>
+
   <!-- ESCRITÓRIO + PRÓXIMO TURNO -->
   <div class="panel" id="home-escritorio"></div>
 
@@ -834,17 +845,6 @@ body{
     <div id="manager-profile-display"></div>
   </div>
 
-  <!-- ROTINA DA MANHÃ -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">☀️ Rotina da manhã</div><div class="panel-note">Segure apertado pra editar/trocar horário</div></div><span class="pill pill-flat" style="font-size:10px">repete todo dia</span></div>
-    <div id="morning-routine-list"></div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <input type="time" class="finput" id="morning-routine-time" style="flex:0 0 auto;width:90px">
-      <input class="finput" id="morning-routine-input" placeholder="Nova tarefa da rotina..." style="flex:1" onkeydown="if(event.key==='Enter')addMorningRoutine()">
-      <button class="btn btn-primary btn-sm" onclick="addMorningRoutine()">+</button>
-    </div>
-  </div>
-
   <!-- TAREFAS DIÁRIAS (recorrentes por dia da semana, com horário) -->
   <div class="panel">
     <div class="panel-head"><div><div class="panel-title">📆 Tarefas Diárias</div><div class="panel-note">Toque marca prioridade (🌸) · segure apertado pra editar/trocar horário</div></div></div>
@@ -945,6 +945,16 @@ body{
       <button class="btn btn-ghost btn-xs" onclick="openModal('m-orient')">+ nova</button>
     </div>
     <div id="orient-list"></div>
+  </div>
+
+  <!-- PROBLEMAS DIÁRIOS -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📋 Problemas diários</div><span class="pill pill-bad" style="font-size:10px" id="daily-problems-badge"></span></div>
+    <div id="daily-problems-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input class="finput" id="problems-input" placeholder="Descreva o problema..." style="flex:1" onkeydown="if(event.key==='Enter')addProblem()">
+      <button class="btn btn-primary btn-sm" onclick="addProblem()">+</button>
+    </div>
   </div>
 
 </section>
