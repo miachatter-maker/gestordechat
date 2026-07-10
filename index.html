@@ -465,25 +465,19 @@ body{
   <div class="eyebrow">escala</div>
   <div class="view-title">Turno</div>
 
-  <!-- ESCALA DO DIA -->
+  <!-- ESCALA -->
   <div class="panel">
     <div class="panel-head">
-      <div><div class="panel-title" id="turno-day-title">Hoje</div></div>
+      <div><div class="panel-title">Escala da semana</div><div class="panel-note">Guiada só pelo horário previsto</div></div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-xs" onclick="copyTurnoDay()">📋 copiar</button>
+        <button class="btn btn-ghost btn-xs" onclick="copyTurnoSchedule()">📋 copiar</button>
         <button class="btn btn-primary btn-xs" onclick="openModal('m-shift')">+ turno</button>
       </div>
     </div>
-    <div id="turno-day-list"></div>
-  </div>
-
-  <!-- ESCALA SEMANAL -->
-  <div class="panel">
-    <div class="panel-head">
-      <div><div class="panel-title">Escala da semana</div></div>
-      <button class="btn btn-ghost btn-xs" onclick="copyTurnoWeek()">📋 copiar</button>
+    <div style="margin-bottom:10px">
+      <button class="btn ${turnoEditMode?'btn-primary':'btn-ghost'} btn-xs" onclick="toggleTurnoEditMode()">${turnoEditMode?'✅ concluir edição':'✏️ editar escala (falta/troca)'}</button>
     </div>
-    <div id="turno-week-list"></div>
+    <div id="turno-schedule"></div>
   </div>
 
   <!-- PRESENÇAS -->
