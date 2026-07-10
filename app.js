@@ -1268,41 +1268,7 @@ function renderAvailWindowsPanel(){
     }).join('')}
     </div>
   `;
-  attachWindowSwipe(el);
-}
-function attachWindowSwipe(container){
-  container.querySelectorAll('.window-row').forEach(row=>{
-    let startX=0,curX=0,dragging=false;
-    const onDown=e=>{startX=(e.touches?e.touches[0].clientX:e.clientX);dragging=true;row.style.transition='none';};
-    const onMove=e=>{
-      if(!dragging)return;
-      curX=(e.touches?e.touches[0].clientX:e.clientX)-startX;
-      row.style.transform=`translateX(${curX}px)`;
-      row.style.opacity=String(Math.max(0.15,1-Math.abs(curX)/150));
-    };
-    const onUp=()=>{
-      if(!dragging)return;
-      dragging=false;
-      row.style.transition='transform .2s ease, opacity .2s ease';
-      if(Math.abs(curX)>80){
-        row.style.transform=`translateX(${curX>0?400:-400}px)`;
-        row.style.opacity='0';
-        windowsDismissed.add(row.dataset.key);
-        setTimeout(renderAvailWindowsPanel,180);
-      } else {
-        row.style.transform='translateX(0)';
-        row.style.opacity='1';
-      }
-      curX=0;
-    };
-    row.addEventListener('mousedown',onDown);
-    row.addEventListener('touchstart',onDown,{passive:true});
-    row.addEventListener('mousemove',onMove);
-    row.addEventListener('touchmove',onMove,{passive:true});
-    row.addEventListener('mouseup',onUp);
-    row.addEventListener('mouseleave',onUp);
-    row.addEventListener('touchend',onUp);
-  });
+  attachSwipeDismiss(el,'.window-row',key=>{windowsDismissed.add(key);renderAvailWindowsPanel();});
 }
 function openWindowQuickAssign(shiftId,date,originalId,startTime,endTime){
   const c=S.chatters.filter(ch=>ch.id!==originalId);
@@ -1582,7 +1548,7 @@ function renderSmartAlerts(){
     const note=getAlertNote(a.id);
     const borderColor=isDone?'var(--ok)':colorMap[a.type]||'var(--line)';
     const bg=isDone?'var(--bg-soft)':bgMap[a.type]||'var(--bg-soft)';
-    return`<div style="border-radius:10px;padding:11px 12px;background:${bg};border-left:3px solid ${borderColor};margin-bottom:8px;transition:opacity .2s">
+    return`<div ${!isDone?`class="alert-swipe-row" data-key="${a.id}"`:''} style="border-radius:10px;padding:11px 12px;background:${bg};border-left:3px solid ${borderColor};margin-bottom:8px;transition:opacity .2s;touch-action:pan-y">
       <div style="display:flex;align-items:flex-start;gap:10px">
         <button onclick="toggleAlertDone('${a.id}')" style="width:22px;height:22px;border-radius:5px;border:2px solid ${isDone?'var(--ok)':borderColor};background:${isDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:13px">
           ${isDone?'<span style="color:#fff">✓</span>':''}
@@ -1644,6 +1610,46 @@ function renderSmartAlerts(){
   }
 
   panel.innerHTML=html;
+  attachSwipeDismiss(panel,'.alert-swipe-row',key=>toggleAlertDone(key));
+}
+
+// Motor genérico de "arrastar pro lado pra sumir", reusado em avisos,
+// janelas livres, etc. onDismiss recebe a data-key do item arrastado.
+function attachSwipeDismiss(container,selector,onDismiss){
+  container.querySelectorAll(selector).forEach(row=>{
+    let startX=0,curX=0,dragging=false;
+    const onDown=e=>{
+      if(e.target.closest('button')||e.target.closest('input'))return;
+      startX=(e.touches?e.touches[0].clientX:e.clientX);dragging=true;row.style.transition='none';
+    };
+    const onMove=e=>{
+      if(!dragging)return;
+      curX=(e.touches?e.touches[0].clientX:e.clientX)-startX;
+      row.style.transform=`translateX(${curX}px)`;
+      row.style.opacity=String(Math.max(0.15,1-Math.abs(curX)/150));
+    };
+    const onUp=()=>{
+      if(!dragging)return;
+      dragging=false;
+      row.style.transition='transform .2s ease, opacity .2s ease';
+      if(Math.abs(curX)>80){
+        row.style.transform=`translateX(${curX>0?400:-400}px)`;
+        row.style.opacity='0';
+        setTimeout(()=>onDismiss(row.dataset.key),180);
+      } else {
+        row.style.transform='translateX(0)';
+        row.style.opacity='1';
+      }
+      curX=0;
+    };
+    row.addEventListener('mousedown',onDown);
+    row.addEventListener('touchstart',onDown,{passive:true});
+    row.addEventListener('mousemove',onMove);
+    row.addEventListener('touchmove',onMove,{passive:true});
+    row.addEventListener('mouseup',onUp);
+    row.addEventListener('mouseleave',onUp);
+    row.addEventListener('touchend',onUp);
+  });
 }
 
 function renderHome(){
@@ -2037,7 +2043,7 @@ function attachTurnoDaySwipe(){
     card.style.transition='transform .2s ease, opacity .2s ease';
     // Arrasta pra DIREITA = dia seguinte · arrasta pra ESQUERDA = dia anterior
     if(Math.abs(curX)>60){
-      changeTurnoFocusDay(curX>0?1:-1);
+      changeTurnoFocusDay(curX>0?-1:1);
     } else {
       card.style.transform='translateX(0)';
       card.style.opacity='1';
