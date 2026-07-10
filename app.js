@@ -3122,6 +3122,13 @@ function deleteChatter(id){
   Object.keys(S.motivational||{}).forEach(wkey=>{
     if(S.motivational[wkey]?.chatters)delete S.motivational[wkey].chatters[id];
   });
+  S.swaps=(S.swaps||[]).filter(sw=>sw.covererId!==id&&sw.originalId!==id);
+  Object.keys(S.justificativas||{}).forEach(key=>{
+    if(key.includes(id))delete S.justificativas[key];
+  });
+  Object.keys(S.alertNotes||{}).forEach(key=>{
+    if(key.includes(id))delete S.alertNotes[key];
+  });
   Object.keys(S.revenues).forEach(key=>{
     if(key.startsWith(id+'_'))delete S.revenues[key];
   });
@@ -7752,7 +7759,10 @@ function renderPagChattersAll(){
       const falta=Math.max(0,metaCat-weekRev);
       const remainDays=getRemainingWorkDaysThisWeek(c.id);
       const faltaPorDia=falta>0&&remainDays>0?falta/remainDays:null;
-      const medal=autoMedalForPct(pct);
+      const autoMedal=autoMedalForPct(pct);
+      const manualMedalRaw=S.chatterFichas?.[c.id]?.manualMedal;
+      const hasManualMedal=manualMedalRaw!==undefined&&manualMedalRaw!==''&&manualMedalRaw!==null;
+      const medal=hasManualMedal?parseInt(manualMedalRaw,10):autoMedal;
       const r=calcChatterPagamento(weekRev,medal,cat,htTotal,weekExtra,metaVal);
       const col=pct>=100?'var(--ok)':pct>=85?'var(--warn)':pct>=70?'var(--info)':'var(--bad)';
       const tier=pct>=100?'100%':pct>=85?'85%':pct>=70?'70%':'—';
@@ -7776,9 +7786,12 @@ function renderPagChattersAll(){
             <div style="font-size:9px;color:var(--text3)">Faturamento (auto)</div>
             <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(weekRev)}</div>
           </div>
-          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
-            <div style="font-size:9px;color:var(--text3)">Medalha (auto)</div>
-            <div style="font-size:12.5px;font-weight:700">${PAG_MEDAL_LABEL[medal]}</div>
+          <div class="field" style="margin:0">
+            <label class="flabel">Medalha${hasManualMedal?'':' (auto)'}</label>
+            <select class="fselect" style="font-size:12px;padding:6px 8px" onchange="saveManualMedal('${c.id}',this.value);renderPagChattersAll()">
+              <option value="" ${!hasManualMedal?'selected':''}>Auto — ${PAG_MEDAL_LABEL[autoMedal]}</option>
+              ${[0,1,2,3,4].map(m=>`<option value="${m}" ${hasManualMedal&&medal===m?'selected':''}>${PAG_MEDAL_LABEL[m]}</option>`).join('')}
+            </select>
           </div>
           <div class="field" style="margin:0">
             <label class="flabel">Categoria</label>
@@ -7807,6 +7820,11 @@ function renderPagChattersAll(){
 function saveChatterPagCategoria(cid,cat){
   if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
   S.chatterFichas[cid].pagCategoria=cat;
+  save();
+}
+function saveManualMedal(cid,value){
+  if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[cid].manualMedal=value; // '' = volta a ser automático
   save();
 }
 
