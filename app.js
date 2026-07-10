@@ -1994,27 +1994,27 @@ function renderTurnoSchedule(){
   const schedule=getEffectiveScheduleForDate(day);
   const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
   const body=modelsWithShifts.length?modelsWithShifts.map(m=>`
-    <div style="margin-bottom:10px">
-      <div style="font-size:11.5px;font-weight:700;color:var(--text3);margin-bottom:2px">${m.emoji||'🧩'} ${m.name}</div>
+    <div style="margin-bottom:5px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3)">${m.emoji||'🧩'} ${m.name}</div>
       ${schedule[m.id].map(b=>{
-        const canEdit=turnoEditMode&&!b.isWindow;
-        return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;flex-wrap:wrap">
-          <span style="font-family:var(--font-mono);color:var(--text3);width:95px;flex-shrink:0">${b.start}–${b.end}</span>
-          <span style="flex:1;min-width:60px;${b.isWindow?'color:var(--text3)':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.isWindow?'—':b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca)</span>`:''}</span>
-          ${canEdit?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
-          <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>
-          <button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
+        const canEditFT=turnoEditMode&&!b.isWindow;
+        return`<div style="display:flex;align-items:center;gap:6px;padding:1px 0;font-size:12.5px;flex-wrap:wrap">
+          <span style="font-family:var(--font-mono);color:var(--text3);width:90px;flex-shrink:0">${b.start}–${b.end}</span>
+          <span style="flex:1;min-width:50px;${b.isWindow?'color:var(--text3)':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.isWindow?'—':b.name}${b.isCovered?` <span style="font-size:9px;color:var(--text3)">(troca)</span>`:''}</span>
+          ${canEditFT?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
+          <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>`:''}
+          ${turnoEditMode?`<button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
         </div>`;
       }).join('')}
-    </div>`).join(''):'<div style="font-size:12.5px;color:var(--text3);padding:6px 0">Sem ninguém escalado nesse dia</div>';
-  el.innerHTML=`<div id="turno-day-card" style="background:var(--bg-soft);border-radius:14px;padding:16px;touch-action:pan-y">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <button onclick="changeTurnoFocusDay(-1)" class="btn btn-ghost btn-xs" style="font-size:16px;padding:4px 10px">‹</button>
+    </div>`).join(''):'<div style="font-size:12px;color:var(--text3);padding:3px 0">Sem ninguém escalado nesse dia</div>';
+  el.innerHTML=`<div id="turno-day-card" style="background:var(--bg-soft);border-radius:12px;padding:10px 12px;touch-action:pan-y">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <button onclick="changeTurnoFocusDay(-1)" class="btn btn-ghost btn-xs" style="font-size:15px;padding:2px 8px">‹</button>
       <div style="text-align:center">
-        <div style="font-size:13px;font-weight:800">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''}</div>
-        <div style="font-size:11px;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</div>
+        <div style="font-size:12.5px;font-weight:800">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''}</div>
+        <div style="font-size:10.5px;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</div>
       </div>
-      <button onclick="changeTurnoFocusDay(1)" class="btn btn-ghost btn-xs" style="font-size:16px;padding:4px 10px">›</button>
+      <button onclick="changeTurnoFocusDay(1)" class="btn btn-ghost btn-xs" style="font-size:15px;padding:2px 8px">›</button>
     </div>
     ${body}
   </div>`;
