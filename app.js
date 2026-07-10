@@ -452,6 +452,11 @@ function pushToFirestore(){
     console.warn('pushToFirestore abortado: todos os documentos vieram vazios e o estado local também está vazio — não é seguro escrever.');
     return;
   }
+  // Só ignora os snapshots de eco da NOSSA PRÓPRIA escrita — nunca antes
+  // disso (essa era a causa de sessões novas ficarem com tudo vazio: o
+  // save() inicial, ainda antes do Firebase conectar, já activava essa
+  // janela de 3s e engolia os 4 documentos reais quando chegavam).
+  fbIgnoreSnapshotsUntil=Date.now()+3000;
   const core={};
   Object.keys(S).forEach(k=>{if(!SHARD_FIELDS.includes(k))core[k]=S[k];});
   const jobs=[{id:FIREBASE_DOC_ID,data:core}];
@@ -542,7 +547,6 @@ function save(){
       }
     }
   }
-  fbIgnoreSnapshotsUntil=Date.now()+3000;
   clearTimeout(fbSaveTimer);
   fbSaveTimer=setTimeout(()=>pushToFirestore(),600);
 }
