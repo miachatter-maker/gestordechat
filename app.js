@@ -1992,31 +1992,26 @@ function renderTurnoSchedule(){
     const isOpen=turnoExpandedDays.has(dateStr);
     const schedule=getEffectiveScheduleForDate(day);
     const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
-    const windowCount=modelsWithShifts.reduce((n,m)=>n+schedule[m.id].filter(b=>b.isWindow).length,0);
     const body=!isOpen?'':(modelsWithShifts.length?modelsWithShifts.map(m=>`
-      <div style="margin-bottom:10px">
-        <div style="font-size:12px;font-weight:800;color:var(--text2);margin-bottom:3px">${m.emoji||'🧩'} ${m.name}</div>
+      <div style="margin-bottom:8px">
+        <div style="font-size:11.5px;font-weight:700;color:var(--text3);margin-bottom:2px">${m.emoji||'🧩'} ${m.name}</div>
         ${schedule[m.id].map(b=>{
           const canEdit=turnoEditMode&&!b.isWindow;
-          return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;flex-wrap:wrap">
-            <span style="font-family:var(--font-mono);color:var(--text3);width:100px;flex-shrink:0">${b.start}–${b.end}</span>
-            <span style="flex:1;min-width:80px;${b.isWindow?'color:var(--bad);font-style:italic':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca, era ${b.originalName})</span>`:''}</span>
-            ${b.isWindow?`<button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs">🔁 cobrir</button>`:''}
+          return`<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;flex-wrap:wrap">
+            <span style="font-family:var(--font-mono);color:var(--text3);width:95px;flex-shrink:0">${b.start}–${b.end}</span>
+            <span style="flex:1;min-width:60px;${b.isWindow?'color:var(--text3)':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.isWindow?'—':b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca)</span>`:''}</span>
             ${canEdit?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
             <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>
             <button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
           </div>`;
         }).join('')}
-      </div>`).join(''):'<div style="font-size:12.5px;color:var(--text3)">Sem ninguém escalado nesse dia</div>');
-    return`<div onclick="toggleTurnoDay('${dateStr}')" style="border-radius:12px;padding:${isOpen?'12px 14px':'10px 14px'};margin-bottom:8px;cursor:pointer;transition:padding .15s;${isToday?'background:var(--accent-soft);border:2px solid var(--accent)':'background:var(--bg-soft);border:1px solid var(--line)'}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;${isOpen?'margin-bottom:8px':''}">
-        <div style="font-size:12px;font-weight:800;letter-spacing:.04em;color:${isToday?'var(--accent)':'var(--text2)'}">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''} <span style="font-weight:400;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</span></div>
-        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-          ${!isOpen&&windowCount?`<span class="pill pill-bad" style="font-size:10px">${windowCount} janela${windowCount>1?'s':''}</span>`:''}
-          <span style="font-size:11px;color:var(--text3)">${isOpen?'▲':'▼'}</span>
-        </div>
+      </div>`).join(''):'<div style="font-size:12px;color:var(--text3)">Sem ninguém escalado</div>');
+    return`<div onclick="toggleTurnoDay('${dateStr}')" style="padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:12px;font-weight:700;color:${isToday?'var(--text)':'var(--text3)'}">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''} <span style="font-weight:400;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</span></div>
+        <span style="font-size:11px;color:var(--text3)">${isOpen?'▲':'▼'}</span>
       </div>
-      ${body}
+      ${isOpen?`<div style="margin-top:8px">${body}</div>`:''}
     </div>`;
   }).join('');
 }
