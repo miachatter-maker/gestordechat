@@ -118,6 +118,19 @@ function pruneHeavyData(s){
     }
     if(Array.isArray(s.geradorElite))s.geradorElite=dedupeByContent(s.geradorElite).filter(c=>c&&(c.name||c.salesRaw));
     if(Array.isArray(s.geradorMeu))s.geradorMeu=dedupeByContent(s.geradorMeu);
+    if(Array.isArray(s.shifts)&&s.shifts.length>1){
+      // Remove turnos duplicados (mesmo chatter, mesmo horário, mesmos dias,
+      // mesmas modelos) — mantém só o primeiro. Também tira modelo repetido
+      // dentro do mesmo turno, que causava a mesma linha aparecer 2x na escala.
+      s.shifts.forEach(sh=>{if(Array.isArray(sh.modelIds))sh.modelIds=[...new Set(sh.modelIds)];});
+      const seenShiftKeys=new Set();
+      s.shifts=s.shifts.filter(sh=>{
+        const key=[sh.chatterId,sh.start,sh.end,sh.start2||'',sh.end2||'',(sh.days||[]).slice().sort().join(','),(sh.modelIds||[]).slice().sort().join(','),sh.folgaDia||'',sh.folgaDia2||''].join('|');
+        if(seenShiftKeys.has(key))return false;
+        seenShiftKeys.add(key);
+        return true;
+      });
+    }
     if(s.midnightTasks){
       // Mantém só UMA tarefa por (chatter + dia) — a versão marcada como
       // feita ganha, se existir; senão a primeira. Isso corrige conjuntos
@@ -1222,24 +1235,74 @@ function assignWindowCover(shiftId,date,originalId,covererId,startTime,endTime){
   renderAvailWindowsPanel();
   if(typeof renderTurnoSchedule==='function'&&currentViewName()==='turno')renderTurnoSchedule();
 }
+let windowsDismissed=null;
 function renderAvailWindowsPanel(){
   const panel=document.getElementById('home-availwindows-panel');
   const el=document.getElementById('home-availwindows-content');
   if(!panel||!el)return;
   if(!S.chatters.length){panel.style.display='none';return;}
-  const windows=getWeekAvailableWindows();
+  if(!windowsDismissed)windowsDismissed=new Set();
+  // Some da lista assim que alguém cobrir (não é mais "livre") — e também
+  // se o usuário arrastou o cartão pro lado pra dispensar.
+  const windows=getWeekAvailableWindows()
+    .filter(w=>!w.covererId)
+    .filter(w=>!windowsDismissed.has(`${w.date}_${w.shiftId}_${w.startSort}`));
   if(!windows.length){panel.style.display='none';return;}
   panel.style.display='block';
   el.innerHTML=`
-    <div style="font-weight:700;font-size:13px;margin-bottom:8px">🗓️ Janelas livres</div>
+    <div style="font-weight:700;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">🗓️ <span>Janelas livres</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px">
     ${windows.map(w=>{
-      const dayShort=w.dayName.slice(0,3);
-      const modelName=w.modelStr.replace(/^[^\s]+\s/,''); // tira o emoji, só o nome
-      return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer" onclick="openWindowQuickAssign('${w.shiftId}','${w.date}','${w.originalId}','${w.startSort}','${w.timeStr.split('–')[1]}')">
-        <span>${dayShort} ${modelName} ${w.timeStr} <span style="color:var(--bad)">livre</span>${w.covererId?` <span style="color:var(--ok);font-size:11px">· ${S.chatters.find(c=>c.id===w.covererId)?.name||''}</span>`:''}</span>
+      const key=`${w.date}_${w.shiftId}_${w.startSort}`;
+      const dayShort=w.dayName.slice(0,3).toUpperCase();
+      const modelEmoji=w.modelStr.split(' ')[0];
+      const modelName=w.modelStr.replace(/^\S+\s/,'');
+      return`<div class="window-row" data-key="${key}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bad-soft);border-radius:10px;touch-action:pan-y">
+        <div style="font-size:10px;font-weight:800;color:var(--bad);background:var(--bg);border-radius:6px;padding:4px 7px;flex-shrink:0;letter-spacing:.03em">${dayShort}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:700">${modelEmoji} ${modelName}</div>
+          <div style="font-size:11.5px;color:var(--text2);font-family:var(--font-mono)">${w.timeStr}</div>
+        </div>
+        <button onclick="openWindowQuickAssign('${w.shiftId}','${w.date}','${w.originalId}','${w.startSort}','${w.timeStr.split('–')[1]}')" class="btn btn-primary btn-xs" style="flex-shrink:0">cobrir</button>
       </div>`;
     }).join('')}
+    </div>
   `;
+  attachWindowSwipe(el);
+}
+function attachWindowSwipe(container){
+  container.querySelectorAll('.window-row').forEach(row=>{
+    let startX=0,curX=0,dragging=false;
+    const onDown=e=>{startX=(e.touches?e.touches[0].clientX:e.clientX);dragging=true;row.style.transition='none';};
+    const onMove=e=>{
+      if(!dragging)return;
+      curX=(e.touches?e.touches[0].clientX:e.clientX)-startX;
+      row.style.transform=`translateX(${curX}px)`;
+      row.style.opacity=String(Math.max(0.15,1-Math.abs(curX)/150));
+    };
+    const onUp=()=>{
+      if(!dragging)return;
+      dragging=false;
+      row.style.transition='transform .2s ease, opacity .2s ease';
+      if(Math.abs(curX)>80){
+        row.style.transform=`translateX(${curX>0?400:-400}px)`;
+        row.style.opacity='0';
+        windowsDismissed.add(row.dataset.key);
+        setTimeout(renderAvailWindowsPanel,180);
+      } else {
+        row.style.transform='translateX(0)';
+        row.style.opacity='1';
+      }
+      curX=0;
+    };
+    row.addEventListener('mousedown',onDown);
+    row.addEventListener('touchstart',onDown,{passive:true});
+    row.addEventListener('mousemove',onMove);
+    row.addEventListener('touchmove',onMove,{passive:true});
+    row.addEventListener('mouseup',onUp);
+    row.addEventListener('mouseleave',onUp);
+    row.addEventListener('touchend',onUp);
+  });
 }
 function openWindowQuickAssign(shiftId,date,originalId,startTime,endTime){
   const c=S.chatters.filter(ch=>ch.id!==originalId);
@@ -1904,40 +1967,63 @@ function renderTurno(){
   renderAbsenceListWithJustificativa();
 }
 const DAY_FULL_UP={dom:'DOMINGO',seg:'SEGUNDA',ter:'TERÇA',qua:'QUARTA',qui:'QUINTA',sex:'SEXTA',sab:'SÁBADO'};
+let turnoExpandedDays=null; // Set de dateStr expandidos — null = ainda não inicializado
 function renderTurnoSchedule(){
   const el=document.getElementById('turno-schedule');
   if(!el)return;
+  const btn=document.getElementById('turno-edit-toggle-btn');
+  if(btn){
+    btn.textContent=turnoEditMode?'✅ concluir edição':'✏️ editar';
+    btn.className=turnoEditMode?'btn btn-primary btn-xs':'btn btn-ghost btn-xs';
+  }
+  const addRow=document.getElementById('turno-add-shift-row');
+  if(addRow)addRow.style.display=turnoEditMode?'block':'none';
   if(!S.models.length||!S.chatters.length){
     el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre modelos e chatters primeiro.</div></div>';
     return;
   }
   const todayStr=todayKey();
+  if(!turnoExpandedDays){turnoExpandedDays=new Set([todayStr]);} // só hoje começa aberto
   const wd=getWeekDates(0); // semana atual, dom→sab
   el.innerHTML=wd.map(day=>{
     const dateStr=fmt(day);
     const dayKey=DAY_KEYS[day.getDay()];
     const isToday=dateStr===todayStr;
+    const isOpen=turnoExpandedDays.has(dateStr);
     const schedule=getEffectiveScheduleForDate(day);
     const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
-    const body=modelsWithShifts.length?modelsWithShifts.map(m=>`
+    const windowCount=modelsWithShifts.reduce((n,m)=>n+schedule[m.id].filter(b=>b.isWindow).length,0);
+    const body=!isOpen?'':(modelsWithShifts.length?modelsWithShifts.map(m=>`
       <div style="margin-bottom:10px">
         <div style="font-size:12px;font-weight:800;color:var(--text2);margin-bottom:3px">${m.emoji||'🧩'} ${m.name}</div>
         ${schedule[m.id].map(b=>{
           const canEdit=turnoEditMode&&!b.isWindow;
-          return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
+          return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;flex-wrap:wrap">
             <span style="font-family:var(--font-mono);color:var(--text3);width:100px;flex-shrink:0">${b.start}–${b.end}</span>
-            <span style="flex:1;${b.isWindow?'color:var(--bad);font-style:italic':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca, era ${b.originalName})</span>`:''}</span>
-            ${b.isWindow?`<button onclick="openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs">🔁 cobrir</button>`:''}
-            ${canEdit?`<button onclick="openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
-            <button onclick="openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>`:''}
+            <span style="flex:1;min-width:80px;${b.isWindow?'color:var(--bad);font-style:italic':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca, era ${b.originalName})</span>`:''}</span>
+            ${b.isWindow?`<button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs">🔁 cobrir</button>`:''}
+            ${canEdit?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
+            <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>
+            <button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
           </div>`;
         }).join('')}
-      </div>`).join(''):'<div style="font-size:12.5px;color:var(--text3)">Sem ninguém escalado nesse dia</div>';
-    return`<div style="border-radius:12px;padding:12px 14px;margin-bottom:10px;${isToday?'background:var(--accent-soft);border:2px solid var(--accent)':'background:var(--bg-soft);border:1px solid var(--line)'}">
-      <div style="font-size:12px;font-weight:800;letter-spacing:.04em;color:${isToday?'var(--accent)':'var(--text2)'};margin-bottom:8px">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''} <span style="font-weight:400;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</span></div>
+      </div>`).join(''):'<div style="font-size:12.5px;color:var(--text3)">Sem ninguém escalado nesse dia</div>');
+    return`<div onclick="toggleTurnoDay('${dateStr}')" style="border-radius:12px;padding:${isOpen?'12px 14px':'10px 14px'};margin-bottom:8px;cursor:pointer;transition:padding .15s;${isToday?'background:var(--accent-soft);border:2px solid var(--accent)':'background:var(--bg-soft);border:1px solid var(--line)'}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;${isOpen?'margin-bottom:8px':''}">
+        <div style="font-size:12px;font-weight:800;letter-spacing:.04em;color:${isToday?'var(--accent)':'var(--text2)'}">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''} <span style="font-weight:400;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</span></div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          ${!isOpen&&windowCount?`<span class="pill pill-bad" style="font-size:10px">${windowCount} janela${windowCount>1?'s':''}</span>`:''}
+          <span style="font-size:11px;color:var(--text3)">${isOpen?'▲':'▼'}</span>
+        </div>
+      </div>
       ${body}
     </div>`;
   }).join('');
+}
+function toggleTurnoDay(dateStr){
+  if(turnoExpandedDays.has(dateStr))turnoExpandedDays.delete(dateStr);
+  else turnoExpandedDays.add(dateStr);
+  renderTurnoSchedule();
 }
 function openAbsenceForSlot(chatterId,dateStr){
   openModal('m-absence');
