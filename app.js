@@ -1952,6 +1952,12 @@ function getEffectiveScheduleForDate(dateObj){
 }
 let turnoFocusDate=null; // null = hoje
 function getTurnoFocusDate(){return turnoFocusDate?new Date(turnoFocusDate+'T12:00:00'):new Date();}
+function changeTurnoFocusDay(delta){
+  const d=getTurnoFocusDate();
+  d.setDate(d.getDate()+delta);
+  turnoFocusDate=fmt(d);
+  renderTurnoSchedule();
+}
 let selectedDay='seg';
 function toggleNextTurno(){
   const panel=document.getElementById('next-turno-panel');
@@ -1967,7 +1973,6 @@ function renderTurno(){
   renderAbsenceListWithJustificativa();
 }
 const DAY_FULL_UP={dom:'DOMINGO',seg:'SEGUNDA',ter:'TERÇA',qua:'QUARTA',qui:'QUINTA',sex:'SEXTA',sab:'SÁBADO'};
-let turnoExpandedDays=null; // Set de dateStr expandidos — null = ainda não inicializado
 function renderTurnoSchedule(){
   const el=document.getElementById('turno-schedule');
   if(!el)return;
@@ -1982,43 +1987,70 @@ function renderTurnoSchedule(){
     el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre modelos e chatters primeiro.</div></div>';
     return;
   }
-  const todayStr=todayKey();
-  if(!turnoExpandedDays){turnoExpandedDays=new Set([todayStr]);} // só hoje começa aberto
-  const wd=getWeekDates(0); // semana atual, dom→sab
-  el.innerHTML=wd.map(day=>{
-    const dateStr=fmt(day);
-    const dayKey=DAY_KEYS[day.getDay()];
-    const isToday=dateStr===todayStr;
-    const isOpen=turnoExpandedDays.has(dateStr);
-    const schedule=getEffectiveScheduleForDate(day);
-    const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
-    const body=!isOpen?'':(modelsWithShifts.length?modelsWithShifts.map(m=>`
-      <div style="margin-bottom:8px">
-        <div style="font-size:11.5px;font-weight:700;color:var(--text3);margin-bottom:2px">${m.emoji||'🧩'} ${m.name}</div>
-        ${schedule[m.id].map(b=>{
-          const canEdit=turnoEditMode&&!b.isWindow;
-          return`<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;flex-wrap:wrap">
-            <span style="font-family:var(--font-mono);color:var(--text3);width:95px;flex-shrink:0">${b.start}–${b.end}</span>
-            <span style="flex:1;min-width:60px;${b.isWindow?'color:var(--text3)':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.isWindow?'—':b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca)</span>`:''}</span>
-            ${canEdit?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
-            <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>
-            <button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
-          </div>`;
-        }).join('')}
-      </div>`).join(''):'<div style="font-size:12px;color:var(--text3)">Sem ninguém escalado</div>');
-    return`<div onclick="toggleTurnoDay('${dateStr}')" style="padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:12px;font-weight:700;color:${isToday?'var(--text)':'var(--text3)'}">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''} <span style="font-weight:400;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</span></div>
-        <span style="font-size:11px;color:var(--text3)">${isOpen?'▲':'▼'}</span>
+  const day=getTurnoFocusDate();
+  const dateStr=fmt(day);
+  const dayKey=DAY_KEYS[day.getDay()];
+  const isToday=dateStr===todayKey();
+  const schedule=getEffectiveScheduleForDate(day);
+  const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
+  const body=modelsWithShifts.length?modelsWithShifts.map(m=>`
+    <div style="margin-bottom:10px">
+      <div style="font-size:11.5px;font-weight:700;color:var(--text3);margin-bottom:2px">${m.emoji||'🧩'} ${m.name}</div>
+      ${schedule[m.id].map(b=>{
+        const canEdit=turnoEditMode&&!b.isWindow;
+        return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;flex-wrap:wrap">
+          <span style="font-family:var(--font-mono);color:var(--text3);width:95px;flex-shrink:0">${b.start}–${b.end}</span>
+          <span style="flex:1;min-width:60px;${b.isWindow?'color:var(--text3)':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.isWindow?'—':b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca)</span>`:''}</span>
+          ${canEdit?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
+          <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>
+          <button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
+        </div>`;
+      }).join('')}
+    </div>`).join(''):'<div style="font-size:12.5px;color:var(--text3);padding:6px 0">Sem ninguém escalado nesse dia</div>';
+  el.innerHTML=`<div id="turno-day-card" style="background:var(--bg-soft);border-radius:14px;padding:16px;touch-action:pan-y">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <button onclick="changeTurnoFocusDay(-1)" class="btn btn-ghost btn-xs" style="font-size:16px;padding:4px 10px">‹</button>
+      <div style="text-align:center">
+        <div style="font-size:13px;font-weight:800">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''}</div>
+        <div style="font-size:11px;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</div>
       </div>
-      ${isOpen?`<div style="margin-top:8px">${body}</div>`:''}
-    </div>`;
-  }).join('');
+      <button onclick="changeTurnoFocusDay(1)" class="btn btn-ghost btn-xs" style="font-size:16px;padding:4px 10px">›</button>
+    </div>
+    ${body}
+  </div>`;
+  attachTurnoDaySwipe();
 }
-function toggleTurnoDay(dateStr){
-  if(turnoExpandedDays.has(dateStr))turnoExpandedDays.delete(dateStr);
-  else turnoExpandedDays.add(dateStr);
-  renderTurnoSchedule();
+function attachTurnoDaySwipe(){
+  const card=document.getElementById('turno-day-card');
+  if(!card)return;
+  let startX=0,curX=0,dragging=false;
+  const onDown=e=>{if(e.target.closest('button'))return;startX=(e.touches?e.touches[0].clientX:e.clientX);dragging=true;card.style.transition='none';};
+  const onMove=e=>{
+    if(!dragging)return;
+    curX=(e.touches?e.touches[0].clientX:e.clientX)-startX;
+    card.style.transform=`translateX(${curX}px)`;
+    card.style.opacity=String(Math.max(0.4,1-Math.abs(curX)/300));
+  };
+  const onUp=()=>{
+    if(!dragging)return;
+    dragging=false;
+    card.style.transition='transform .2s ease, opacity .2s ease';
+    // Arrasta pra DIREITA = dia seguinte · arrasta pra ESQUERDA = dia anterior
+    if(Math.abs(curX)>60){
+      changeTurnoFocusDay(curX>0?1:-1);
+    } else {
+      card.style.transform='translateX(0)';
+      card.style.opacity='1';
+    }
+    curX=0;
+  };
+  card.addEventListener('mousedown',onDown);
+  card.addEventListener('touchstart',onDown,{passive:true});
+  card.addEventListener('mousemove',onMove);
+  card.addEventListener('touchmove',onMove,{passive:true});
+  card.addEventListener('mouseup',onUp);
+  card.addEventListener('mouseleave',onUp);
+  card.addEventListener('touchend',onUp);
 }
 function openAbsenceForSlot(chatterId,dateStr){
   openModal('m-absence');
