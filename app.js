@@ -1231,25 +1231,24 @@ function renderAvailWindowsPanel(){
   if(!windows.length){panel.style.display='none';return;}
   panel.style.display='block';
   el.innerHTML=`
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-      <span style="font-size:20px">🗓️</span>
-      <div style="font-weight:700;font-size:14px">Janelas disponíveis na semana</div>
-    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">🗓️ Janelas livres</div>
     ${windows.map(w=>{
-      const d=new Date(w.date+'T12:00:00');
       const dayShort=w.dayName.slice(0,3);
-      return`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13.5px;font-weight:700;color:var(--text)">${w.modelStr} · ${w.timeStr}</div>
-          <div style="font-size:11px;color:var(--text3)">${dayShort} ${d.getDate()}/${d.getMonth()+1} · turno de ${w.originalName}</div>
-        </div>
-        <select onchange="assignWindowCover('${w.shiftId}','${w.date}','${w.originalId}',this.value,'${w.startSort}','${w.timeStr.split('–')[1]}')" style="max-width:130px;font-size:12px;padding:6px 8px;border-radius:8px;border:1.5px solid ${w.covererId?'var(--ok)':'var(--line)'};background:${w.covererId?'var(--ok-soft)':'var(--bg-soft)'};color:var(--text)">
-          <option value="">— cobrir —</option>
-          ${S.chatters.filter(c=>c.id!==w.originalId).map(c=>`<option value="${c.id}" ${w.covererId===c.id?'selected':''}>${c.name}</option>`).join('')}
-        </select>
+      const modelName=w.modelStr.replace(/^[^\s]+\s/,''); // tira o emoji, só o nome
+      return`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer" onclick="openWindowQuickAssign('${w.shiftId}','${w.date}','${w.originalId}','${w.startSort}','${w.timeStr.split('–')[1]}')">
+        <span>${dayShort} ${modelName} ${w.timeStr} <span style="color:var(--bad)">livre</span>${w.covererId?` <span style="color:var(--ok);font-size:11px">· ${S.chatters.find(c=>c.id===w.covererId)?.name||''}</span>`:''}</span>
       </div>`;
     }).join('')}
   `;
+}
+function openWindowQuickAssign(shiftId,date,originalId,startTime,endTime){
+  const c=S.chatters.filter(ch=>ch.id!==originalId);
+  const names=c.map((ch,i)=>`${i+1}. ${ch.name}`).join('\n');
+  const pick=prompt(`Quem vai cobrir esse horário?\n\n${names}\n\nDigite o número (ou deixe vazio pra tirar a cobertura):`);
+  if(pick===null)return;
+  const idx=parseInt(pick,10)-1;
+  const covererId=c[idx]?c[idx].id:'';
+  assignWindowCover(shiftId,date,originalId,covererId,startTime,endTime);
 }
 
 /* ===========================================================
