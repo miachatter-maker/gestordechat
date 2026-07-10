@@ -320,6 +320,7 @@ const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses'];
 const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab'};
 const ALL_SYNC_DOC_IDS=[FIREBASE_DOC_ID,...SHARD_FIELDS.map(f=>SHARD_DOC_IDS[f])];
 let fbDocsSeen=new Set();
+let fbDocsStatus={}; // docId -> 'ok'|'not-exists'|'error: ...' — pra diagnóstico
 function persistLocalCache(){
   try{
     const p=JSON.stringify(S);
@@ -384,10 +385,14 @@ function listenToFirestore(connectTimeout){
               }
               persistLocalCache();
               scheduleRerenderAfterSync();
-            }catch(e){console.error('Erro ao processar snapshot '+docId,e);}
+              fbDocsStatus[docId]=`ok (${Math.round(remote.payload.length/1024)}KB)`;
+            }catch(e){console.error('Erro ao processar snapshot '+docId,e);fbDocsStatus[docId]='erro ao processar: '+e.message;}
+          } else {
+            fbDocsStatus[docId]='existe mas sem payload';
           }
         } else {
           needsInitialPush=true; // documento ainda não existe (ex: primeiro uso, ou fatia nova do sharding)
+          fbDocsStatus[docId]='não existe no Firestore';
         }
         // IMPORTANTE: marca como "visto" ANTES de decidir qualquer coisa.
         // Nunca cria/sobrescreve um documento baseado só no estado local
@@ -423,6 +428,15 @@ function pushToFirestore(){
     // com um estado local que ainda não incorporou o que está no Firestore.
     // A próxima ação do usuário (ou o fim da sincronização inicial) vai
     // disparar um novo save() e tentar de novo.
+    return;
+  }
+  // Rede de segurança extra: se TODOS os 4 documentos vierem como "não
+  // existe" mas o estado local também está vazio, isso quase certamente é
+  // uma sessão nova/com falha de leitura, não o primeiro uso real do app —
+  // não escreve nada, pra nunca arriscar apagar dados reais de ninguém.
+  const allMissing=ALL_SYNC_DOC_IDS.every(id=>fbDocsStatus[id]==='não existe no Firestore');
+  if(allMissing&&(!S.chatters||!S.chatters.length)){
+    console.warn('pushToFirestore abortado: todos os documentos vieram vazios e o estado local também está vazio — não é seguro escrever.');
     return;
   }
   const core={};
@@ -1171,26 +1185,34 @@ function getWeekAvailableWindows(){
     const dayKey=DAY_KEYS[day.getDay()];
     const dateStr=fmt(day);
     S.shifts.forEach(s=>{
-      const opensBlock1=s.folgaDia===dayKey;
-      const opensBlock2=s.folgaDia2===dayKey&&s.start2&&s.end2;
-      if(!opensBlock1&&!opensBlock2)return;
       const c=S.chatters.find(ch=>ch.id===s.chatterId);
-      if(!c)return;
+      if(!c||c.time==='elite')return;
+      if(!(s.days||[]).includes(dayKey))return;
+      const hasAbsence=S.absences.some(a=>a.chatterId===c.id&&a.date===dateStr&&a.type==='falta');
+      // Não importa se é folga (recorrente) ou falta (pontual) — os dois abrem uma janela do mesmo jeito.
+      const opensBlock1=s.folgaDia===dayKey||hasAbsence;
+      const opensBlock2=(s.folgaDia2===dayKey||hasAbsence)&&s.start2&&s.end2;
+      if(!opensBlock1&&!opensBlock2)return;
       const models=(s.modelIds||[]).map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
       const modelStr=models.map(m=>`${m.emoji||'🧩'} ${m.name}`).join(' · ')||'sem modelo';
-      const timeStr=[opensBlock1?`${s.start}–${s.end}`:null,opensBlock2?`${s.start2}–${s.end2}`:null].filter(Boolean).join(' · ');
-      const existingSwap=S.swaps.find(sw=>sw.date===dateStr&&sw.shiftId===s.id&&sw.originalId===c.id);
-      windows.push({date:dateStr,dayName:DAYS[day.getDay()],shiftId:s.id,originalId:c.id,originalName:c.name,modelStr,timeStr,covererId:existingSwap?existingSwap.covererId:''});
+      if(opensBlock1){
+        const existingSwap=S.swaps.find(sw=>sw.date===dateStr&&sw.shiftId===s.id&&sw.originalId===c.id&&sw.start===s.start&&sw.end===s.end);
+        windows.push({date:dateStr,dayName:DAYS[day.getDay()],shiftId:s.id,originalId:c.id,originalName:c.name,modelStr,timeStr:`${s.start}–${s.end}`,startSort:s.start,covererId:existingSwap?existingSwap.covererId:''});
+      }
+      if(opensBlock2){
+        const existingSwap=S.swaps.find(sw=>sw.date===dateStr&&sw.shiftId===s.id&&sw.originalId===c.id&&sw.start===s.start2&&sw.end===s.end2);
+        windows.push({date:dateStr,dayName:DAYS[day.getDay()],shiftId:s.id,originalId:c.id,originalName:c.name,modelStr,timeStr:`${s.start2}–${s.end2}`,startSort:s.start2,covererId:existingSwap?existingSwap.covererId:''});
+      }
     });
   });
-  return windows.sort((a,b)=>a.date.localeCompare(b.date));
+  return windows.sort((a,b)=>a.date!==b.date?a.date.localeCompare(b.date):turnoBlockSortVal(a.startSort)-turnoBlockSortVal(b.startSort));
 }
-function assignWindowCover(shiftId,date,originalId,covererId){
-  S.swaps=S.swaps.filter(sw=>!(sw.date===date&&sw.shiftId===shiftId&&sw.originalId===originalId));
+function assignWindowCover(shiftId,date,originalId,covererId,startTime,endTime){
+  S.swaps=S.swaps.filter(sw=>!(sw.date===date&&sw.shiftId===shiftId&&sw.originalId===originalId&&sw.start===startTime&&sw.end===endTime));
   if(covererId){
     const s=S.shifts.find(sh=>sh.id===shiftId);
     if(s){
-      S.swaps.push({id:'sw'+Date.now()+Math.random().toString(36).slice(2,5),date,covererId,originalId,start:s.start,end:s.end,start2:s.start2||'',end2:s.end2||'',shiftId:s.id,createdAt:todayKey()});
+      S.swaps.push({id:'sw'+Date.now()+Math.random().toString(36).slice(2,5),date,covererId,originalId,start:startTime||s.start,end:endTime||s.end,shiftId:s.id,createdAt:todayKey()});
       const coverer=S.chatters.find(c=>c.id===covererId);
       const original=S.chatters.find(c=>c.id===originalId);
       toast(`✅ ${coverer?.name} vai cobrir ${original?.name} em ${date} — já aparece na escala do dia`);
@@ -1198,7 +1220,7 @@ function assignWindowCover(shiftId,date,originalId,covererId){
   }
   save();
   renderAvailWindowsPanel();
-  if(typeof renderTurno==='function'&&currentViewName()==='turno')renderTurno();
+  if(typeof renderTurnoSchedule==='function'&&currentViewName()==='turno')renderTurnoSchedule();
 }
 function renderAvailWindowsPanel(){
   const panel=document.getElementById('home-availwindows-panel');
@@ -1221,7 +1243,7 @@ function renderAvailWindowsPanel(){
           <div style="font-size:13.5px;font-weight:700;color:var(--text)">${w.modelStr} · ${w.timeStr}</div>
           <div style="font-size:11px;color:var(--text3)">${dayShort} ${d.getDate()}/${d.getMonth()+1} · turno de ${w.originalName}</div>
         </div>
-        <select onchange="assignWindowCover('${w.shiftId}','${w.date}','${w.originalId}',this.value)" style="max-width:130px;font-size:12px;padding:6px 8px;border-radius:8px;border:1.5px solid ${w.covererId?'var(--ok)':'var(--line)'};background:${w.covererId?'var(--ok-soft)':'var(--bg-soft)'};color:var(--text)">
+        <select onchange="assignWindowCover('${w.shiftId}','${w.date}','${w.originalId}',this.value,'${w.startSort}','${w.timeStr.split('–')[1]}')" style="max-width:130px;font-size:12px;padding:6px 8px;border-radius:8px;border:1.5px solid ${w.covererId?'var(--ok)':'var(--line)'};background:${w.covererId?'var(--ok-soft)':'var(--bg-soft)'};color:var(--text)">
           <option value="">— cobrir —</option>
           ${S.chatters.filter(c=>c.id!==w.originalId).map(c=>`<option value="${c.id}" ${w.covererId===c.id?'selected':''}>${c.name}</option>`).join('')}
         </select>
@@ -1625,28 +1647,14 @@ function renderEscritorioPanel(){
   const el=document.getElementById('home-escritorio');
   if(!el)return;
   const todayDK=getTodayDayKey();
-  const today=todayKey();
 
-  const online=getCurrentOnline();
+  // 100% guiado pela escala prevista — sem status manual de on/off.
+  const allOnline=getCurrentOnline();
   const scheduledToday=getCurrentScheduledToday();
-
-  // Manual overrides saved in S.turnoLog[today] with status 'manual_online' or 'manual_offline'
-  if(!S.turnoLog[today])S.turnoLog[today]=[];
-  const manualOnline=S.turnoLog[today].filter(x=>x.status==='manual_online').map(x=>x.chatterId);
-  const manualOffline=S.turnoLog[today].filter(x=>x.status==='manual_offline').map(x=>x.chatterId);
-
-  // Full online list = auto detected + manual overrides
-  const allOnlineIds=new Set([...online.map(c=>c.id),...manualOnline].filter(id=>!manualOffline.includes(id)));
-  const allOnline=S.chatters.filter(c=>allOnlineIds.has(c.id));
-
-  // Not online but scheduled or manually available
-  const notOnline=S.chatters.filter(c=>
-    c.time!=='elite'&&
-    !allOnlineIds.has(c.id)
-  );
+  const onlineIds=new Set(allOnline.map(c=>c.id));
 
   const nextUp=scheduledToday
-    .filter(c=>!allOnlineIds.has(c.id))
+    .filter(c=>!onlineIds.has(c.id))
     .map(c=>({c,next:getNextShiftToday(c.id),
       models:[...new Set(S.shifts.filter(s=>s.chatterId===c.id&&(s.days||[]).includes(todayDK)).flatMap(s=>s.modelIds||[]))].map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean)
     }))
@@ -1754,19 +1762,18 @@ function isChatterScheduledNow(chatterId){
   const todayDK=getTodayDayKey();
   const nowMins=now.getHours()*60+now.getMinutes();
   const today=todayKey();
+  const inWindow=(sm,em)=>em<sm?(nowMins>=sm||nowMins<em):(nowMins>=sm&&nowMins<em); // turno vira a meia-noite (ex 23h-07h)
   const gaveAway=S.swaps.some(sw=>sw.date===today&&sw.originalId===chatterId);
   if(!gaveAway){
     const shifts=S.shifts.filter(s=>s.chatterId===chatterId&&(s.days||[]).includes(todayDK));
     for(const s of shifts){
       const [sh,sm]=s.start.split(':').map(Number);
       const [eh,em]=s.end.split(':').map(Number);
-      const startMins=sh*60+sm, endMins=eh*60+em;
-      if(nowMins>=startMins&&nowMins<endMins)return true;
+      if(inWindow(sh*60+sm,eh*60+em))return true;
       if(s.start2&&s.end2){
         const [sh2,sm2]=s.start2.split(':').map(Number);
         const [eh2,em2]=s.end2.split(':').map(Number);
-        const s2=sh2*60+sm2,e2=eh2*60+em2;
-        if(nowMins>=s2&&nowMins<e2)return true;
+        if(inWindow(sh2*60+sm2,eh2*60+em2))return true;
       }
     }
   }
@@ -1775,11 +1782,11 @@ function isChatterScheduledNow(chatterId){
   for(const sw of swapShifts){
     const [sh,sm]=(sw.start||'').split(':').map(Number);
     const [eh,em]=(sw.end||'').split(':').map(Number);
-    if(!isNaN(sh)){const s=sh*60+sm,e=eh*60+em;if(nowMins>=s&&nowMins<e)return true;}
+    if(!isNaN(sh)&&inWindow(sh*60+sm,eh*60+em))return true;
     if(sw.start2&&sw.end2){
       const [sh2,sm2]=sw.start2.split(':').map(Number);
       const [eh2,em2]=sw.end2.split(':').map(Number);
-      if(!isNaN(sh2)){const s2=sh2*60+sm2,e2=eh2*60+em2;if(nowMins>=s2&&nowMins<e2)return true;}
+      if(!isNaN(sh2)&&inWindow(sh2*60+sm2,eh2*60+em2))return true;
     }
   }
   return false;
@@ -1806,20 +1813,7 @@ function getNextShiftToday(chatterId){
 }
 
 function getChatterStatus(chatterId,dateKey){
-  // Manual overrides (checkins) take priority over schedule
-  const log=(S.turnoLog[dateKey]||[]).filter(e=>e.chatterId===chatterId);
-  if(log.length){
-    const last=log[log.length-1];
-    // Manual override: if last action was 'out', check if a new shift started since then
-    if(last.action==='out'){
-      // If schedule says they should be on right now (new shift window), override the manual out
-      if(dateKey===todayKey()&&isChatterScheduledNow(chatterId))return'online';
-      return'offline';
-    }
-    if(last.action==='overtime')return'overtime';
-    if(last.action==='in')return'online';
-  }
-  // No manual log — use schedule automatically
+  // Sempre guiado pela hora prevista no turno — sem botão manual de on/off.
   if(dateKey===todayKey()&&isChatterScheduledNow(chatterId))return'online';
   return'offline';
 }
@@ -1851,6 +1845,51 @@ function getChatterOvertimeOn(chatterId,dateKey){
 /* ===========================================================
    TURNO
    =========================================================== */
+// Ordena blocos do dia começando pelo que atravessa a madrugada (23h-07h),
+// depois manhã/tarde, na ordem que a operação realmente funciona — não pela
+// hora numérica crua.
+function turnoBlockSortVal(time){
+  if(!time)return 999;
+  const h=parseInt(time.split(':')[0],10);
+  return h>=18?h-24:h;
+}
+// Monta a escala efetiva de UM dia (todas as models, todos os blocos),
+// já resolvendo folga/falta (ambos viram "janela") e troca (já resolvida
+// mostra o nome de quem cobre). Não depende de check-in manual — só da
+// escala prevista + trocas/faltas registradas.
+function getEffectiveScheduleForDate(dateObj){
+  const dateStr=fmt(dateObj);
+  const dayKey=DAY_KEYS[dateObj.getDay()];
+  const result={}; // modelId -> [{start,end,name,isWindow,isCovered,shiftId,originalId,chatterId}]
+  S.models.forEach(m=>result[m.id]=[]);
+  S.shifts.forEach(s=>{
+    if(!(s.days||[]).includes(dayKey))return;
+    const c=S.chatters.find(ch=>ch.id===s.chatterId);
+    if(!c||c.time==='elite')return; // Elite não entra na escala
+    const blocks=[{start:s.start,end:s.end,folga:s.folgaDia===dayKey}];
+    if(s.start2&&s.end2)blocks.push({start:s.start2,end:s.end2,folga:s.folgaDia2===dayKey});
+    (s.modelIds&&s.modelIds.length?s.modelIds:[]).forEach(mid=>{
+      if(!result[mid])return;
+      blocks.forEach(b=>{
+        const hasAbsence=S.absences.some(a=>a.chatterId===c.id&&a.date===dateStr&&a.type==='falta');
+        const isOpen=b.folga||hasAbsence;
+        const swap=S.swaps.find(sw=>sw.date===dateStr&&sw.shiftId===s.id&&sw.originalId===c.id&&((sw.start===b.start&&sw.end===b.end)||(sw.start2===b.start&&sw.end2===b.end)));
+        if(swap){
+          const coverer=S.chatters.find(ch=>ch.id===swap.covererId);
+          result[mid].push({start:b.start,end:b.end,name:coverer?coverer.name:'?',chatterId:swap.covererId,isWindow:false,isCovered:true,shiftId:s.id,originalId:c.id,originalName:c.name});
+        } else if(isOpen){
+          result[mid].push({start:b.start,end:b.end,name:'Janela',chatterId:null,isWindow:true,shiftId:s.id,originalId:c.id,originalName:c.name});
+        } else {
+          result[mid].push({start:b.start,end:b.end,name:c.name,chatterId:c.id,isWindow:false,shiftId:s.id,originalId:c.id,originalName:c.name});
+        }
+      });
+    });
+  });
+  Object.keys(result).forEach(mid=>result[mid].sort((a,b)=>turnoBlockSortVal(a.start)-turnoBlockSortVal(b.start)));
+  return result;
+}
+let turnoFocusDate=null; // null = hoje
+function getTurnoFocusDate(){return turnoFocusDate?new Date(turnoFocusDate+'T12:00:00'):new Date();}
 let selectedDay='seg';
 function toggleNextTurno(){
   const panel=document.getElementById('next-turno-panel');
@@ -1862,9 +1901,77 @@ function toggleNextTurno(){
 }
 
 function renderTurno(){
-  renderTurnoDay();
-  renderTurnoWeek();
+  renderTurnoSchedule();
   renderAbsenceListWithJustificativa();
+}
+const DAY_FULL_UP={dom:'DOMINGO',seg:'SEGUNDA',ter:'TERÇA',qua:'QUARTA',qui:'QUINTA',sex:'SEXTA',sab:'SÁBADO'};
+function renderTurnoSchedule(){
+  const el=document.getElementById('turno-schedule');
+  if(!el)return;
+  if(!S.models.length||!S.chatters.length){
+    el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre modelos e chatters primeiro.</div></div>';
+    return;
+  }
+  const todayStr=todayKey();
+  const wd=getWeekDates(0); // semana atual, dom→sab
+  el.innerHTML=wd.map(day=>{
+    const dateStr=fmt(day);
+    const dayKey=DAY_KEYS[day.getDay()];
+    const isToday=dateStr===todayStr;
+    const schedule=getEffectiveScheduleForDate(day);
+    const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
+    const body=modelsWithShifts.length?modelsWithShifts.map(m=>`
+      <div style="margin-bottom:10px">
+        <div style="font-size:12px;font-weight:800;color:var(--text2);margin-bottom:3px">${m.emoji||'🧩'} ${m.name}</div>
+        ${schedule[m.id].map(b=>{
+          const canEdit=turnoEditMode&&!b.isWindow;
+          return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
+            <span style="font-family:var(--font-mono);color:var(--text3);width:100px;flex-shrink:0">${b.start}–${b.end}</span>
+            <span style="flex:1;${b.isWindow?'color:var(--bad);font-style:italic':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.name}${b.isCovered?` <span style="font-size:10px;color:var(--text3)">(troca, era ${b.originalName})</span>`:''}</span>
+            ${b.isWindow?`<button onclick="openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs">🔁 cobrir</button>`:''}
+            ${canEdit?`<button onclick="openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
+            <button onclick="openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>`:''}
+          </div>`;
+        }).join('')}
+      </div>`).join(''):'<div style="font-size:12.5px;color:var(--text3)">Sem ninguém escalado nesse dia</div>';
+    return`<div style="border-radius:12px;padding:12px 14px;margin-bottom:10px;${isToday?'background:var(--accent-soft);border:2px solid var(--accent)':'background:var(--bg-soft);border:1px solid var(--line)'}">
+      <div style="font-size:12px;font-weight:800;letter-spacing:.04em;color:${isToday?'var(--accent)':'var(--text2)'};margin-bottom:8px">${DAY_FULL_UP[dayKey]}${isToday?' · HOJE':''} <span style="font-weight:400;color:var(--text3)">${day.getDate()}/${day.getMonth()+1}</span></div>
+      ${body}
+    </div>`;
+  }).join('');
+}
+function openAbsenceForSlot(chatterId,dateStr){
+  openModal('m-absence');
+  setTimeout(()=>{
+    const ch=document.getElementById('abs-chatter');if(ch)ch.value=chatterId;
+    const dt=document.getElementById('abs-date');if(dt)dt.value=dateStr;
+    const tp=document.getElementById('abs-type');if(tp)tp.value='falta';
+  },30);
+}
+function openSwapForSlot(shiftId,chatterId,dateStr){
+  openModal('m-swap');
+  setTimeout(()=>{
+    const dt=document.getElementById('swap-date');if(dt)dt.value=dateStr;
+    const out=document.getElementById('swap-chatter-out');if(out)out.value=chatterId;
+    if(typeof updateSwapPreview==='function')updateSwapPreview();
+  },30);
+}
+function copyTurnoSchedule(){
+  const wd=getWeekDates(0);
+  let txt='';
+  wd.forEach(day=>{
+    const dayKey=DAY_KEYS[day.getDay()];
+    const schedule=getEffectiveScheduleForDate(day);
+    const modelsWithShifts=S.models.filter(m=>(schedule[m.id]||[]).length);
+    if(!modelsWithShifts.length)return;
+    txt+=`${DAY_FULL_UP[dayKey]} (${day.getDate()}/${day.getMonth()+1})\n`;
+    modelsWithShifts.forEach(m=>{
+      txt+=`${m.name}:\n`;
+      schedule[m.id].forEach(b=>{txt+=`${b.start} - ${b.end}: ${b.name}\n`;});
+    });
+    txt+='\n';
+  });
+  navigator.clipboard.writeText(txt.trim()).then(()=>toast('📋 Escala copiada!'));
 }
 
 function renderTurnoQuickEditor(){
@@ -4947,7 +5054,19 @@ initFirebaseWithRetry();
 // maior que o timeout do Firebase (8s) de propósito, pra dar tempo da
 // mensagem de erro real aparecer antes de esconder a tela.
 setTimeout(()=>{
-  if(!document.getElementById('initial-load-overlay')?.querySelector('button'))hideInitialLoadOverlay();
+  const overlay=document.getElementById('initial-load-overlay');
+  if(!overlay||overlay.querySelector('button'))return; // já foi liberado ou já mostra um erro
+  if(fbHasReceivedFirstSnapshot){hideInitialLoadOverlay();return;}
+  // Passou do tempo e a sincronização NÃO terminou, mas também não caiu no
+  // callback de erro — mostra exatamente o status de cada uma das 4 partes,
+  // em vez de simplesmente liberar a tela vazia em silêncio.
+  const rows=ALL_SYNC_DOC_IDS.map(id=>`<div style="display:flex;justify-content:space-between;gap:10px;font-size:11px;padding:3px 0"><span style="color:var(--text3)">${id}</span><span>${fbDocsStatus[id]||'sem resposta'}</span></div>`).join('');
+  overlay.innerHTML=`<div style="max-width:340px;text-align:center;padding:0 20px">
+    <div style="font-size:28px;margin-bottom:10px">⏱️</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">Demorou demais pra sincronizar</div>
+    <div style="text-align:left;background:var(--bg-soft);border-radius:8px;padding:10px 12px;margin-bottom:14px">${rows}</div>
+    <button onclick="hideInitialLoadOverlay()" class="btn btn-primary btn-sm">Continuar mesmo assim</button>
+  </div>`;
 },10000);
 document.getElementById('abs-date').value=todayKey();
 
@@ -6156,8 +6275,8 @@ function copyTurnoWeek(){
 let turnoEditMode=false;
 function toggleTurnoEditMode(){
   turnoEditMode=!turnoEditMode;
-  renderTurnoWeek();
-  if(turnoEditMode)toast('Modo edição ativo — ✏️ editar ou ✕ remover');
+  if(typeof renderTurnoSchedule==='function')renderTurnoSchedule();
+  if(turnoEditMode)toast('Modo edição ativo — clique em ❌ falta ou 🔁 trocar');
 }
 
 
