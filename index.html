@@ -471,11 +471,11 @@ body{
       <div><div class="panel-title">Escala da semana</div><div class="panel-note">Guiada só pelo horário previsto</div></div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-xs" onclick="copyTurnoSchedule()">📋 copiar</button>
-        <button class="btn btn-primary btn-xs" onclick="openModal('m-shift')">+ turno</button>
+        <button class="btn btn-ghost btn-xs" id="turno-edit-toggle-btn" onclick="toggleTurnoEditMode()">✏️ editar</button>
       </div>
     </div>
-    <div style="margin-bottom:10px">
-      <button class="btn ${turnoEditMode?'btn-primary':'btn-ghost'} btn-xs" onclick="toggleTurnoEditMode()">${turnoEditMode?'✅ concluir edição':'✏️ editar escala (falta/troca)'}</button>
+    <div id="turno-add-shift-row" style="display:none;margin-bottom:10px">
+      <button class="btn btn-primary btn-xs btn-block" onclick="openModal('m-shift')">+ adicionar turno</button>
     </div>
     <div id="turno-schedule"></div>
   </div>
