@@ -474,8 +474,9 @@ body{
         <button class="btn btn-ghost btn-xs" id="turno-edit-toggle-btn" onclick="toggleTurnoEditMode()">✏️ editar</button>
       </div>
     </div>
-    <div id="turno-add-shift-row" style="display:none;margin-bottom:10px">
-      <button class="btn btn-primary btn-xs btn-block" onclick="openModal('m-shift')">+ adicionar turno</button>
+    <div id="turno-add-shift-row" style="display:none;margin-bottom:10px;gap:8px">
+      <button class="btn btn-primary btn-xs" style="flex:1" onclick="openModal('m-shift')">+ adicionar turno</button>
+      <button class="btn btn-ghost btn-xs" style="color:var(--bad)" onclick="zerarEscalaCompleta()">🗑️ zerar tudo</button>
     </div>
     <div id="turno-schedule"></div>
   </div>
