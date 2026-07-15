@@ -1012,7 +1012,7 @@ function renderGargaloSemana(){
   if(latest){
     if(latest.ticketMedio>0&&latest.ticketMedio<50)suggestion='Foco em ticket médio: treinar upsell e ofertas de maior valor por venda.';
     else if(latest.vendasPorHora>0&&latest.vendasPorHora<10)suggestion='Foco em ritmo: reduzir tempo parado e responder mais rápido no chat.';
-    else if(latest.highTicketPct<10)suggestion='Foco em high ticket: incentivar oferecer pacotes acima de R$375 com mais frequência.';
+    else if(latest.highTicketPct<10)suggestion='Foco em high ticket: incentivar oferecer pacotes acima de R$300 com mais frequência.';
     else if(latest.maxGapMin>60)suggestion='Foco em presença: teve um intervalo grande sem vender — verificar o que aconteceu no turno.';
   }
   el.innerHTML=`<div style="background:var(--bad-soft);border-radius:10px;padding:12px">
@@ -4353,7 +4353,7 @@ function parseTeamReportsCore(forceExtra){
     const allSalesForMetrics=allSales;
     const combinedTotal=chatterTotal+extraTotal;
     const ticketMedio=allSalesForMetrics.length>0?combinedTotal/allSalesForMetrics.length:0;
-    const HIGH_TICKET_MIN=375; // limiar fixo — vendas a partir desse valor dão 8% de bônus diário
+    const HIGH_TICKET_MIN=300; // limiar fixo — vendas a partir desse valor dão 8% de bônus diário
     const highTicketSales=allSalesForMetrics.filter(s=>s.val>=HIGH_TICKET_MIN);
     const highTicketPct=allSalesForMetrics.length>0?Math.round((highTicketSales.length/allSalesForMetrics.length)*100):0;
     const highTicketTotal=highTicketSales.reduce((s,v)=>s+v.val,0); // valor exato em R$, não estimativa
@@ -6253,7 +6253,7 @@ function suggestTrainingText(chatterId){
           ${evoVph!==null?`<div style="font-size:10px;color:${evoVph>=0?'var(--ok)':'var(--bad)'}">${evoVph>=0?'▲':'▼'}${Math.abs(evoVph)}%</div>`:''}
         </div>
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
-          <div style="font-size:9px;color:var(--text3)">High ticket ≥R$375</div>
+          <div style="font-size:9px;color:var(--text3)">High ticket ≥R$300</div>
           <div style="font-size:13px;font-weight:700;color:${avgHigh>=30?'var(--ok)':avgHigh>=15?'var(--warn)':'var(--bad)'}">${avgHigh}%</div>
           ${htTotalWeek>0?`<div style="font-size:10px;color:var(--text3)">${money(htTotalWeek)}/sem.</div>`:''}
         </div>
@@ -7630,7 +7630,7 @@ function renderTesterDetail(cid){
           <div style="font-size:13px;font-weight:700;color:${analysis.avgVph>=20?'var(--ok)':analysis.avgVph>=10?'var(--warn)':'var(--bad)'}">${money(analysis.avgVph)}/h</div>
         </div>
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
-          <div style="font-size:9px;color:var(--text3)">High ticket ≥R$375</div>
+          <div style="font-size:9px;color:var(--text3)">High ticket ≥R$300</div>
           <div style="font-size:13px;font-weight:700;color:${analysis.avgHigh>=30?'var(--ok)':analysis.avgHigh>=15?'var(--warn)':'var(--bad)'}">${analysis.avgHigh}%</div>
           ${analysis.htTotal>0?`<div style="font-size:10px;color:var(--text3)">${money(analysis.htTotal)}</div>`:''}
         </div>
@@ -7907,6 +7907,17 @@ function renderPagWeekNav(){
     ${!isNow?`<button onclick="setPagWeekOffset(0)" style="background:var(--accent-soft);border:none;border-radius:7px;padding:4px 9px;cursor:pointer;font-size:11px;font-weight:600;color:var(--accent)">hoje</button>`:''}
   </div>`;
 }
+function getChatterWeekWorkStats(cid,offset){
+  const f=S.chatterFichas[cid];
+  const analytics=f?.analytics?.weeklyData||{};
+  const wd=getWeekDates(offset);
+  let dias=0,horas=0;
+  wd.forEach(d=>{
+    const a=analytics[fmt(d)];
+    if(a&&((a.chatterTotal||0)>0||(a.extraTotal||0)>0||(a.totalVendas||0)>0)){dias++;horas+=a.shiftHours||0;}
+  });
+  return{dias,horas:Math.round(horas*10)/10};
+}
 function renderPagChattersAll(){
   const el=document.getElementById('pag-chatters-all');
   if(!el)return;
@@ -7922,6 +7933,8 @@ function renderPagChattersAll(){
       const weekRev=getChatterWeekRevenue(c.id,pagWeekOffset);
       const weekExtra=getChatterExtraRevenue(c.id,pagWeekOffset);
       const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,pagWeekOffset);
+      const {dias,horas}=getChatterWeekWorkStats(c.id,pagWeekOffset);
+      const fatPorHora=horas>0?(weekRev+weekExtra)/horas:0;
       // Categoria: única escolha manual (padrão sugerido pela meta cadastrada)
       const goals=S.chatterWeekGoals[wkey]||{};
       const metaVal=parseFloat(goals[c.id])||0;
@@ -7975,19 +7988,76 @@ function renderPagChattersAll(){
             </select>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
-          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
-            <div style="font-size:9px;color:var(--text3)">High ticket ≥R$375 (auto, ${avgHtPct}%)</div>
-            <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(htTotal)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+          <div style="background:var(--bg);border-radius:7px;padding:6px;text-align:center">
+            <div style="font-size:8.5px;color:var(--text3)">Dias trabalhados</div>
+            <div style="font-size:12.5px;font-weight:700">${dias}</div>
           </div>
-          <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
-            <div style="font-size:9px;color:var(--text3)">Hora extra (auto)</div>
-            <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(weekExtra)}</div>
+          <div style="background:var(--bg);border-radius:7px;padding:6px;text-align:center">
+            <div style="font-size:8.5px;color:var(--text3)">Horas (turno+extra)</div>
+            <div style="font-size:12.5px;font-weight:700">${horas}h</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:6px;text-align:center">
+            <div style="font-size:8.5px;color:var(--text3)">Fatur. por hora</div>
+            <div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fatPorHora)}</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:6px;text-align:center">
+            <div style="font-size:8.5px;color:var(--text3)">High ticket ≥R$300</div>
+            <div style="font-size:12.5px;font-weight:700">${avgHtPct}%</div>
           </div>
         </div>
-        <div id="pag-c-result-${c.id}" style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
-          ${renderChatterPagCells(r,pct,col)}
+        <div id="pag-c-result-${c.id}" style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px">
+          ${renderChatterPagCells(r,pct,col,medal)}
         </div>
+        <button class="btn btn-ghost btn-xs btn-block" onclick="toggleCatComparison('${c.id}')">📊 Ver ganho em todas as 5 categorias</button>
+        <div id="pag-cat-compare-${c.id}" style="display:none;margin-top:8px"></div>
+        ${(()=>{
+          // Piso é MENSAL, não semanal — soma as últimas ~4 semanas (mês
+          // corrente aproximado) e compara com o piso garantido da medalha.
+          if(pagWeekOffset!==0)return''; // só mostra na semana atual, pra não confundir
+          let monthTotal=0;
+          for(let o=0;o>-4;o--){
+            const rv=getChatterWeekRevenue(c.id,o);
+            const rx=getChatterExtraRevenue(c.id,o);
+            const {htTotal:ht2}=getChatterWeekHighTicket(c.id,o);
+            monthTotal+=calcChatterPagamento(rv,medal,cat,ht2,rx,0).totalComPiso;
+          }
+          const piso=PAG_PISO[medal]||1000;
+          const faltaPiso=Math.max(0,piso-monthTotal);
+          return`<div style="margin-top:8px;font-size:11px;color:var(--text3);border-top:1px solid var(--line);padding-top:8px">
+            💰 Piso mensal (${PAG_MEDAL_LABEL[medal]}): ${money(piso)} · últimas 4 semanas somaram ${money(monthTotal)}
+            ${faltaPiso>0?`<span style="color:var(--warn)"> · empresa completaria +${money(faltaPiso)} se o mês fechar assim</span>`:` <span style="color:var(--ok)">· já passou do piso ✅</span>`}
+          </div>`;
+        })()}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function toggleCatComparison(cid){
+  const el=document.getElementById('pag-cat-compare-'+cid);
+  if(!el)return;
+  if(el.style.display==='block'){el.style.display='none';return;}
+  el.style.display='block';
+  const c=S.chatters.find(ch=>ch.id===cid);
+  if(!c)return;
+  const weekRev=getChatterWeekRevenue(cid,pagWeekOffset);
+  const weekExtra=getChatterExtraRevenue(cid,pagWeekOffset);
+  const {htTotal}=getChatterWeekHighTicket(cid,pagWeekOffset);
+  const manualMedalRaw=S.chatterFichas?.[cid]?.manualMedal;
+  const wkey=getWeekKey(pagWeekOffset);
+  const goals=S.chatterWeekGoals[wkey]||{};
+  const metaVal=parseFloat(goals[cid])||0;
+  const savedCat=S.chatterFichas?.[cid]?.pagCategoria||'B';
+  const autoMedal=autoMedalForPct(weekRev>0?weekRev/PAG_CATS[savedCat].n100*100:0);
+  const medal=(manualMedalRaw!==undefined&&manualMedalRaw!=='')?parseInt(manualMedalRaw,10):autoMedal;
+  el.innerHTML=`<div style="background:var(--bg);border-radius:8px;padding:8px 10px">
+    <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Com o MESMO faturamento (${money(weekRev)}), veja quanto ${c.name.split(' ')[0]} ganharia em cada categoria — não muda a categoria dela de verdade, é só comparação</div>
+    ${['A','B','C','D','E'].map(k=>{
+      const rk=calcChatterPagamento(weekRev,medal,k,htTotal,weekExtra,0);
+      const isCurrentCat=k===savedCat;
+      return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;${isCurrentCat?'font-weight:700':''};border-bottom:1px solid var(--line);font-size:12px">
+        <span>${isCurrentCat?'👉 ':''}Categoria ${k} <span style="color:var(--text3);font-size:10.5px">(meta ${money(PAG_CATS[k].n100)})</span></span>
+        <span style="font-family:var(--font-mono);color:${isCurrentCat?'var(--ok)':'var(--text)'}">${money(rk.totalComPiso)}</span>
       </div>`;
     }).join('')}
   </div>`;
@@ -8003,22 +8073,32 @@ function saveManualMedal(cid,value){
   save();
 }
 
-function renderChatterPagCells(r,pct,col){
+function renderChatterPagCells(r,pct,col,medal){
+  const comPct=Math.round((PAG_COM[medal]||0.04)*1000)/10; // ex: 4.5
+  const boostX=pct>100?pagBoost(pct-100):1;
   return`
     <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
-      <div style="font-size:9px;color:var(--text3)">Comissão</div>
+      <div style="font-size:9px;color:var(--text3)">① Comissão (${comPct}%)</div>
       <div style="font-size:12px;font-weight:700;font-family:var(--font-mono)">${money(r.comissao)}</div>
     </div>
     <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
-      <div style="font-size:9px;color:var(--text3)">Prêmio meta</div>
+      <div style="font-size:9px;color:var(--text3)">② Prêmio meta${boostX>1?` (boost ${boostX}×)`:''}</div>
       <div style="font-size:12px;font-weight:700;color:${r.premio>0?'var(--ok)':'var(--text3)'}">${money(r.premio)}</div>
+    </div>
+    <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:var(--text3)">③ High ticket (8%)</div>
+      <div style="font-size:12px;font-weight:700;color:${r.htBonus>0?'var(--ok)':'var(--text3)'}">${money(r.htBonus)}</div>
+    </div>
+    <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:var(--text3)">④ Modelo extra (10%)</div>
+      <div style="font-size:12px;font-weight:700;color:${r.extraBonus>0?'var(--ok)':'var(--text3)'}">${money(r.extraBonus)}</div>
     </div>
     <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
       <div style="font-size:9px;color:var(--text3)">% meta</div>
       <div style="font-size:12px;font-weight:800;color:${col}">${pct}%</div>
     </div>
     <div style="background:var(--ok-soft);border-radius:7px;padding:7px;text-align:center">
-      <div style="font-size:9px;color:var(--text3)">Total (real)</div>
+      <div style="font-size:9px;color:var(--text3)">⑤ Total (real)</div>
       <div style="font-size:12px;font-weight:800;color:var(--ok)">${money(r.totalComPiso)}</div>
     </div>`;
 }
