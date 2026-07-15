@@ -4211,55 +4211,43 @@ function parseTeamReportsCore(forceExtra){
   const raw=document.getElementById('teamreport-input').value.trim();
   if(!raw){document.getElementById('teamreport-results').innerHTML='<div style="color:var(--text3);font-size:13px;padding:8px 0">Cole o conteúdo antes de processar</div>';return;}
 
-  const lines=raw.split('\n').map(l=>l.trim()).filter(l=>l);
+  // Parser tolerante: funciona com o relatório colado em várias linhas OU
+  // tudo espremido numa linha só (comum quando se copia de certos apps de
+  // chat, que colapsam as quebras de linha). Em vez de andar linha a linha,
+  // busca os padrões (Data, Nome, Modelo, horário, vendas) direto no texto
+  // inteiro, então não depende de onde as quebras de linha caem.
+  const normalized=raw.replace(/\r/g,' ');
+  const rawBlocks=normalized.split(/(?=Data\s*:\s*\d)/i).map(b=>b.trim()).filter(b=>b);
   const blocks=[];
-  let current=null;
-
-  lines.forEach(line=>{
-    if(/^data:/i.test(line)){
-      if(current)blocks.push(current);
-      current={dateRaw:line.replace(/^data:\s*/i,'').trim(),name:'',modelBlocks:[],currentModel:null,rawSales:[]};
-    } else if(/^nome:/i.test(line)&&current){
-      current.name=line.replace(/^nome:\s*/i,'').trim();
-    } else if(current){
-      const isModelLine=/^[A-ZÁÉÍÓÚÀÂÊÎÔÛÃÕ\s0-9-]+$/.test(line)&&line.length>3&&!line.includes('R$')&&!/^\d/.test(line)&&line===line.toUpperCase();
-      if(isModelLine){
-        // If current model has NO sales/shift yet, it might be a continuation of the model name
-        // e.g. "ARRUDA" then "PRIVACY FREE" = one model "ARRUDA PRIVACY FREE"
-        if(current.currentModel&&!current.currentModel.sales.length&&!current.currentModel.shiftStart&&!current.currentModel.total){
-          current.currentModel.name+=' '+line;
-        } else {
-          current.currentModel={name:line,sales:[],saleTimes:[]};
-          current.modelBlocks.push(current.currentModel);
-        }
-      } else if(/total de comiss/i.test(line)&&current.currentModel){
-        const m=line.match(/R\$\s*([\d.,]+)/);
-        if(m)current.currentModel.total=parseFloat(m[1].replace('.','').replace(',','.'));
-      } else if(current.currentModel){
-        // Detect shift window: "23:21 às 07:02"
-        const shiftMatch=line.match(/(\d{2}:\d{2})\s+às\s+(\d{2}:\d{2})/);
-        if(shiftMatch&&!current.currentModel.shiftStart){
-          current.currentModel.shiftStart=shiftMatch[1];
-          current.currentModel.shiftEnd=shiftMatch[2];
-        }
-        // Detect sale times: "HH:MM -" (R$ value may be on same OR next line in real reports)
-        // Shift times use "às" so they never match "HH:MM -"
-        const saleTimePattern=/(\d{2}:\d{2})\s*-/g;
-        let st;
-        while((st=saleTimePattern.exec(line))!==null){
-          current.currentModel.saleTimes.push(st[1]);
-        }
-        const valMatches=line.match(/R\$\s*([\d.,]+)/g);
-        if(valMatches){
-          valMatches.forEach(v=>{
-            const val=parseFloat(v.replace('R$','').trim().replace(/\./g,'').replace(',','.'));
-            if(val>0){current.currentModel.sales.push(val);current.rawSales.push({val,time:null});}
-          });
-        }
+  rawBlocks.forEach(text=>{
+    const dateMatch=text.match(/Data\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+    const nameMatch=text.match(/Nome\s*:\s*((?:[A-ZÀ-Ú][a-zà-ÿ'.]+\s*)+)/);
+    if(!dateMatch||!nameMatch)return;
+    const dateRaw=dateMatch[1];
+    const name=nameMatch[1].trim();
+    const afterName=text.slice(nameMatch.index+nameMatch[0].length);
+    const modelBlocks=[];
+    // Cada bloco de modelo: NOME EM MAIÚSCULA (pode ter "-" e espaços) seguido,
+    // em algum ponto, de "HH:MM às HH:MM" (o turno), depois vendas e o total.
+    const modelRegex=/([A-ZÀ-Ú][A-ZÀ-Ú0-9\s-]*?)\s+(\d{2}:\d{2})\s+às\s+(\d{2}:\d{2})([\s\S]*?)(?=[A-ZÀ-Ú][A-ZÀ-Ú0-9\s-]*?\s+\d{2}:\d{2}\s+às\s+\d{2}:\d{2}|$)/g;
+    let mm;
+    while((mm=modelRegex.exec(afterName))!==null){
+      const modelName=mm[1].trim();
+      const shiftStart=mm[2],shiftEnd=mm[3];
+      const body=mm[4];
+      const sales=[],saleTimes=[];
+      const saleRegex=/(\d{2}:\d{2})\s*-\s*R\$\s*([\d.,]+)/g;
+      let sm;
+      while((sm=saleRegex.exec(body))!==null){
+        const val=parseFloat(sm[2].replace(/\./g,'').replace(',','.'));
+        if(val>0){sales.push(val);saleTimes.push(sm[1]);}
       }
+      const totalMatch=body.match(/Total de comiss[õo]es\s*:\s*R\$\s*([\d.,]+)/i);
+      const total=totalMatch?parseFloat(totalMatch[1].replace(/\./g,'').replace(',','.')):undefined;
+      if(modelName)modelBlocks.push({name:modelName,sales,saleTimes,shiftStart,shiftEnd,total});
     }
+    blocks.push({dateRaw,name,modelBlocks,rawSales:[]});
   });
-  if(current)blocks.push(current);
 
   if(!blocks.length){
     document.getElementById('teamreport-results').innerHTML='<div style="color:var(--warn);font-size:13px;padding:8px 0">⚠️ Nenhum relatório reconhecido. Verifique o formato.</div>';
@@ -4468,7 +4456,6 @@ function parseTeamReportsCore(forceExtra){
   }
 
   const safeRender=(fn,name)=>{try{fn();}catch(e){console.warn('renderError',name,e);}};
-  safeRender(renderMetaProgress,'meta');
   safeRender(renderExtraProgress,'extra');
   safeRender(renderGestaoMissingReports,'missing-reports');
   const cv=currentViewName();
