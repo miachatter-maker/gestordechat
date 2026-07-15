@@ -1043,19 +1043,36 @@ function renderWeeklyRanking(){
     const metaManual=parseFloat(goals[c.id])||0;
     const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
     const pct=meta>0?(rev/meta*100):0;
-    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum};
+    // Melhora da semana: compara o % da meta dessa semana com o da semana
+    // anterior — quem mais subiu (e já tinha um número real pra comparar).
+    const prevGoals=S.chatterWeekGoals[getWeekKey(weekOffset-1)]||{};
+    const prevMetaManual=parseFloat(prevGoals[c.id])||0;
+    const prevMeta=prevMetaManual>0?prevMetaManual:(PAG_CATS[cat]?.n100||0);
+    const prevRev=getChatterWeekRevenue(c.id,weekOffset-1);
+    const prevPct=prevMeta>0?(prevRev/prevMeta*100):0;
+    const melhora=prevPct>0?pct-prevPct:null;
+    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct};
   });
   const top=(key,fmtFn)=>{
     const sorted=[...rows].filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
     if(!sorted.length)return null;
     return{name:sorted[0].c.name,val:fmtFn(sorted[0][key])};
   };
+  const topMelhora=(()=>{
+    // Só entra quem estava "mal" (abaixo de 70% da meta na semana anterior)
+    // — a ideia é destacar quem vinha com dificuldade e deu um salto, não
+    // quem já ia bem e melhorou um pouco mais.
+    const sorted=rows.filter(r=>r.melhora!==null&&r.melhora>0&&r.prevPct<70).sort((a,b)=>b.melhora-a.melhora);
+    if(!sorted.length)return null;
+    return{name:sorted[0].c.name,val:`+${Math.round(sorted[0].melhora)}pp (vinha de ${Math.round(sorted[0].prevPct)}%)`};
+  })();
   const cards=[
     {label:'🎫 Maior ticket',data:top('avgTicket',v=>money(v))},
     {label:'🛍️ Mais vendas',data:top('vendasSum',v=>`${v} venda${v>1?'s':''}`)},
     {label:'⚡ Mais lucro em hora extra',data:top('extraBonus',v=>money(v))},
     {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
+    {label:'📈 Melhora da semana',data:topMelhora},
   ].filter(x=>x.data);
   if(!cards.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem dados suficientes essa semana ainda</div>';return;}
   el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${cards.map(x=>`
@@ -1132,7 +1149,7 @@ function saveWeekNotes(){
 function renderSemanaRevenue(){
   const el=document.getElementById('semana-revenue-preview');
   const wd=getWeekDates();
-  const chatters=S.chatters.filter(c=>c.time!=='tester'&&c.time!=='elite');
+  const chatters=S.chatters.filter(c=>c.time!=='tester'&&c.time!=='elite'&&!isChatterTerminated(c));
   let total=0;
   wd.forEach(d=>chatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
   el.innerHTML=`<div style="font-family:var(--font-mono);font-size:30px;font-weight:700;color:var(--ok);text-align:center;padding:8px 0">${money(total)}</div>
@@ -3266,7 +3283,7 @@ function renderReport_Weekly(){
 
   // ---- Section 1: Visão Geral ----
   let totalRev=0;
-  const chatterRevs=S.chatters.filter(c=>c.time!=='tester').map(c=>{
+  const chatterRevs=S.chatters.filter(c=>c.time!=='tester'&&c.time!=='elite'&&!isChatterTerminated(c)).map(c=>{
     let r=0;wd.forEach(wdate=>S.models.forEach(m=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(wdate)}`])||0;}));
     return{c,r};
   }).filter(x=>x.r>0).sort((a,b)=>b.r-a.r);
@@ -3285,7 +3302,7 @@ function renderReport_Weekly(){
   // ---- Section 2: Performance por Chatter ----
   const s2=document.getElementById('rpt-performance');
   if(s2){
-    const ativos=S.chatters.filter(c=>c.level!=='treinamento'&&c.level!=='teste'&&c.time!=='tester');
+    const ativos=S.chatters.filter(c=>c.level!=='treinamento'&&c.level!=='teste'&&c.time!=='tester'&&c.time!=='elite'&&!isChatterTerminated(c));
     if(!ativos.length){s2.innerHTML='<div style="color:var(--text3);font-size:12px">Nenhum chatter ativo cadastrado</div>';}
     else s2.innerHTML=ativos.map(c=>{
       let rev=0;let daysWorked=0;
@@ -3510,7 +3527,7 @@ function generateFullReport(){
   lines.push(`● Pior chatter: ${worst&&worst!==best?`${worst.c.name} (${moneyShort(worst.r)})`:'—'}`);
   lines.push(``);
   lines.push(`2. PERFORMANCE POR CHATTER`);
-  const ativos=S.chatters.filter(c=>c.level!=='treinamento'&&c.level!=='teste'&&c.time!=='tester');
+  const ativos=S.chatters.filter(c=>c.level!=='treinamento'&&c.level!=='teste'&&c.time!=='tester'&&c.time!=='elite'&&!isChatterTerminated(c));
   ativos.forEach(c=>{
     let rev=0;let daysWorked=0;
     wd.forEach(dd=>{let dr=0;S.models.forEach(m=>{dr+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(dd)}`])||0;});rev+=dr;if(dr>0)daysWorked++;});
@@ -4304,8 +4321,18 @@ function parseTeamReportsCore(forceExtra){
           let slot=S.horaExtraSlots[wkeyLocal].find(x=>x.id===slotId);
           if(!slot){slot={id:slotId,shiftId:'parsed',slotIdx:0,chatterId:chatter.id,modelId:model.id,revenue:0,done:true,dateKey};S.horaExtraSlots[wkeyLocal].push(slot);}
           slot.revenue=total;
+          // Se esse mesmo dia+modelo+pessoa já tinha sido lançado como
+          // faturamento NORMAL antes (ex: alguém processou no botão errado
+          // da primeira vez), limpa o normal pra não ficar contando 2x.
+          const normalKey=`${chatter.id}_${model.id}_${dateKey}`;
+          if(S.revenues[normalKey])delete S.revenues[normalKey];
         } else {
           const key=`${chatter.id}_${model.id}_${dateKey}`;
+          // Se esse mesmo dia+modelo+pessoa já tinha ido pra Hora Extra por
+          // engano, tira de lá — o valor agora é faturamento normal.
+          const wkeyLocal2=getWeekKey();
+          const extraSlotId=`parsed_${chatter.id}_${model.id}_${dateKey}`;
+          if(S.horaExtraSlots[wkeyLocal2])S.horaExtraSlots[wkeyLocal2]=S.horaExtraSlots[wkeyLocal2].filter(x=>x.id!==extraSlotId);
           const existing=parseFloat(S.revenues[key])||0;
           if(existing>0&&Math.abs(existing-total)>0.01){
             const ok=confirm(`Já existe um valor de ${money(existing)} para ${chatter.name} · ${model.name} em ${dateKey.split('-').reverse().join('/')}.\n\nSubstituir pelo novo valor de ${money(total)}?`);
@@ -4318,16 +4345,24 @@ function parseTeamReportsCore(forceExtra){
     });
 
     // ---- Analytics ----
-    const normalSales=allSales.filter(s=>!s.isExtra);
-    const ticketMedio=normalSales.length>0?chatterTotal/normalSales.length:0;
+    // Ticket médio, high ticket e ritmo de vendas contam TODAS as vendas do
+    // dia (normais + hora extra) — desempenho é desempenho, independente de
+    // qual "caixinha" a venda cai pra fins de pagamento. Só a meta semanal
+    // (chatterTotal x extraTotal) continua separada, porque isso sim tem
+    // regra de pagamento diferente.
+    const allSalesForMetrics=allSales;
+    const combinedTotal=chatterTotal+extraTotal;
+    const ticketMedio=allSalesForMetrics.length>0?combinedTotal/allSalesForMetrics.length:0;
     const HIGH_TICKET_MIN=375; // limiar fixo — vendas a partir desse valor dão 8% de bônus diário
-    const highTicketSales=normalSales.filter(s=>s.val>=HIGH_TICKET_MIN);
-    const highTicketPct=normalSales.length>0?Math.round((highTicketSales.length/normalSales.length)*100):0;
+    const highTicketSales=allSalesForMetrics.filter(s=>s.val>=HIGH_TICKET_MIN);
+    const highTicketPct=allSalesForMetrics.length>0?Math.round((highTicketSales.length/allSalesForMetrics.length)*100):0;
     const highTicketTotal=highTicketSales.reduce((s,v)=>s+v.val,0); // valor exato em R$, não estimativa
 
-    // Vendas por hora — use shift window from "HH:MM às HH:MM" in the report
+    // Vendas por hora — usa a janela de turno "HH:MM às HH:MM" de TODOS os
+    // blocos (normais e hora extra), já que o tempo trabalhado extra também
+    // conta pro ritmo de vendas por hora.
     let shiftHours=0;
-    block.modelBlocks.filter(mb=>!(/hora extra/i.test(mb.name))).forEach(mb=>{
+    block.modelBlocks.forEach(mb=>{
       if(mb.shiftStart&&mb.shiftEnd){
         const[h1,m1]=mb.shiftStart.split(':').map(Number);
         const[h2,m2]=mb.shiftEnd.split(':').map(Number);
@@ -4337,12 +4372,12 @@ function parseTeamReportsCore(forceExtra){
       }
     });
     if(!shiftHours)shiftHours=8; // fallback if no shift window found
-    const vendasPorHora=shiftHours>0?Math.round((chatterTotal/shiftHours)*100)/100:0; // R$/hora
+    const vendasPorHora=shiftHours>0?Math.round((combinedTotal/shiftHours)*100)/100:0; // R$/hora
 
-    // Tempo máximo sem venda (gap between sale times)
+    // Tempo máximo sem venda (gap between sale times) — todos os blocos
     let maxGapMin=0;
     const saleTsAll=[];
-    block.modelBlocks.filter(mb=>!(/hora extra/i.test(mb.name))).forEach(mb=>{
+    block.modelBlocks.forEach(mb=>{
       (mb.saleTimes||[]).forEach(t=>{const[h,m]=t.split(':').map(Number);saleTsAll.push(h*60+m);});
     });
     saleTsAll.sort((a,b)=>a-b);
@@ -4359,7 +4394,7 @@ function parseTeamReportsCore(forceExtra){
       if(!S.chatterFichas[chatter.id].analytics)S.chatterFichas[chatter.id].analytics={};
       const a=S.chatterFichas[chatter.id].analytics;
       if(!a.weeklyData)a.weeklyData={};
-      a.weeklyData[dateKey]={ticketMedio,vendasPorHora,highTicketPct,highTicketTotal,maxGapMin,totalVendas:normalSales.length,chatterTotal,extraTotal,shiftHours,saleTimes:saleTsAll};
+      a.weeklyData[dateKey]={ticketMedio,vendasPorHora,highTicketPct,highTicketTotal,maxGapMin,totalVendas:allSalesForMetrics.length,chatterTotal,extraTotal,shiftHours,saleTimes:saleTsAll};
       // Auto-fill ficha técnica from analytics
       const f=S.chatterFichas[chatter.id];
       // Valor/hora: 0.3=regular, 0.5=bom, 0.8=ótimo, 1+=excelente
@@ -6058,7 +6093,7 @@ function renderEvolucao(){
   const goals=S.chatterWeekGoals[wkey]||{};
   let teamTotal=0, teamDays=0, teamTicketSum=0, teamVphSum=0, teamHighSum=0;
 
-  S.chatters.filter(c=>c.time!=='tester').forEach(c=>{
+  S.chatters.filter(c=>c.time!=='tester'&&c.time!=='elite'&&!isChatterTerminated(c)).forEach(c=>{
     const rev=getChatterWeekRevenueTotal(c.id);
     const meta=parseFloat(goals[c.id])||0;
     const pct=meta>0?Math.round((getChatterWeekRevenue(c.id)/meta)*100):null;
