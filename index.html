@@ -512,6 +512,11 @@ body{
   </div>
 
   <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🚧 Gargalo da semana</div><div class="panel-note">Quem mais precisa de atenção agora, com sugestão</div></div></div>
+    <div id="gargalo-semana-board"></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-head"><div class="panel-title">⚠️ Risco de não bater a meta</div></div>
     <div id="week-meta-risk-board"></div>
   </div>
@@ -821,6 +826,7 @@ body{
 <section class="view" id="v-gestao">
   <div class="eyebrow">operação</div>
   <div class="view-title">Agenda</div>
+  <div style="font-size:12.5px;font-weight:600;color:var(--accent);font-style:italic;margin:-6px 0 14px">Supervisionar. Gerenciar. Resolver e relatar. Sempre leve soluções.</div>
 
   <!-- PERFIL DO GESTOR -->
   <div class="panel" id="manager-profile-panel" style="background:var(--accent-soft);border:none;position:relative">
@@ -932,11 +938,12 @@ body{
 
   <!-- PROBLEMAS DIÁRIOS -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">📋 Problemas diários</div><span class="pill pill-bad" style="font-size:10px" id="daily-problems-badge"></span></div>
+    <div class="panel-head"><div class="panel-title">📋 Acontecimento e ação tomada</div></div>
     <div id="daily-problems-list"></div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <input class="finput" id="problems-input" placeholder="Descreva o problema..." style="flex:1" onkeydown="if(event.key==='Enter')addProblem()">
-      <button class="btn btn-primary btn-sm" onclick="addProblem()">+</button>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+      <input class="finput" id="event-input" placeholder="O que aconteceu...">
+      <input class="finput" id="action-input" placeholder="Ação tomada..." onkeydown="if(event.key==='Enter')addEventAction()">
+      <button class="btn btn-primary btn-sm" onclick="addEventAction()">+ registrar</button>
     </div>
   </div>
 
@@ -1058,6 +1065,7 @@ body{
 
   <!-- CHATTERS -->
   <div id="pagpane-chatters">
+    <div id="pag-week-nav" style="display:flex;justify-content:center;margin-bottom:12px"></div>
     <div id="pag-chatters-all"></div>
     <div class="panel" style="margin-top:8px">
       <div class="panel-head"><div class="panel-title">📊 Tabela de metas — todas as categorias</div></div>
