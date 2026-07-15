@@ -975,6 +975,7 @@ function renderSemana(){
   renderWeekOrients();
   renderMetaRiskBoard();
   renderWeeklyRanking();
+  renderGargaloSemana();
   const wk=getWeekDates();
   document.getElementById('semana-range').textContent=`${wk[0].getDate()}/${wk[0].getMonth()+1} – ${wk[6].getDate()}/${wk[6].getMonth()+1}`;
   const notesEl=document.getElementById('week-notes');
@@ -985,6 +986,41 @@ function renderSemana(){
 }
 // Ranking da semana: maior ticket médio, quem mais lucrou de hora extra,
 // quem tá mais perto da meta, e quem vende mais rápido (valor/hora).
+function renderGargaloSemana(){
+  const el=document.getElementById('gargalo-semana-board');
+  if(!el)return;
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem chatters no time</div>';return;}
+  const wkey=getWeekKey(0);
+  const goals=S.chatterWeekGoals[wkey]||{};
+  let worst=null,worstPct=101;
+  chatters.forEach(c=>{
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaManual=parseFloat(goals[c.id])||0;
+    const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
+    if(!meta)return;
+    const rev=getChatterWeekRevenue(c.id,0);
+    const pct=rev/meta*100;
+    if(pct<worstPct){worstPct=pct;worst=c;}
+  });
+  if(!worst){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem dados suficientes ainda essa semana</div>';return;}
+  const f=S.chatterFichas?.[worst.id];
+  const analytics=f?.analytics?.weeklyData||{};
+  const dates=Object.keys(analytics).sort();
+  const latest=dates.length?analytics[dates[dates.length-1]]:null;
+  let suggestion='Converse sobre o ritmo da semana e reforce a meta com ela.';
+  if(latest){
+    if(latest.ticketMedio>0&&latest.ticketMedio<50)suggestion='Foco em ticket médio: treinar upsell e ofertas de maior valor por venda.';
+    else if(latest.vendasPorHora>0&&latest.vendasPorHora<10)suggestion='Foco em ritmo: reduzir tempo parado e responder mais rápido no chat.';
+    else if(latest.highTicketPct<10)suggestion='Foco em high ticket: incentivar oferecer pacotes acima de R$375 com mais frequência.';
+    else if(latest.maxGapMin>60)suggestion='Foco em presença: teve um intervalo grande sem vender — verificar o que aconteceu no turno.';
+  }
+  el.innerHTML=`<div style="background:var(--bad-soft);border-radius:10px;padding:12px">
+    <div style="font-weight:700;font-size:13.5px;margin-bottom:4px">${worst.name} — ${Math.round(worstPct)}% da meta</div>
+    <div style="font-size:12.5px;color:var(--text2)">💡 ${suggestion}</div>
+    <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="openChatterDetail('${worst.id}')">Ver perfil →</button>
+  </div>`;
+}
 function renderWeeklyRanking(){
   const el=document.getElementById('week-ranking-board');
   if(!el)return;
@@ -2011,6 +2047,7 @@ function renderTurnoSchedule(){
         return`<div style="display:flex;align-items:center;gap:6px;padding:1px 0;font-size:12.5px;flex-wrap:wrap">
           <span style="font-family:var(--font-mono);color:var(--text3);width:90px;flex-shrink:0">${b.start}–${b.end}</span>
           <span style="flex:1;min-width:50px;${b.isWindow?'color:var(--text3)':b.isCovered?'color:var(--info);font-weight:600':'font-weight:600'}">${b.isWindow?'—':b.name}${b.isCovered?` <span style="font-size:9px;color:var(--text3)">(troca)</span>`:''}</span>
+          ${turnoEditMode?`<button onclick="event.stopPropagation();openEditShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Editar esse turno">✏️</button>`:''}
           ${canEditFT?`<button onclick="event.stopPropagation();openAbsenceForSlot('${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Falta">❌</button>
           <button onclick="event.stopPropagation();openSwapForSlot('${b.shiftId}','${b.originalId}','${dateStr}')" class="btn btn-ghost btn-xs" title="Trocar">🔁</button>`:''}
           ${turnoEditMode?`<button onclick="event.stopPropagation();deleteShift('${b.shiftId}')" class="btn btn-ghost btn-xs" title="Excluir esse turno (todos os dias)" style="color:var(--bad)">🗑️</button>`:''}
@@ -2928,6 +2965,19 @@ function copyDiscordReport(){
     }
   }
 }
+const PERFIL_LABEL={analitica:'🔍 Analítica',criativa:'🎨 Criativa',executora:'⚡ Executora'};
+function mapeamentoSummaryHtml(id){
+  const m=S.chatterFichas?.[id]?.mapeamento;
+  if(!m||!(m.resumo||m.motivacao||m.perfil||m.comoLiderar||m.naoFazer))return'';
+  return`<div style="background:var(--accent-soft);border-radius:10px;padding:12px;margin-bottom:14px">
+    <div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px">🧭 Mapeamento de perfil</div>
+    ${m.resumo?`<div style="font-size:12.5px;margin-bottom:5px"><strong>História:</strong> ${m.resumo}</div>`:''}
+    ${m.motivacao?`<div style="font-size:12.5px;margin-bottom:5px"><strong>Motivação:</strong> ${m.motivacao}</div>`:''}
+    ${m.perfil?`<div style="font-size:12.5px;margin-bottom:5px"><strong>Perfil:</strong> ${PERFIL_LABEL[m.perfil]||m.perfil}</div>`:''}
+    ${m.comoLiderar?`<div style="font-size:12.5px;margin-bottom:5px;color:var(--ok)"><strong>✅ Como liderar:</strong> ${m.comoLiderar}</div>`:''}
+    ${m.naoFazer?`<div style="font-size:12.5px;color:var(--bad)"><strong>🚫 Não fazer:</strong> ${m.naoFazer}</div>`:''}
+  </div>`;
+}
 function openChatterDetail(id){
   const c=S.chatters.find(ch=>ch.id===id);if(!c)return;
   const color=getComputedLevelColor(c.level);
@@ -2970,6 +3020,7 @@ function openChatterDetail(id){
       <div><div style="font-size:17px;font-weight:700">${c.name}</div><div style="font-size:12px;color:var(--text2)">${c.discord||'sem discord'}</div>
       <span class="pill ${LVLCLASS[c.level]}" style="border:1px solid;margin-top:4px">${c.level}</span></div>
     </div>
+    ${mapeamentoSummaryHtml(id)}
     <div class="statgrid">
       <div class="statcell"><div class="statval" style="font-size:18px;color:var(--ok)">${moneyShort(revWeek)}</div><div class="statlb">Semana</div></div>
       <div class="statcell"><div class="statval" style="font-size:18px;color:var(--warn)">${weekOT}min</div><div class="statlb">H.Extra sem.</div></div>
@@ -4238,7 +4289,13 @@ function parseTeamReportsCore(forceExtra){
           if(!slot){slot={id:slotId,shiftId:'parsed',slotIdx:0,chatterId:chatter.id,modelId:model.id,revenue:0,done:true,dateKey};S.horaExtraSlots[wkeyLocal].push(slot);}
           slot.revenue=total;
         } else {
-          S.revenues[`${chatter.id}_${model.id}_${dateKey}`]=total;
+          const key=`${chatter.id}_${model.id}_${dateKey}`;
+          const existing=parseFloat(S.revenues[key])||0;
+          if(existing>0&&Math.abs(existing-total)>0.01){
+            const ok=confirm(`Já existe um valor de ${money(existing)} para ${chatter.name} · ${model.name} em ${dateKey.split('-').reverse().join('/')}.\n\nSubstituir pelo novo valor de ${money(total)}?`);
+            if(!ok)return{name:mb.name,total:existing,model,matched:!!model,isExtra,skipped:true};
+          }
+          S.revenues[key]=total;
         }
       }
       return{name:mb.name,total,model,matched:!!model,isExtra};
@@ -4471,12 +4528,34 @@ function removeDailyItem(store,id){
   else{const t=todayKey();S[store][t]=(S[store][t]||[]).filter(x=>x.id!==id);}
   save();renderGestao();
 }
-function addProblem(){
-  const inp=document.getElementById('problems-input');
-  const text=inp?.value.trim();if(!text)return;
+function addEventAction(){
+  const evInp=document.getElementById('event-input');
+  const acInp=document.getElementById('action-input');
+  const event=evInp?.value.trim();
+  const action=acInp?.value.trim();
+  if(!event){toast('⚠️ Descreva o que aconteceu');return;}
   if(!Array.isArray(S.problemsToday))S.problemsToday=[];
-  S.problemsToday.push({id:'p'+Date.now(),text,done:false});
-  inp.value='';save();renderGestao();
+  S.problemsToday.push({id:'p'+Date.now(),event,action,date:todayKey()});
+  evInp.value='';if(acInp)acInp.value='';
+  save();renderEventActionList();
+}
+function deleteEventAction(id){
+  S.problemsToday=(S.problemsToday||[]).filter(x=>x.id!==id);
+  save();renderEventActionList();
+}
+function renderEventActionList(){
+  const el=document.getElementById('daily-problems-list');
+  if(!el)return;
+  const list=(S.problemsToday||[]).slice().reverse();
+  if(!list.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:4px 0">Nenhum registro ainda</div>';return;}
+  el.innerHTML=list.map(x=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+    <div style="display:flex;justify-content:space-between;gap:8px">
+      <div style="font-size:13px;font-weight:600;flex:1">${x.event}</div>
+      <button onclick="deleteEventAction('${x.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;flex-shrink:0">✕</button>
+    </div>
+    ${x.action?`<div style="font-size:12px;color:var(--ok);margin-top:2px">✅ ${x.action}</div>`:'<div style="font-size:11.5px;color:var(--text3);margin-top:2px;font-style:italic">sem ação registrada ainda</div>'}
+    <div style="font-size:10px;color:var(--text3);margin-top:2px">${(x.date||'').split('-').reverse().join('/')}</div>
+  </div>`).join('');
 }
 function addDemanda(){
   const inp=document.getElementById('demandas-input');
@@ -4776,6 +4855,23 @@ function renderFichaChatter(chatterId){
     <div style="background:var(--bg-soft);border-radius:12px;padding:14px;margin-bottom:12px">
       <div style="font-weight:800;font-size:16px;margin-bottom:4px">${c.name}</div>
       <div style="font-size:12px;color:var(--text3)">${c.level} · desde ${c.createdAt?c.createdAt.slice(0,10):'?'}</div>
+    </div>
+
+    <div class="panel" style="border:2px solid var(--accent)">
+      <div class="panel-head"><div><div class="panel-title">🧭 Mapeamento de Perfil</div><div class="panel-note">Resumo pra saber como liderar essa pessoa rapidinho</div></div></div>
+      ${txtField('resumo','Resumo da história','mapeamento','Breve histórico dessa pessoa na equipe...')}
+      ${txtField('motivacao','O que motiva essa pessoa','mapeamento','O que faz ela querer trabalhar/se esforçar?')}
+      <div class="field">
+        <label class="flabel">Perfil de liderança</label>
+        <select class="fselect" onchange="saveFichaText('${chatterId}','mapeamento','perfil',this.value)">
+          <option value="" ${!f.mapeamento?.perfil?'selected':''}>— selecionar —</option>
+          <option value="analitica" ${f.mapeamento?.perfil==='analitica'?'selected':''}>🔍 Analítica</option>
+          <option value="criativa" ${f.mapeamento?.perfil==='criativa'?'selected':''}>🎨 Criativa</option>
+          <option value="executora" ${f.mapeamento?.perfil==='executora'?'selected':''}>⚡ Executora</option>
+        </select>
+      </div>
+      ${txtField('comoLiderar','Como liderar e motivar','mapeamento','O que funciona bem com essa pessoa? Elogio público, desafio, dado concreto...')}
+      ${txtField('naoFazer','O que NÃO fazer','mapeamento','O que evitar? O que já não funcionou ou irritou essa pessoa?')}
     </div>
 
     <div class="panel">
@@ -6338,7 +6434,7 @@ function saveJustificativa2(chatterId,text,datesStr){
 function renderGestao(){
   renderManagerProfile();
   renderTaskBoards();
-  renderDailyList('problemsToday','daily-problems-list','daily-problems-badge');
+  renderEventActionList();
   renderTrainings();
   renderPrizePanel();
   const wkey=getWeekKey();
@@ -7708,6 +7804,7 @@ function pagSwitchTab(tab){
 }
 
 function renderPagamento(){
+  renderPagWeekNav();
   // Render meta table
   const tbody=document.getElementById('pag-meta-table');
   if(tbody){
@@ -7743,20 +7840,38 @@ function getRemainingWorkDaysThisWeek(chatterId){
   });
   return count;
 }
+let pagWeekOffset=0;
+function setPagWeekOffset(o){
+  pagWeekOffset=Math.min(0,o); // nunca deixa ir pro futuro
+  renderPagChattersAll();
+  renderPagWeekNav();
+}
+function renderPagWeekNav(){
+  const el=document.getElementById('pag-week-nav');
+  if(!el)return;
+  const isNow=pagWeekOffset===0;
+  el.innerHTML=`<div style="display:flex;align-items:center;gap:6px">
+    <button onclick="setPagWeekOffset(${pagWeekOffset-1})" style="background:var(--bg-soft);border:1px solid var(--line);border-radius:7px;padding:4px 10px;cursor:pointer;font-size:14px;color:var(--text2)">‹</button>
+    <div style="font-size:12.5px;font-weight:600;color:var(--text2);min-width:140px;text-align:center">${weekLabel(pagWeekOffset)}${isNow?' <span style="font-size:10px;color:var(--ok)">(atual)</span>':''}</div>
+    <button onclick="setPagWeekOffset(${pagWeekOffset+1})" ${isNow?'disabled style="opacity:.3;cursor:not-allowed"':''} style="background:var(--bg-soft);border:1px solid var(--line);border-radius:7px;padding:4px 10px;cursor:pointer;font-size:14px;color:var(--text2)">›</button>
+    ${!isNow?`<button onclick="setPagWeekOffset(0)" style="background:var(--accent-soft);border:none;border-radius:7px;padding:4px 9px;cursor:pointer;font-size:11px;font-weight:600;color:var(--accent)">hoje</button>`:''}
+  </div>`;
+}
 function renderPagChattersAll(){
   const el=document.getElementById('pag-chatters-all');
   if(!el)return;
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
   if(!chatters.length){el.innerHTML='';return;}
-  const wkey=getWeekKey(0); // Pagamento é sempre a semana atual, nunca segue a navegação de outras abas
+  const wkey=getWeekKey(pagWeekOffset);
+  const readOnly=pagWeekOffset!==0; // resultado de semana passada é só consulta
 
   el.innerHTML=`<div class="panel">
-    <div class="panel-head"><div class="panel-title">📋 Todos os chatters — semana atual</div><div class="panel-note">Faturamento, medalha, high ticket e "falta pra meta" são automáticos. Só escolha a categoria.</div></div>
+    <div class="panel-head"><div class="panel-title">📋 Todos os chatters ${pagWeekOffset===0?'— semana atual':'— '+weekLabel(pagWeekOffset)}</div><div class="panel-note">${readOnly?'Consulta de semana anterior — categoria e medalha não editáveis aqui':'Faturamento, medalha, high ticket e "falta pra meta" são automáticos. Só escolha a categoria.'}</div></div>
     ${chatters.map(c=>{
-      // Tudo automático a partir dos dados reais — sempre semana atual (offset 0)
-      const weekRev=getChatterWeekRevenue(c.id,0);
-      const weekExtra=getChatterExtraRevenue(c.id,0);
-      const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,0);
+      // Tudo automático a partir dos dados reais — respeita a semana selecionada aqui
+      const weekRev=getChatterWeekRevenue(c.id,pagWeekOffset);
+      const weekExtra=getChatterExtraRevenue(c.id,pagWeekOffset);
+      const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,pagWeekOffset);
       // Categoria: única escolha manual (padrão sugerido pela meta cadastrada)
       const goals=S.chatterWeekGoals[wkey]||{};
       const metaVal=parseFloat(goals[c.id])||0;
@@ -7767,7 +7882,7 @@ function renderPagChattersAll(){
       const metaCat=metaVal>0?metaVal:PAG_CATS[cat].n100;
       const pct=weekRev>0&&metaCat>0?Math.round(weekRev/metaCat*100):0;
       const falta=Math.max(0,metaCat-weekRev);
-      const remainDays=getRemainingWorkDaysThisWeek(c.id);
+      const remainDays=pagWeekOffset===0?getRemainingWorkDaysThisWeek(c.id):0;
       const faltaPorDia=falta>0&&remainDays>0?falta/remainDays:null;
       const autoMedal=autoMedalForPct(pct);
       const manualMedalRaw=S.chatterFichas?.[c.id]?.manualMedal;
@@ -7789,7 +7904,7 @@ function renderPagChattersAll(){
           <span style="color:var(--text3)">${money(weekRev)} de ${money(metaCat)}${metaVal>0?'':' (categoria)'}</span>
         </div>
         <div style="margin-bottom:10px">
-          ${falta>0?`<div style="color:var(--bad);font-weight:700;font-size:12.5px">falta ${money(falta)}${faltaPorDia?` · <span style="color:var(--warn)">${money(faltaPorDia)}/dia</span> em ${remainDays} dia${remainDays>1?'s':''} de trabalho restante${remainDays>1?'s':''}`:remainDays===0?' · sem mais dias de trabalho essa semana':''}</div>`:`<div style="color:var(--ok);font-weight:700;font-size:12.5px">✅ meta batida!</div>`}
+          ${falta>0?`<div style="color:var(--bad);font-weight:700;font-size:12.5px">falta ${money(falta)}${faltaPorDia?` · <span style="color:var(--warn)">${money(faltaPorDia)}/dia</span> em ${remainDays} dia${remainDays>1?'s':''} de trabalho restante${remainDays>1?'s':''}`:remainDays===0&&pagWeekOffset===0?' · sem mais dias de trabalho essa semana':''}</div>`:`<div style="color:var(--ok);font-weight:700;font-size:12.5px">✅ meta batida!</div>`}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
           <div style="background:var(--bg);border-radius:7px;padding:7px;text-align:center">
@@ -7798,14 +7913,14 @@ function renderPagChattersAll(){
           </div>
           <div class="field" style="margin:0">
             <label class="flabel">Medalha${hasManualMedal?'':' (auto)'}</label>
-            <select class="fselect" style="font-size:12px;padding:6px 8px" onchange="saveManualMedal('${c.id}',this.value);renderPagChattersAll()">
+            <select class="fselect" style="font-size:12px;padding:6px 8px" ${readOnly?'disabled':''} onchange="saveManualMedal('${c.id}',this.value);renderPagChattersAll()">
               <option value="" ${!hasManualMedal?'selected':''}>Auto — ${PAG_MEDAL_LABEL[autoMedal]}</option>
               ${[0,1,2,3,4].map(m=>`<option value="${m}" ${hasManualMedal&&medal===m?'selected':''}>${PAG_MEDAL_LABEL[m]}</option>`).join('')}
             </select>
           </div>
           <div class="field" style="margin:0">
             <label class="flabel">Categoria</label>
-            <select class="fselect" style="font-size:12px;padding:6px 8px" id="pag-c-cat-${c.id}" onchange="saveChatterPagCategoria('${c.id}',this.value);renderPagChattersAll()">
+            <select class="fselect" style="font-size:12px;padding:6px 8px" id="pag-c-cat-${c.id}" ${readOnly?'disabled':''} onchange="saveChatterPagCategoria('${c.id}',this.value);renderPagChattersAll()">
               ${['A','B','C','D','E'].map(k=>`<option value="${k}" ${cat===k?'selected':''}>${k} — meta ${money(PAG_CATS[k].n100)}</option>`).join('')}
             </select>
           </div>
