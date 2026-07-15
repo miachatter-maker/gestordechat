@@ -989,7 +989,7 @@ function renderSemana(){
 function renderGargaloSemana(){
   const el=document.getElementById('gargalo-semana-board');
   if(!el)return;
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem chatters no time</div>';return;}
   const wkey=getWeekKey(0);
   const goals=S.chatterWeekGoals[wkey]||{};
@@ -1024,26 +1024,26 @@ function renderGargaloSemana(){
 function renderWeeklyRanking(){
   const el=document.getElementById('week-ranking-board');
   if(!el)return;
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem chatters no time</div>';return;}
-  const wkey=getWeekKey(0);
+  const wkey=getWeekKey(weekOffset);
   const goals=S.chatterWeekGoals[wkey]||{};
   const rows=chatters.map(c=>{
     const f=S.chatterFichas[c.id];
-    const wd=getWeekDates(0);
+    const wd=getWeekDates(weekOffset);
     const analytics=f?.analytics?.weeklyData||{};
-    let ticketSum=0,vphSum=0,days=0;
-    wd.forEach(d=>{const a=analytics[fmt(d)];if(a&&a.ticketMedio>0){ticketSum+=a.ticketMedio;vphSum+=a.vendasPorHora||0;days++;}});
+    let ticketSum=0,vphSum=0,days=0,vendasSum=0;
+    wd.forEach(d=>{const a=analytics[fmt(d)];if(a&&a.ticketMedio>0){ticketSum+=a.ticketMedio;vphSum+=a.vendasPorHora||0;days++;}if(a)vendasSum+=a.totalVendas||0;});
     const avgTicket=days>0?ticketSum/days:0;
     const avgVph=days>0?vphSum/days:0;
-    const rev=getChatterWeekRevenue(c.id,0);
-    const extraFat=getChatterExtraRevenue(c.id,0);
+    const rev=getChatterWeekRevenue(c.id,weekOffset);
+    const extraFat=getChatterExtraRevenue(c.id,weekOffset);
     const extraBonus=extraFat*0.10;
     const cat=f?.pagCategoria||'B';
     const metaManual=parseFloat(goals[c.id])||0;
     const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
     const pct=meta>0?(rev/meta*100):0;
-    return{c,avgTicket,avgVph,extraBonus,pct};
+    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum};
   });
   const top=(key,fmtFn)=>{
     const sorted=[...rows].filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
@@ -1052,6 +1052,7 @@ function renderWeeklyRanking(){
   };
   const cards=[
     {label:'🎫 Maior ticket',data:top('avgTicket',v=>money(v))},
+    {label:'🛍️ Mais vendas',data:top('vendasSum',v=>`${v} venda${v>1?'s':''}`)},
     {label:'⚡ Mais lucro em hora extra',data:top('extraBonus',v=>money(v))},
     {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
@@ -1354,7 +1355,7 @@ function getSmartAlerts(){
     });
   });
 
-  S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester').forEach(c=>{
+  S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c)).forEach(c=>{
     const id=c.id;
     const target=parseFloat(goals[id])||0;
     const current=getChatterWeekRevenue(id);
@@ -1526,7 +1527,7 @@ function getSmartAlerts(){
   wd2.forEach(d=>{
     const dk=fmt(d);
     if(dk>=todayKey())return; // only past days
-    S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester').forEach(c=>{
+    S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c)).forEach(c=>{
       const hasRev=S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dk}`])||0)>0);
       if(!hasRev){
         if(!missingByChatter[c.id])missingByChatter[c.id]={c,dates:[]};
@@ -1706,7 +1707,7 @@ function renderHome(){
 // Calcula quem está em risco de não bater a meta essa semana — considera
 // risco quem está bem abaixo do ritmo esperado pro dia da semana atual.
 function getChattersAtMetaRisk(){
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   const wkey=getWeekKey(0);
   const goals=S.chatterWeekGoals[wkey]||{};
   const todayDow=new Date().getDay(); // 0=dom...6=sab
@@ -1929,7 +1930,7 @@ function getChatterStatus(chatterId,dateKey){
 function getCurrentOnline(){
   const today=todayKey();
   // Elite chatters work off-schedule — exclude from auto status
-  return S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&['online','overtime'].includes(getChatterStatus(c.id,today)));
+  return S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c)&&['online','overtime'].includes(getChatterStatus(c.id,today)));
 }
 function getCurrentScheduledToday(){
   const todayDK=getTodayDayKey();
@@ -2014,6 +2015,15 @@ function toggleNextTurno(){
   if(arrow)arrow.textContent=open?'▾ fechar':'▸ ver';
 }
 
+function zerarEscalaCompleta(){
+  if(!confirm('Isso apaga TODOS os turnos cadastrados (de todos os chatters), pra você recomeçar do zero. As trocas e faltas registradas também são limpas. Essa ação não pode ser desfeita.\n\nTem certeza?'))return;
+  if(!confirm('Confirma mesmo? Todos os turnos vão sumir da escala.'))return;
+  S.shifts=[];
+  S.swaps=[];
+  save();
+  renderTurnoSchedule();
+  toast('🗑️ Escala zerada — pode recomeçar');
+}
 function renderTurno(){
   renderTurnoSchedule();
   renderAbsenceListWithJustificativa();
@@ -2028,7 +2038,7 @@ function renderTurnoSchedule(){
     btn.className=turnoEditMode?'btn btn-primary btn-xs':'btn btn-ghost btn-xs';
   }
   const addRow=document.getElementById('turno-add-shift-row');
-  if(addRow)addRow.style.display=turnoEditMode?'block':'none';
+  if(addRow)addRow.style.display=turnoEditMode?'flex':'none';
   if(!S.models.length||!S.chatters.length){
     el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre modelos e chatters primeiro.</div></div>';
     return;
@@ -2816,7 +2826,7 @@ function renderTeam(filter){
   if(!chatters.length){list.innerHTML='<div class="empty"><div class="empty-ic">▦</div><div class="empty-tx">Nenhum chatter encontrado</div></div>';return;}
 
   const eliteGroup=chatters.filter(c=>c.time==='elite');
-  const basicoGroup=chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const basicoGroup=chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
 
   const renderCard=c=>{
     const isReserva=S.chatterFichas?.[c.id]?.testerDecision==='espera';
@@ -3384,7 +3394,7 @@ function autoSuggestReportIssues(wd){
   }
 
   // Chatters muito abaixo da meta (< 70%) essa semana
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   const abaixoMeta=chatters.filter(c=>{
     const meta=parseFloat((S.chatterWeekGoals[getWeekKey(0)]||{})[c.id])||0;
     if(!meta)return false;
@@ -3594,6 +3604,12 @@ function renderModelsList(){
     <button onclick="deleteModel('${m.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
   </div>`).join('')+'</div>';
 }
+// Chatter "demitido": some do time ativo (faturamento, pagamento, projeção,
+// ranking, escalas futuras) a partir da data de demissão, mas o histórico
+// (fichas, relatórios, evolução) continua intacto pra sempre.
+function isChatterTerminated(c){
+  return!!c.terminatedDate&&c.terminatedDate<=todayKey();
+}
 function renderRevenueTable(){
   const el=document.getElementById('revenue-table');
   if(!el)return;
@@ -3603,7 +3619,7 @@ function renderRevenueTable(){
 
   // Show all chatters do time base — elite e testers/reservas têm seu
   // próprio fluxo de faturamento (Gerador Elite / Testers / Reservas)
-  const allChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const allChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
 
   // Check if any data exists for this date (from reports or manual)
   const hasReportData=allChatters.some(c=>S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0)>0));
@@ -3632,7 +3648,7 @@ function renderRevenueTable(){
     }).join('');
     dayTotal+=rowTotal;
     const rowColor=rowTotal>0?'':'opacity:0.5';
-    html+=`<tr style="${rowColor}">
+    html+=`<tr class="chatter-fire-row" data-key="${c.id}" style="${rowColor};touch-action:pan-y">
       <td><div style="font-weight:700;font-size:13px">${c.name}</div></td>
       ${cells}
       <td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:${rowTotal>0?'var(--ok)':'var(--text3)'}">
@@ -3649,10 +3665,22 @@ function renderRevenueTable(){
   });
   html+=`<td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:var(--ok)">${dayTotal>0?money(dayTotal):'—'}</td>`;
   html+='</tr></tbody></table></div>';
-
-  // No substitute button needed — re-processing a report auto-replaces the data
+  html+='<div style="font-size:10.5px;color:var(--text3);margin-top:6px">Arraste o nome de alguém pro lado pra demitir (some do faturamento a partir de hoje)</div>';
 
   el.innerHTML=html;
+  attachSwipeDismiss(el,'.chatter-fire-row',key=>fireChatterFromFaturamento(key));
+}
+function fireChatterFromFaturamento(chatterId){
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  if(!c)return;
+  const ok=confirm(`Demitir ${c.name}?\n\nA partir de HOJE ele não aparece mais no faturamento, pagamento, projeção, ranking semanal nem nas escalas futuras. O histórico até hoje continua intacto nas fichas, relatórios e evolução.`);
+  if(!ok){renderRevenueTable();return;} // desfaz a animação de arrastar
+  c.terminatedDate=todayKey();
+  S.shifts=S.shifts.filter(s=>s.chatterId!==chatterId); // não trabalha mais, tira da escala futura
+  save();
+  toast(`${c.name} foi demitido — histórico preservado, some do time ativo a partir de hoje`);
+  renderRevenueTable();
+  renderDailyByModel();renderDailyByChatter();
 }
 function openSubstituteReport(dateKey){
   // Pre-fill the substitute modal with the date
@@ -3721,7 +3749,7 @@ document.getElementById('report-period-tabs').addEventListener('click',e=>{
 function renderReport(period){
   const el=document.getElementById('report-body');
   const wd=getWeekDates();const today=new Date();
-  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(period==='week'){
     let total=0;wd.forEach(d=>teamChatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
     el.innerHTML=`<div style="font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--ok);text-align:center;padding:6px 0">${money(total)}</div>
@@ -3761,7 +3789,7 @@ function renderDailyByModel(){
   const el=document.getElementById('daily-by-model');
   if(!el)return;
   if(!S.models.length){el.innerHTML='<div class="empty"><div class="empty-tx">Cadastre modelos para ver o diário</div></div>';return;}
-  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   const wd=getWeekDates();
   const dayLabels=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   let html=`<div style="overflow-x:auto"><table class="rtable"><thead><tr><th>Modelo</th>${dayLabels.map(d=>`<th style="text-align:right">${d}</th>`).join('')}<th style="text-align:right;color:var(--ok)">Total</th></tr></thead><tbody>`;
@@ -3795,7 +3823,7 @@ function renderDailyByChatter(){
   const dateKey=selectedFatDate||todayKey();
 
   // Build model -> chatters map from shifts
-  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   const modelChatters={};
   S.models.forEach(m=>{ modelChatters[m.id]=new Set(); });
   S.shifts.forEach(s=>{
@@ -3846,7 +3874,7 @@ function renderDailyByChatter(){
   el.innerHTML=html;
 }
 function getWeekTotalRevenue(){
-  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const teamChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   let t=0;
   getWeekDates().forEach(d=>teamChatters.forEach(c=>S.models.forEach(m=>{t+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(d)}`])||0;})));
   // Include hora extra from parsed reports in the grand total display
@@ -5705,7 +5733,7 @@ function renderTaskBoards(){
    =========================================================== */
 function getChattersNeedingOrientation(){
   const wk=getWeekKey(0);
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   const oriented=S.orientedThisWeek[wk]||[];
   const candidates=[];
   chatters.forEach(c=>{
@@ -5769,7 +5797,7 @@ function renderSemanaDesenvolvimento(){
   const el=document.getElementById('semana-desenvolvimento');
   if(!el)return;
   const wd=getWeekDates();
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:13px">Cadastre chatters e processe relatórios para ver os dados</div>';return;}
 
   let hasData=false;
@@ -5830,7 +5858,7 @@ function gerarAnaliseSemanal(){
   const wd=getWeekDates();
   const wkey=getWeekKey();
   const goals=S.chatterWeekGoals[wkey]||{};
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:13px">Sem dados</div>';return;}
 
   const linhas=[];
@@ -5986,7 +6014,7 @@ function getChatterModelRevenue(cid){
   return byModel;
 }
 async function rodarAnaliseComparativaEquipe(){
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(chatters.length<2){toast('⚠️ Precisa de pelo menos 2 chatters no time base');return;}
   const btn=document.getElementById('team-analysis-btn');
   const resEl=document.getElementById('team-analysis-result');
@@ -6387,7 +6415,7 @@ function renderHomeMissingReports(){
   wd.forEach(d=>{
     const dk=fmt(d);
     if(dk>todayKey())return;
-    S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester').forEach(c=>{
+    S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c)).forEach(c=>{
       const hasRev=S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dk}`])||0)>0);
       const justKey='just_'+c.id+'_'+dk;
       const hasJust=S.justificativas&&S.justificativas[justKey];
@@ -6514,7 +6542,7 @@ function toggleTurnoEditMode(){
 // escreveu manualmente.
 function autoSuggestOrientations(){
   const wk=getWeekKey(0);
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   chatters.forEach(c=>{
     const meta=parseFloat((S.chatterWeekGoals[wk]||{})[c.id])||0;
     if(!meta)return;
@@ -7860,7 +7888,7 @@ function renderPagWeekNav(){
 function renderPagChattersAll(){
   const el=document.getElementById('pag-chatters-all');
   if(!el)return;
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(!chatters.length){el.innerHTML='';return;}
   const wkey=getWeekKey(pagWeekOffset);
   const readOnly=pagWeekOffset!==0; // resultado de semana passada é só consulta
@@ -8009,7 +8037,7 @@ function calcGerPremio(fat, meta){
 function getCompanyMonthToDateRevenue(){
   const today=new Date();
   const year=today.getFullYear(),month=today.getMonth();
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   let total=0;
   for(let d=1;d<=today.getDate();d++){
     const key=fmt(new Date(year,month,d));
@@ -8039,7 +8067,7 @@ function renderGerChattersConfig(){
 function renderGerPreview(){
   const el=document.getElementById('ger-preview');
   if(!el)return;
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre chatters na aba Equipe</div>';return;}
 
   const wkey=getWeekKey(0);
@@ -8110,7 +8138,7 @@ function renderGerPreview(){
    =========================================================== */
 function renderProjecao(){
   const sel=document.getElementById('proj-chatter');
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(sel){
     const cur=sel.value;
     sel.innerHTML='<option value="">— todos os chatters —</option>'+
@@ -8150,7 +8178,7 @@ function getChatterAvgWeeklyRevenue(cid){
 }
 // Projeção mensal (30 dias) somada de toda a empresa, no ritmo atual de cada chatter
 function getCompanyMonthlyProjection(){
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   let total=0;
   chatters.forEach(c=>{total+=getChatterAvgWeeklyRevenue(c.id)*(30/7);});
   return total;
