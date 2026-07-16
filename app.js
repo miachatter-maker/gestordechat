@@ -44,6 +44,7 @@ function migrateState(s){
   if(!s.motivational)s.motivational={};
   if(!s.scheduleRequests)s.scheduleRequests={};
   if(!s.chatterFichas)s.chatterFichas={};
+  if(!s.chatObservacoes)s.chatObservacoes={};
   if(!s.estudosDraft)s.estudosDraft={};
   if(!s.estudosHistory)s.estudosHistory=[];
   if(!s.managerProfile)s.managerProfile={};
@@ -52,6 +53,11 @@ function migrateState(s){
   if(!s.semanaObjetivos)s.semanaObjetivos={};
   if(!s.modelRequestsSplit)s.modelRequestsSplit={};
   if(!s.demandas2||!Array.isArray(s.demandas2))s.demandas2=[];
+  if(!s._tombstones||typeof s._tombstones!=='object')s._tombstones={};
+  else{ // limpa marcas de exclusão com mais de 200 dias — não precisam durar pra sempre
+    const cutoff=Date.now()-1000*60*60*24*200;
+    Object.keys(s._tombstones).forEach(id=>{if(!(s._tombstones[id]>cutoff))delete s._tombstones[id];});
+  }
   if(!s.justificativas)s.justificativas={};
   if(!s.chatlabAnalyses)s.chatlabAnalyses=[];
   if(!s.chatterTraining)s.chatterTraining={};
@@ -305,6 +311,12 @@ function mergeArraysSafe(local,remote){
   loc.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){if(!map.has(item.id))order.push(item.id);map.set(item.id,item);}});
   rem.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){
     const existing=map.get(item.id);
+    // Se esse id não existe mais localmente porque foi apagado (tombstone),
+    // nunca deixa o merge trazê-lo de volta a partir de um snapshot remoto
+    // que ainda não tinha recebido a exclusão (ex: reload antes do push de
+    // 600ms terminar). Isso é a causa raiz de itens excluídos "voltarem
+    // sozinhos" depois de recarregar a página.
+    if(!existing&&S&&S._tombstones&&S._tombstones[item.id])return;
     if(!map.has(item.id))order.push(item.id);
     map.set(item.id,existing?deepMergeState(existing,item):item);
   }});
@@ -397,6 +409,7 @@ function listenToFirestore(connectTimeout){
                 if(docId===SHARD_DOC_IDS.chatterFichas)pruneHeavyData(S); // dedupe/limpa aqui também, não só no load inicial
               }
               persistLocalCache();
+              _lastKnownIds=collectAllIds(S); // atualiza a baseline pra não confundir itens novos vindos do remoto com exclusões locais
               scheduleRerenderAfterSync();
               fbDocsStatus[docId]=`ok (${Math.round(remote.payload.length/1024)}KB)`;
             }catch(e){console.error('Erro ao processar snapshot '+docId,e);fbDocsStatus[docId]='erro ao processar: '+e.message;}
@@ -517,10 +530,53 @@ function currentViewName(){
   return active?active.id.replace('v-',''):'home';
 }
 
+// Percorre TODO o estado recursivamente coletando os ids de qualquer objeto
+// {id:...} encontrado (inclusive dentro de listas por data/semana, tipo
+// turnoLog, demandas, absences, etc). Usado só pra detectar exclusões.
+function collectAllIds(node,ids){
+  ids=ids||new Set();
+  if(Array.isArray(node)){
+    node.forEach(item=>{
+      if(item&&typeof item==='object'){
+        if(item.id!=null)ids.add(item.id);
+        collectAllIds(item,ids);
+      }
+    });
+  } else if(node&&typeof node==='object'){
+    Object.keys(node).forEach(k=>{if(k!=='_tombstones')collectAllIds(node[k],ids);});
+  }
+  return ids;
+}
+let _lastKnownIds=null; // snapshot dos ids vistos no último save() — pra detectar exclusões
+// Marca um id como excluído NA HORA, sem depender do diff genérico de save()
+// (que só funciona se _lastKnownIds já estiver inicializado). Chamado direto
+// de cada função de exclusão explícita (turno, troca, etc) — é o jeito
+// garantido de nunca deixar um snapshot remoto atrasado trazer o item de volta.
+function markTombstone(id){
+  if(id==null)return;
+  if(!S._tombstones)S._tombstones={};
+  S._tombstones[id]=Date.now();
+}
+
 let localSaveFailCount=0;
 let lastLocalSaveWarningAt=0;
 function save(){
   pruneHeavyData(S); // limpa/dedupe antes de salvar, pra nunca deixar duplicata ir pro Firebase
+  // Detecta o que sumiu desde o último save() e marca como excluído
+  // (tombstone), pra um snapshot remoto desatualizado nunca conseguir
+  // trazer esse item de volta num merge futuro.
+  try{
+    const currentIds=collectAllIds(S);
+    if(_lastKnownIds){
+      _lastKnownIds.forEach(id=>{
+        if(!currentIds.has(id)){
+          if(!S._tombstones)S._tombstones={};
+          S._tombstones[id]=Date.now();
+        }
+      });
+    }
+    _lastKnownIds=currentIds;
+  }catch(e){console.error('Erro ao detectar exclusões pra tombstone',e);}
   try{
     const payload=JSON.stringify(S);
     localStorage.setItem(DB,payload);
@@ -579,6 +635,12 @@ function load(){
       }
     }catch(e){console.warn('Backup load also failed',e);}
   }
+  // Estabelece a baseline de ids JÁ AQUI (antes de qualquer interação do
+  // usuário ou resposta do Firestore). Sem isso, se o usuário excluísse algo
+  // antes do primeiro save() ter uma baseline válida, nenhum tombstone era
+  // criado e o item podia "voltar sozinho" quando um snapshot remoto atrasado
+  // chegasse — essa era a causa raiz do bug de turno excluído reaparecendo.
+  _lastKnownIds=collectAllIds(S);
 }
 let S={
   chatters:[],shifts:[],absences:[],orientations:[],studies:[],revenues:{},models:[],
@@ -630,6 +692,9 @@ let S={
   semanaObjetivos:{},    // weekKey -> [{id, label, valor, done}]
   modelRequestsSplit:{}, // weekKey -> {modelId: text}
   demandas2:[],          // persistent list [{id,text,date,done}] — does NOT reset daily
+  _tombstones:{},        // id -> timestamp da exclusão — impede que um item apagado
+                          // localmente seja "ressuscitado" por um merge com um
+                          // snapshot remoto (Firestore) que ainda não sabia da exclusão
 };
 
 /* ===========================================================
@@ -839,6 +904,7 @@ function populateShiftModelChips(){
 }
 function closeModal(id){
   document.getElementById(id).classList.remove('open');
+  if(id==='m-mapeamento')stopMapeamentoRecording(true);
   if(id==='m-shift'){
     document.getElementById('shift-edit-id').value='';
     document.getElementById('shift-modal-title').textContent='Escalar chatter';
@@ -2035,6 +2101,8 @@ function toggleNextTurno(){
 function zerarEscalaCompleta(){
   if(!confirm('Isso apaga TODOS os turnos cadastrados (de todos os chatters), pra você recomeçar do zero. As trocas e faltas registradas também são limpas. Essa ação não pode ser desfeita.\n\nTem certeza?'))return;
   if(!confirm('Confirma mesmo? Todos os turnos vão sumir da escala.'))return;
+  S.shifts.forEach(s=>markTombstone(s.id));
+  S.swaps.forEach(s=>markTombstone(s.id));
   S.shifts=[];
   S.swaps=[];
   save();
@@ -3153,6 +3221,7 @@ function openEditShiftFromProfile(shiftId,chatterId){
   window._profileChaterId=chatterId;
 }
 function deleteShiftFromProfile(shiftId,chatterId){
+  markTombstone(shiftId);
   S.shifts=S.shifts.filter(s=>s.id!==shiftId);
   save();
   toast('Turno removido');
@@ -4954,6 +5023,8 @@ function renderFichaChatter(chatterId){
       <div style="font-size:12px;color:var(--text3)">${c.level} · desde ${c.createdAt?c.createdAt.slice(0,10):'?'}</div>
     </div>
 
+    ${renderMapeamentoPanel(chatterId)}
+
     <div class="panel" style="border:2px solid var(--accent)">
       <div class="panel-head"><div><div class="panel-title">🧭 Mapeamento de Perfil</div><div class="panel-note">Resumo pra saber como liderar essa pessoa rapidinho</div></div></div>
       ${txtField('resumo','Resumo da história','mapeamento','Breve histórico dessa pessoa na equipe...')}
@@ -4999,6 +5070,8 @@ function renderFichaChatter(chatterId){
       ${txtField('obs','Anotações livres','obs','Qualquer coisa relevante sobre esse chatter...')}
     </div>
 
+    ${renderChatObsPanel(chatterId)}
+
     <button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="saveFichaSnapshot('${chatterId}')">💾 Salvar snapshot semanal</button>
 
     ${Object.keys(f.analytics?.weeklyData||{}).length?`
@@ -5037,6 +5110,286 @@ function renderFichaChatter(chatterId){
     ${renderFichaCruzamento(chatterId)}
   `;
 }
+const CHAT_OBS_ITEMS=[
+  ['chamouNome','Chamou o cliente pelo nome'],
+  ['respondeuNaoLidas','Respondeu as mensagens não lidas'],
+  ['tempoRespostaBom','Tempo de resposta bom'],
+  ['checouConversao','Checou a conversão das últimas vendas'],
+  ['analiseConversa','Analisou alguma conversa']
+];
+function ensureChatObsEntry(chatterId,dateKey){
+  if(!S.chatObservacoes)S.chatObservacoes={};
+  if(!S.chatObservacoes[chatterId])S.chatObservacoes[chatterId]={};
+  if(!S.chatObservacoes[chatterId][dateKey]){
+    const e={anotacao:''};
+    CHAT_OBS_ITEMS.forEach(([k])=>e[k]=false);
+    S.chatObservacoes[chatterId][dateKey]=e;
+  }
+  return S.chatObservacoes[chatterId][dateKey];
+}
+function saveChatObsCheck(chatterId,dateKey,field,val){
+  const e=ensureChatObsEntry(chatterId,dateKey);
+  e[field]=val;
+  save();
+}
+function saveChatObsNote(chatterId,dateKey,val){
+  const e=ensureChatObsEntry(chatterId,dateKey);
+  e.anotacao=val;
+  save();
+}
+function toggleChatObsHistory(chatterId){
+  const div=document.getElementById('chatobs-hist-'+chatterId);
+  if(!div)return;
+  div.style.display=div.style.display==='none'?'block':'none';
+}
+function chatObsChecklistSummary(e){
+  return CHAT_OBS_ITEMS.map(([k,label])=>`<span style="display:inline-block;margin:0 8px 4px 0;font-size:11px;color:${e[k]?'var(--ok)':'var(--text3)'}">${e[k]?'✅':'▫️'} ${label}</span>`).join('');
+}
+// Quadro "Observações de Chat": checklist diário de acompanhamento (lembrete do
+// que avaliar em cada chatter todo dia) + histórico por dia dentro da ficha.
+function renderChatObsPanel(chatterId){
+  const dateKey=todayKey();
+  const entry=ensureChatObsEntry(chatterId,dateKey);
+  const all=(S.chatObservacoes[chatterId])||{};
+  const pastDates=Object.keys(all).filter(d=>d!==dateKey).sort((a,b)=>b.localeCompare(a));
+  return `<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">💬 Observações de Chat</div><div class="panel-note">Checklist diário — o que avaliar hoje nesse chatter</div></div></div>
+    <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">HOJE · ${dateKey}</div>
+    ${CHAT_OBS_ITEMS.map(([k,label])=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text2)">
+      <input type="checkbox" style="width:auto" ${entry[k]?'checked':''} onchange="saveChatObsCheck('${chatterId}','${dateKey}','${k}',this.checked)">${label}
+    </label>`).join('')}
+    <div class="field" style="margin-top:6px">
+      <label class="flabel">Anotação do dia</label>
+      <textarea class="ftext" style="min-height:52px" placeholder="O que se destacou hoje nas conversas desse chatter..."
+        onblur="saveChatObsNote('${chatterId}','${dateKey}',this.value)">${entry.anotacao||''}</textarea>
+    </div>
+    ${pastDates.length?`
+    <button class="btn btn-ghost btn-xs" style="margin-top:4px" onclick="toggleChatObsHistory('${chatterId}')">📅 Ver histórico (${pastDates.length} ${pastDates.length===1?'dia':'dias'})</button>
+    <div id="chatobs-hist-${chatterId}" style="display:none;margin-top:8px">
+      ${pastDates.map(date=>{const e=all[date];return `
+      <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div style="font-weight:700;font-size:12px;color:var(--text3);margin-bottom:4px">${date}</div>
+        <div style="margin-bottom:4px">${chatObsChecklistSummary(e)}</div>
+        ${e.anotacao?`<div style="font-size:12.5px;color:var(--text2)">${e.anotacao}</div>`:''}
+      </div>`;}).join('')}
+    </div>`:''}
+  </div>`;
+}
+/* ===========================================================
+   MAPEAMENTO DE PERFORMANCE — entrevista guiada (roteiro fixo de
+   20 perguntas em 6 blocos) + gravação/transcrição + análise por IA.
+   Gera perfil (Executor/Criativo/Líder/Analítico híbrido), scores de
+   comunicação e inteligência emocional, motivadores, estilo de liderança
+   ideal e um radar de 10 competências (0-10). Fica salvo na ficha do
+   chatter em S.chatterFichas[chatterId].mapeamentoIA.
+   =========================================================== */
+let _mapRecognition=null;
+let _mapMediaRecorder=null;
+let _mapMediaStream=null;
+let _mapRecording=false;
+
+function openMapeamentoModal(chatterId){
+  const c=S.chatters.find(ch=>ch.id===chatterId);if(!c)return;
+  window._mapeamentoChatterId=chatterId;
+  const nameEl=document.getElementById('mapeamento-modal-name');
+  if(nameEl)nameEl.textContent=c.name;
+  const draft=(S.chatterFichas[chatterId]&&S.chatterFichas[chatterId].mapeamentoDraftTranscript)||'';
+  const ta=document.getElementById('mapeamento-transcript');
+  if(ta)ta.value=draft;
+  const st=document.getElementById('mapeamento-status');
+  if(st)st.textContent='';
+  const gerarBtn=document.getElementById('mapeamento-gerar-btn');
+  if(gerarBtn){gerarBtn.disabled=!draft.trim();gerarBtn.textContent='🤖 Gerar Mapeamento com IA';}
+  const recBtn=document.getElementById('mapeamento-rec-btn');
+  if(recBtn)recBtn.textContent='🎙️ Iniciar gravação';
+  openModal('m-mapeamento');
+}
+
+function toggleMapeamentoRecording(){
+  if(_mapRecording)stopMapeamentoRecording();else startMapeamentoRecording();
+}
+
+function startMapeamentoRecording(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    toast('⚠️ Seu navegador não suporta gravação de áudio — cole a conversa manualmente no campo de texto.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+    _mapMediaStream=stream;
+    try{ _mapMediaRecorder=new MediaRecorder(stream); _mapMediaRecorder.start(); }catch(e){ console.warn('MediaRecorder indisponível',e); }
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    const ta=document.getElementById('mapeamento-transcript');
+    if(SR&&ta){
+      _mapRecognition=new SR();
+      _mapRecognition.lang='pt-BR';
+      _mapRecognition.continuous=true;
+      _mapRecognition.interimResults=true;
+      let baseText=ta.value;
+      if(baseText&&!/\s$/.test(baseText))baseText+=' ';
+      _mapRecognition.onresult=(ev)=>{
+        let finalTxt='';let interimTxt='';
+        for(let i=ev.resultIndex;i<ev.results.length;i++){
+          const t=ev.results[i][0].transcript;
+          if(ev.results[i].isFinal)finalTxt+=t+' ';else interimTxt+=t;
+        }
+        if(finalTxt)baseText+=finalTxt;
+        ta.value=baseText+interimTxt;
+      };
+      _mapRecognition.onerror=(ev)=>console.warn('Erro no reconhecimento de voz',ev.error);
+      _mapRecognition.onend=()=>{ if(_mapRecording){ try{_mapRecognition.start();}catch(e){} } }; // o navegador corta sessões longas sozinho — reinicia automaticamente enquanto estiver gravando
+      try{_mapRecognition.start();}catch(e){console.warn(e);}
+    } else {
+      toast('⚠️ Transcrição automática não é suportada nesse navegador (funciona melhor no Chrome/Android) — grave normalmente e depois cole/edite o texto da conversa no campo abaixo.');
+    }
+    _mapRecording=true;
+    const recBtn=document.getElementById('mapeamento-rec-btn');
+    if(recBtn)recBtn.textContent='⏹️ Parar gravação';
+    const st=document.getElementById('mapeamento-status');
+    if(st)st.textContent='🔴 Gravando... fale perto do microfone.';
+  }).catch(err=>{
+    console.error(err);
+    toast('⚠️ Não foi possível acessar o microfone. Verifique a permissão do navegador.');
+  });
+}
+
+function stopMapeamentoRecording(silent){
+  _mapRecording=false;
+  if(_mapRecognition){ try{_mapRecognition.onend=null;_mapRecognition.stop();}catch(e){} _mapRecognition=null; }
+  if(_mapMediaRecorder){ try{_mapMediaRecorder.stop();}catch(e){} _mapMediaRecorder=null; }
+  if(_mapMediaStream){ try{_mapMediaStream.getTracks().forEach(t=>t.stop());}catch(e){} _mapMediaStream=null; }
+  const recBtn=document.getElementById('mapeamento-rec-btn');
+  if(recBtn)recBtn.textContent='🎙️ Iniciar gravação';
+  const ta=document.getElementById('mapeamento-transcript');
+  const st=document.getElementById('mapeamento-status');
+  if(st&&!silent)st.textContent='⏸️ Gravação parada — revise o texto abaixo antes de gerar o mapeamento.';
+  const gerarBtn=document.getElementById('mapeamento-gerar-btn');
+  if(gerarBtn&&ta)gerarBtn.disabled=!ta.value.trim();
+  const chatterId=window._mapeamentoChatterId;
+  if(chatterId&&ta){
+    if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    S.chatterFichas[chatterId].mapeamentoDraftTranscript=ta.value;
+    save();
+  }
+}
+
+const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista estruturada de 20 perguntas em 6 blocos (História, Motivação, Tomada de decisão, Relação com liderança, Trabalho em equipe, Ambição) e deve produzir um mapeamento de performance completo da pessoa entrevistada.
+
+Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito.
+
+Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
+{
+  "resumoHistoria": "resumo objetivo em 2-4 frases da trajetória e do contexto da pessoa",
+  "comunicacao": (número de 0 a 100),
+  "inteligenciaEmocional": (número de 0 a 100),
+  "aprendizagem": "vendo" | "fazendo" | "ouvindo" | "repetindo" | "explorando",
+  "perfis": [ {"tipo":"Executor"|"Criativo"|"Líder"|"Analítico","pct":(número)} ],
+  "motivadores": ["até 3 motivadores ranqueados do maior pro menor, escolhidos entre: dinheiro, reconhecimento, competição, estabilidade, aprendizado, propósito, liberdade, status, crescimento, impacto, pertencimento"],
+  "liderancaIdeal": {
+    "estilo": "nome curto do estilo de liderança recomendado",
+    "funcionaQuando": ["3 a 5 recomendações objetivas do que fazer com essa pessoa"],
+    "evite": ["3 a 5 coisas a evitar com essa pessoa"]
+  },
+  "radar": {"Execução":(0-10),"Criatividade":(0-10),"Liderança":(0-10),"Comunicação":(0-10),"Autonomia":(0-10),"Disciplina":(0-10),"Inteligência emocional":(0-10),"Adaptabilidade":(0-10),"Resolução de problemas":(0-10),"Influência":(0-10)},
+  "comoMotivar": "2-4 frases objetivas de como motivar essa pessoa no dia a dia",
+  "comoLiderar": "2-4 frases de como liderar essa pessoa e que tipo de autoridade usar",
+  "oQueNaoFazer": "2-4 frases do que evitar — o que desmotivaria essa pessoa"
+}
+
+O campo "perfis" deve ter 1 a 3 itens (perfis híbridos são comuns, ex: Executor 82% / Líder 18%), com a soma dos "pct" próxima de 100, ordenados do maior pro menor. Se a transcrição não trouxer informação suficiente para algum campo, use seu melhor julgamento clínico com base no que foi dito — nunca deixe um campo vazio, nulo ou fora do formato pedido.`;
+
+async function gerarMapeamentoIA(){
+  const chatterId=window._mapeamentoChatterId;if(!chatterId)return;
+  const c=S.chatters.find(ch=>ch.id===chatterId);if(!c)return;
+  const ta=document.getElementById('mapeamento-transcript');
+  const transcript=(ta?ta.value:'').trim();
+  if(!transcript){toast('Grave ou cole a conversa antes de gerar o mapeamento.');return;}
+  stopMapeamentoRecording(true);
+  const btn=document.getElementById('mapeamento-gerar-btn');
+  const st=document.getElementById('mapeamento-status');
+  if(btn){btn.disabled=true;btn.textContent='🤖 Analisando...';}
+  if(st)st.textContent='Enviando pra IA, isso pode levar alguns segundos...';
+  try{
+    const prompt=`Chatter: ${c.name} (nível: ${c.level})\n\nTranscrição da entrevista de mapeamento:\n\n${transcript}`;
+    const res=await fetch(AI_PROXY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:MAPEAMENTO_SYSTEM,messages:[{role:'user',content:prompt}]})
+    });
+    const data=await res.json();
+    let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
+    if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
+    const parsed=JSON.parse(text.slice(jsonStart,jsonEnd+1));
+    if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    S.chatterFichas[chatterId].mapeamentoIA={...parsed,transcricao:transcript,date:todayKey()};
+    delete S.chatterFichas[chatterId].mapeamentoDraftTranscript;
+    save();
+    toast('🎯 Mapeamento gerado!');
+    closeModal('m-mapeamento');
+    renderFichaChatter(chatterId);
+  }catch(e){
+    console.error('Erro ao gerar mapeamento',e);
+    toast('⚠️ Erro ao gerar mapeamento: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🤖 Gerar Mapeamento com IA';}
+    if(st)st.textContent='';
+  }
+}
+
+function renderMapeamentoPanel(chatterId){
+  const f=S.chatterFichas[chatterId]||{};
+  const m=f.mapeamentoIA;
+  if(!m){
+    return `<div class="panel">
+      <div class="panel-head"><div><div class="panel-title">🎯 Mapeamento de Performance</div><div class="panel-note">Entrevista guiada (roteiro + gravação) analisada por IA — perfil completo de liderança e motivação</div></div></div>
+      <button class="btn btn-primary btn-block" onclick="openMapeamentoModal('${chatterId}')">🎙️ Mapear</button>
+    </div>`;
+  }
+  const perfisTxt=(m.perfis||[]).map(p=>`${p.tipo} ${p.pct}%`).join(' / ');
+  const radar=m.radar||{};
+  const radarKeys=Object.keys(radar);
+  return `<div class="panel" style="border:2px solid var(--accent)">
+    <div class="panel-head"><div><div class="panel-title">🎯 Mapeamento de Performance</div><div class="panel-note">Gerado em ${m.date||''} · <b>${perfisTxt||'-'}</b></div></div></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:var(--text3)">Comunicação</div>
+        <div style="font-size:16px;font-weight:800">${m.comunicacao??'-'}/100</div>
+      </div>
+      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:var(--text3)">Intelig. emocional</div>
+        <div style="font-size:16px;font-weight:800">${m.inteligenciaEmocional??'-'}/100</div>
+      </div>
+    </div>
+
+    <div class="field"><label class="flabel">📖 Resumo da história</label><div style="font-size:12.5px;color:var(--text2)">${m.resumoHistoria||'-'}</div></div>
+    <div class="field"><label class="flabel">🎓 Aprende melhor</label><div style="font-size:12.5px;color:var(--text2)">${m.aprendizagem||'-'}</div></div>
+    <div class="field"><label class="flabel">🔥 Motivadores principais</label><div style="font-size:12.5px;color:var(--text2)">${(m.motivadores||[]).join(' · ')||'-'}</div></div>
+
+    <div class="field">
+      <label class="flabel">👑 Liderança ideal${m.liderancaIdeal&&m.liderancaIdeal.estilo?' — '+m.liderancaIdeal.estilo:''}</label>
+      <div style="font-size:11.5px;color:var(--ok);margin-bottom:4px">${((m.liderancaIdeal&&m.liderancaIdeal.funcionaQuando)||[]).map(x=>'✔ '+x).join('<br>')}</div>
+      <div style="font-size:11.5px;color:var(--bad)">${((m.liderancaIdeal&&m.liderancaIdeal.evite)||[]).map(x=>'✖ '+x).join('<br>')}</div>
+    </div>
+
+    <div class="field"><label class="flabel">💡 Como motivar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoMotivar||'-'}</div></div>
+    <div class="field"><label class="flabel">🧭 Como liderar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoLiderar||'-'}</div></div>
+    <div class="field"><label class="flabel">🚫 O que NÃO fazer</label><div style="font-size:12.5px;color:var(--text2)">${m.oQueNaoFazer||'-'}</div></div>
+
+    <div class="panel-note" style="margin:10px 0 6px">📊 Radar de competências (0-10)</div>
+    ${radarKeys.map(k=>`
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)"><span>${k}</span><span>${radar[k]}</span></div>
+        <div class="goalbar-track"><div class="goalbar-fill" style="width:${Math.max(0,Math.min(100,(Number(radar[k])||0)/10*100))}%"></div></div>
+      </div>`).join('')}
+
+    <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="openMapeamentoModal('${chatterId}')">🔁 Refazer mapeamento</button>
+  </div>`;
+}
+
 function formatFichaSnapshot(snap){
   const lines=[];
   if(snap.tech)Object.entries(snap.tech).forEach(([k,v])=>{if(v)lines.push(`${k}: ${v}`);});
@@ -6395,6 +6748,7 @@ function copiarRelatorioEvolucao(){
 
 function deleteShift(shiftId){
   if(!confirm('Remover este turno?'))return;
+  markTombstone(shiftId);
   S.shifts=S.shifts.filter(s=>s.id!==shiftId);
   save();renderTurno();toast('Turno removido');
 }
