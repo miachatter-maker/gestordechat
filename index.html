@@ -1465,6 +1465,72 @@ body{
   </div>
 </div></div>
 
+<div class="modalbg" id="m-mapeamento"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🎯 Mapeamento de Performance — <span id="mapeamento-modal-name"></span></div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Siga o roteiro abaixo na conversa, grave (ou cole a conversa manualmente) e depois gere o mapeamento com IA.</div>
+
+      <details style="margin-bottom:12px;background:var(--bg-soft);border-radius:10px;padding:10px 12px">
+        <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:var(--text2)">📋 Ver roteiro de perguntas (toque para abrir)</summary>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-top:8px">
+          <b>BLOCO 1 — História</b>
+          <ol style="margin:4px 0 10px 18px;padding:0">
+            <li>Conte sua trajetória até chegar aqui.</li>
+            <li>Qual foi sua maior conquista nos últimos dois anos?</li>
+            <li>Qual foi seu maior fracasso e o que aprendeu?</li>
+          </ol>
+          <b>BLOCO 2 — Motivação</b>
+          <ol start="4" style="margin:4px 0 10px 18px;padding:0">
+            <li>O que faz você acordar disposto a trabalhar?</li>
+            <li>Se você recebesse dinheiro suficiente pra viver, ainda trabalharia? Fazendo o quê?</li>
+            <li>O que faz você perder completamente a vontade de trabalhar?</li>
+          </ol>
+          <b>BLOCO 3 — Tomada de decisão</b>
+          <ol start="7" style="margin:4px 0 10px 18px;padding:0">
+            <li>Quando surge um problema difícil, qual costuma ser sua primeira reação?</li>
+            <li>Você prefere receber uma tarefa pronta ou descobrir sozinho como resolver?</li>
+            <li>Conte uma situação em que precisou tomar uma decisão importante rapidamente.</li>
+          </ol>
+          <b>BLOCO 4 — Relação com liderança</b>
+          <ol start="10" style="margin:4px 0 10px 18px;padding:0">
+            <li>Qual foi o melhor líder que você já teve? O que ele fazia?</li>
+            <li>Qual foi o pior líder que você já teve? Por quê?</li>
+            <li>Quando alguém corrige seu trabalho, como você costuma reagir?</li>
+            <li>Você prefere autonomia ou acompanhamento frequente?</li>
+          </ol>
+          <b>BLOCO 5 — Trabalho em equipe</b>
+          <ol start="14" style="margin:4px 0 10px 18px;padding:0">
+            <li>Quando um grupo trava numa decisão, qual costuma ser seu papel? (organizar / executar / propor ideias / esperar decisão)</li>
+            <li>Você gosta mais de ensinar ou aprender?</li>
+            <li>Você prefere trabalhar sozinho ou em equipe?</li>
+          </ol>
+          <b>BLOCO 6 — Ambição</b>
+          <ol start="17" style="margin:4px 0 0 18px;padding:0">
+            <li>Onde você quer estar daqui a dois anos?</li>
+            <li>O que você acredita que falta para chegar lá?</li>
+            <li>Qual habilidade você mais gostaria de desenvolver hoje?</li>
+            <li>Se dependesse apenas de você, qual seria sua próxima grande meta?</li>
+          </ol>
+        </div>
+      </details>
+  <div class="field">
+    <label class="flabel">🎙️ Gravação da conversa</label>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-ghost btn-block" id="mapeamento-rec-btn" onclick="toggleMapeamentoRecording()">🎙️ Iniciar gravação</button>
+    </div>
+    <div id="mapeamento-status" style="font-size:11.5px;color:var(--text3);margin-bottom:8px"></div>
+  </div>
+  <div class="field">
+    <label class="flabel">Transcrição (editável — revise antes de gerar)</label>
+    <textarea class="ftext" id="mapeamento-transcript" style="min-height:160px" placeholder="A transcrição aparece aqui automaticamente durante a gravação (Chrome/Android). Se preferir, cole ou digite a conversa manualmente."
+      oninput="document.getElementById('mapeamento-gerar-btn').disabled=!this.value.trim()"></textarea>
+  </div>
+  <div class="modalbtns">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-mapeamento')">Cancelar</button>
+    <button class="btn btn-primary btn-block" id="mapeamento-gerar-btn" disabled onclick="gerarMapeamentoIA()">🤖 Gerar Mapeamento com IA</button>
+  </div>
+</div></div>
+
 <div class="toast" id="toast"></div>
 
 <script src="firebase-bundle.js"></script>
