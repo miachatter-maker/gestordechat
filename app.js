@@ -5498,54 +5498,50 @@ function renderMapeamentoPanel(chatterId){
   const radar=m.radar||{};
   const radarKeys=Object.keys(radar);
   const body=`
-    <div style="position:relative;overflow:hidden">
-      <div style="position:absolute;top:0;left:0;bottom:0;width:96px;z-index:0">
-        <div style="position:sticky;top:16px;display:flex;flex-direction:column;gap:6px">
-          <button data-noaccordion class="btn btn-ghost btn-xs" style="color:var(--bad);border-color:var(--bad)" onclick="excluirMapeamentoIA('${chatterId}')">🗑️ Excluir</button>
-          <button data-noaccordion class="btn btn-ghost btn-xs" onclick="abrirTrocaMapeamento('${chatterId}')">🔁 Trocar pessoa</button>
-        </div>
+    <div style="position:relative;overflow:hidden;border-radius:10px;margin-bottom:6px">
+      <div style="position:absolute;top:0;left:0;bottom:0;width:96px;display:flex;flex-direction:column;gap:6px;justify-content:center;z-index:0">
+        <button data-noaccordion class="btn btn-ghost btn-xs" style="color:var(--bad);border-color:var(--bad)" onclick="excluirMapeamentoIA('${chatterId}')">🗑️ Excluir</button>
+        <button data-noaccordion class="btn btn-ghost btn-xs" onclick="abrirTrocaMapeamento('${chatterId}')">🔁 Trocar pessoa</button>
       </div>
-      <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--surface);z-index:1">
-        <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:12px">
-          <div class="panel-note" style="margin-bottom:6px">👤 Quem é essa pessoa</div>
-          <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${m.resumoHistoria||'-'}</div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-          <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
-            <div style="font-size:9px;color:var(--text3)">Comunicação</div>
-            <div style="font-size:16px;font-weight:800">${m.comunicacao??'-'}/100</div>
-          </div>
-          <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
-            <div style="font-size:9px;color:var(--text3)">Intelig. emocional</div>
-            <div style="font-size:16px;font-weight:800">${m.inteligenciaEmocional??'-'}/100</div>
-          </div>
-        </div>
-
-        <div class="field"><label class="flabel">🎓 Aprende melhor</label><div style="font-size:12.5px;color:var(--text2)">${m.aprendizagem||'-'}</div></div>
-        <div class="field"><label class="flabel">🔥 Motivadores principais</label><div style="font-size:12.5px;color:var(--text2)">${(m.motivadores||[]).join(' · ')||'-'}</div></div>
-
-        <div class="field">
-          <label class="flabel">👑 Liderança ideal${m.liderancaIdeal&&m.liderancaIdeal.estilo?' — '+m.liderancaIdeal.estilo:''}</label>
-          <div style="font-size:11.5px;color:var(--ok);margin-bottom:4px">${((m.liderancaIdeal&&m.liderancaIdeal.funcionaQuando)||[]).map(x=>'✔ '+x).join('<br>')}</div>
-          <div style="font-size:11.5px;color:var(--bad)">${((m.liderancaIdeal&&m.liderancaIdeal.evite)||[]).map(x=>'✖ '+x).join('<br>')}</div>
-        </div>
-
-        <div class="field"><label class="flabel">💡 Como motivar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoMotivar||'-'}</div></div>
-        <div class="field"><label class="flabel">🧭 Como liderar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoLiderar||'-'}</div></div>
-        <div class="field"><label class="flabel">🚫 O que NÃO fazer</label><div style="font-size:12.5px;color:var(--text2)">${m.oQueNaoFazer||'-'}</div></div>
-
-        <div class="panel-note" style="margin:10px 0 6px">📊 Radar de competências (0-10)</div>
-        ${radarKeys.map(k=>`
-          <div style="margin-bottom:8px">
-            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)"><span>${k}</span><span>${radar[k]}</span></div>
-            <div class="goalbar-track"><div class="goalbar-fill" style="width:${Math.max(0,Math.min(100,(Number(radar[k])||0)/10*100))}%"></div></div>
-          </div>`).join('')}
-
-        <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px" onclick="openMapeamentoModal('${chatterId}')">🔁 Refazer mapeamento</button>
+      <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--bg-soft);border-radius:10px;padding:12px;z-index:1">
+        <div class="panel-note" style="margin-bottom:6px">👤 Quem é essa pessoa</div>
+        <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${m.resumoHistoria||'-'}</div>
       </div>
     </div>
-    <div class="panel-note" style="margin-top:8px;text-align:center">⬅️ Arraste esse card pra direita pra excluir ou trocar de pessoa</div>
+    <div class="panel-note" style="margin-bottom:12px;text-align:center">⬅️ Arraste esse card pra direita pra excluir ou trocar de pessoa</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:var(--text3)">Comunicação</div>
+        <div style="font-size:16px;font-weight:800">${m.comunicacao??'-'}/100</div>
+      </div>
+      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:var(--text3)">Intelig. emocional</div>
+        <div style="font-size:16px;font-weight:800">${m.inteligenciaEmocional??'-'}/100</div>
+      </div>
+    </div>
+
+    <div class="field"><label class="flabel">🎓 Aprende melhor</label><div style="font-size:12.5px;color:var(--text2)">${m.aprendizagem||'-'}</div></div>
+    <div class="field"><label class="flabel">🔥 Motivadores principais</label><div style="font-size:12.5px;color:var(--text2)">${(m.motivadores||[]).join(' · ')||'-'}</div></div>
+
+    <div class="field">
+      <label class="flabel">👑 Liderança ideal${m.liderancaIdeal&&m.liderancaIdeal.estilo?' — '+m.liderancaIdeal.estilo:''}</label>
+      <div style="font-size:11.5px;color:var(--ok);margin-bottom:4px">${((m.liderancaIdeal&&m.liderancaIdeal.funcionaQuando)||[]).map(x=>'✔ '+x).join('<br>')}</div>
+      <div style="font-size:11.5px;color:var(--bad)">${((m.liderancaIdeal&&m.liderancaIdeal.evite)||[]).map(x=>'✖ '+x).join('<br>')}</div>
+    </div>
+
+    <div class="field"><label class="flabel">💡 Como motivar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoMotivar||'-'}</div></div>
+    <div class="field"><label class="flabel">🧭 Como liderar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoLiderar||'-'}</div></div>
+    <div class="field"><label class="flabel">🚫 O que NÃO fazer</label><div style="font-size:12.5px;color:var(--text2)">${m.oQueNaoFazer||'-'}</div></div>
+
+    <div class="panel-note" style="margin:10px 0 6px">📊 Radar de competências (0-10)</div>
+    ${radarKeys.map(k=>`
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)"><span>${k}</span><span>${radar[k]}</span></div>
+        <div class="goalbar-track"><div class="goalbar-fill" style="width:${Math.max(0,Math.min(100,(Number(radar[k])||0)/10*100))}%"></div></div>
+      </div>`).join('')}
+
+    <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px" onclick="openMapeamentoModal('${chatterId}')">🔁 Refazer mapeamento</button>
   `;
   return fichaAccordion('mapeamento-'+chatterId,'border:2px solid var(--accent)',
     `<div><div class="panel-title">🎯 Mapeamento de Performance</div><div class="panel-note">Gerado em ${m.date||''} · <b>${perfisTxt||'-'}</b></div></div>`,
