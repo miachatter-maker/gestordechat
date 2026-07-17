@@ -5342,10 +5342,14 @@ async function gerarMapeamentoIA(){
   if(st)st.textContent='Enviando pra IA, isso pode levar alguns segundos...';
   try{
     const prompt=`Chatter: ${c.name} (nível: ${c.level})\n\nTranscrição da entrevista de mapeamento:\n\n${transcript}`;
+    // max_tokens generoso: o JSON pedido é grande (radar de 10 competências,
+    // 2 arrays de 3-5 itens, 4 campos de texto livre) e com um valor baixo
+    // (2500) a resposta vinha sendo cortada no meio, quebrando o JSON.parse
+    // mesmo com uma transcrição curta.
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system:MAPEAMENTO_SYSTEM,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:MAPEAMENTO_SYSTEM,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
@@ -5353,7 +5357,19 @@ async function gerarMapeamentoIA(){
     text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
     const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
     if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
-    const parsed=JSON.parse(text.slice(jsonStart,jsonEnd+1));
+    let parsed;
+    try{
+      parsed=JSON.parse(text.slice(jsonStart,jsonEnd+1));
+    }catch(parseErr){
+      // Se a resposta foi cortada (ex: acabou o max_tokens no meio de um
+      // array/objeto), o trecho entre a 1ª "{" e a última "}" não fecha
+      // corretamente. Detecta esse caso pra dar um erro claro em vez de só
+      // "JSON parse error", e sugere tentar de novo.
+      const looksTruncated=data.stop_reason==='max_tokens'||jsonEnd<text.length-3;
+      throw new Error(looksTruncated
+        ?'A resposta da IA veio incompleta (cortada no meio). Tente gerar novamente — o texto gravado/colado continua salvo.'
+        :'Não consegui interpretar o JSON da IA ('+parseErr.message+'). Tente gerar novamente.');
+    }
     if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
     S.chatterFichas[chatterId].mapeamentoIA={...parsed,transcricao:transcript,date:todayKey()};
     delete S.chatterFichas[chatterId].mapeamentoDraftTranscript;
