@@ -2114,6 +2114,8 @@ function zerarEscalaCompleta(){
   save();
   renderTurnoSchedule();
   toast('🗑️ Escala zerada — pode recomeçar');
+  clearTimeout(fbSaveTimer);
+  pushToFirestore();
 }
 function renderTurno(){
   renderTurnoSchedule();
@@ -3233,6 +3235,8 @@ function deleteShiftFromProfile(shiftId,chatterId){
   toast('Turno removido');
   renderChatterShifts(chatterId);
   renderScheduleForDay(selectedDay);
+  clearTimeout(fbSaveTimer);
+  pushToFirestore();
 }
 
 function saveChatterDetail(id){
@@ -6757,6 +6761,12 @@ function deleteShift(shiftId){
   markTombstone(shiftId);
   S.shifts=S.shifts.filter(s=>s.id!==shiftId);
   save();renderTurno();toast('Turno removido');
+  // Não espera o debounce de 600ms — em exclusões, envia pro Firestore JÁ.
+  // Sem isso, um recarregamento de página muito rápido (menos de 600ms)
+  // podia pegar a versão antiga do servidor antes do envio sair, trazendo
+  // o turno de volta na corrida.
+  clearTimeout(fbSaveTimer);
+  pushToFirestore();
 }
 
 /* ===========================================================
