@@ -309,15 +309,25 @@ function mergeArraysSafe(local,remote){
     return union;
   }
   const order=[];const map=new Map();
-  loc.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){if(!map.has(item.id))order.push(item.id);map.set(item.id,item);}});
+  // Um id tombstoned nunca entra no resultado do merge, mesmo que ainda
+  // esteja presente no array local — isso é o que faz uma exclusão feita
+  // em OUTRO dispositivo (ex: computador) realmente sumir aqui (ex: celular)
+  // assim que a tombstone chegar via Firestore, em vez de só bloquear
+  // re-adições vindas do remoto no mesmo dispositivo que apagou.
+  const tomb=S&&S._tombstones;
+  loc.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){
+    if(tomb&&tomb[item.id])return;
+    if(!map.has(item.id))order.push(item.id);map.set(item.id,item);
+  }});
   rem.forEach(item=>{if(item&&typeof item==='object'&&item.id!=null){
+    if(tomb&&tomb[item.id])return;
     const existing=map.get(item.id);
     // Se esse id não existe mais localmente porque foi apagado (tombstone),
     // nunca deixa o merge trazê-lo de volta a partir de um snapshot remoto
     // que ainda não tinha recebido a exclusão (ex: reload antes do push de
     // 600ms terminar). Isso é a causa raiz de itens excluídos "voltarem
     // sozinhos" depois de recarregar a página.
-    if(!existing&&S&&S._tombstones&&S._tombstones[item.id])return;
+    if(!existing&&tomb&&tomb[item.id])return;
     if(!map.has(item.id))order.push(item.id);
     map.set(item.id,existing?deepMergeState(existing,item):item);
   }});
@@ -401,6 +411,17 @@ function listenToFirestore(connectTimeout){
           if(remote&&remote.payload){
             try{
               const parsedPart=JSON.parse(remote.payload);
+              // Funde as tombstones que vieram desse snapshot ANTES de tudo
+              // o resto, pra que o merge de arrays (turnos, trocas etc.)
+              // logo abaixo já enxergue as exclusões feitas em outros
+              // dispositivos e consiga removê-las também daqui.
+              const incomingTomb=parsedPart&&parsedPart._tombstones;
+              if(incomingTomb&&typeof incomingTomb==='object'){
+                if(!S._tombstones)S._tombstones={};
+                Object.keys(incomingTomb).forEach(id=>{
+                  if(!S._tombstones[id]||incomingTomb[id]>S._tombstones[id])S._tombstones[id]=incomingTomb[id];
+                });
+              }
               if(docId===FIREBASE_DOC_ID){
                 const migrated=migrateState(parsedPart);
                 S=deepMergeState(S,migrated);delete S.payload;delete S.schemaVersion;delete S.updatedAt;
