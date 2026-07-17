@@ -5499,9 +5499,11 @@ function renderMapeamentoPanel(chatterId){
   const radarKeys=Object.keys(radar);
   const body=`
     <div style="position:relative;overflow:hidden">
-      <div style="position:absolute;top:0;left:0;bottom:0;width:96px;display:flex;flex-direction:column;gap:6px;justify-content:center;z-index:0">
-        <button data-noaccordion class="btn btn-ghost btn-xs" style="color:var(--bad);border-color:var(--bad)" onclick="excluirMapeamentoIA('${chatterId}')">🗑️ Excluir</button>
-        <button data-noaccordion class="btn btn-ghost btn-xs" onclick="abrirTrocaMapeamento('${chatterId}')">🔁 Trocar pessoa</button>
+      <div style="position:absolute;top:0;left:0;bottom:0;width:96px;z-index:0">
+        <div style="position:sticky;top:16px;display:flex;flex-direction:column;gap:6px">
+          <button data-noaccordion class="btn btn-ghost btn-xs" style="color:var(--bad);border-color:var(--bad)" onclick="excluirMapeamentoIA('${chatterId}')">🗑️ Excluir</button>
+          <button data-noaccordion class="btn btn-ghost btn-xs" onclick="abrirTrocaMapeamento('${chatterId}')">🔁 Trocar pessoa</button>
+        </div>
       </div>
       <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--surface);z-index:1">
         <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:12px">
