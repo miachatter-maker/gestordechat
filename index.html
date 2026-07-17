@@ -1547,6 +1547,20 @@ body{
   </div>
 </div></div>
 
+<div class="modalbg" id="m-map-troca"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🔁 Trocar mapeamento de pessoa</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">O mapeamento de <b id="map-troca-from-name"></b> vai ser movido pra outro chatter (útil quando a entrevista foi gravada/gerada na pessoa errada).</div>
+  <div class="field">
+    <label class="flabel">Mover para</label>
+    <select class="fselect" id="map-troca-select"></select>
+  </div>
+  <button class="btn btn-primary btn-block" onclick="confirmarTrocaMapeamento()">🔁 Confirmar troca</button>
+  <div class="modalbtns" style="margin-top:14px">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-map-troca')">Cancelar</button>
+  </div>
+</div></div>
+
 <div class="toast" id="toast"></div>
 
 <script src="firebase-bundle.js"></script>
