@@ -7858,6 +7858,50 @@ function buildOperationalContext(){
     });
   }
 
+  // FICHA: observações qualitativas que o gestor vai preenchendo na ficha de
+  // cada chatter (técnica, comportamento, potencial/risco, mapeamento manual
+  // de perfil, anotações livres). Antes disso a IA só via os números — agora
+  // ela também enxerga o que o gestor escreveu sobre cada pessoa.
+  const comFicha=[];
+  ativos.forEach(c=>{
+    const f=S.chatterFichas?.[c.id];
+    if(!f)return;
+    const parts=[];
+    const addField=(store,key,label)=>{const v=f[store]&&f[store][key];if(v&&String(v).trim())parts.push(`${label}: ${String(v).trim()}`);};
+    addField('tech','conversao','Conversão');addField('tech','ticket','Ticket médio');addField('tech','resposta','Tempo de resposta');addField('tech','evolucao','Evolução técnica');
+    addField('behavior','intensidade','Intensidade');addField('behavior','comunicacao','Comunicação');addField('behavior','comprometimento','Comprometimento');addField('behavior','energia','Energia');
+    addField('potential','potencial','Potencial');addField('potential','proximos','Próximos passos');
+    addField('risk','riscos','Riscos');
+    addField('mapeamento','resumo','Resumo');addField('mapeamento','motivacao','Motivação');addField('mapeamento','comoLiderar','Como liderar');addField('mapeamento','naoFazer','O que não fazer');
+    addField('obs','obs','Anotações livres');
+    if(f.mapeamento&&f.mapeamento.perfil)parts.push(`Perfil de liderança: ${f.mapeamento.perfil}`);
+    if(parts.length)comFicha.push(`- ${c.name}: ${parts.join(' | ')}`);
+  });
+  if(comFicha.length){
+    lines.push(`\nFICHA (observações qualitativas registradas pelo gestor sobre cada chatter):`);
+    comFicha.forEach(l=>lines.push(l));
+  }
+
+  // OBSERVAÇÕES DE CHAT: checklist diário (chamou pelo nome, respondeu não
+  // lidas, tempo de resposta, checou conversão, analisou conversa) + nota
+  // livre do dia, feito na Ficha de cada chatter.
+  const weekDateKeys=wd.map(d=>fmt(d));
+  const comChatObs=[];
+  ativos.forEach(c=>{
+    const co=S.chatObservacoes?.[c.id];
+    if(!co)return;
+    const entries=weekDateKeys.filter(dk=>co[dk]).map(dk=>{
+      const e=co[dk];
+      const checks=CHAT_OBS_ITEMS.filter(([k])=>e[k]).map(([,label])=>label);
+      return `${dk}${checks.length?' ('+checks.join(', ')+')':' (nenhum item marcado ainda)'}${e.anotacao&&e.anotacao.trim()?' — nota: '+e.anotacao.trim():''}`;
+    });
+    if(entries.length)comChatObs.push(`- ${c.name}: ${entries.join('; ')}`);
+  });
+  if(comChatObs.length){
+    lines.push(`\nOBSERVAÇÕES DE CHAT (checklist diário de acompanhamento) desta semana:`);
+    comChatObs.forEach(l=>lines.push(l));
+  }
+
   return lines.join('\n');
 }
 
