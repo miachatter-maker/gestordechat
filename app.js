@@ -1144,7 +1144,8 @@ function renderWeeklyRanking(){
     const prevRev=getChatterWeekRevenue(c.id,weekOffset-1);
     const prevPct=prevMeta>0?(prevRev/prevMeta*100):0;
     const melhora=prevPct>0?pct-prevPct:null;
-    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct};
+    const htTotal=getChatterWeekHighTicket(c.id,weekOffset).htTotal;
+    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal};
   });
   const top=(key,fmtFn)=>{
     const sorted=[...rows].filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
@@ -1165,6 +1166,7 @@ function renderWeeklyRanking(){
     {label:'⚡ Mais lucro em hora extra',data:top('extraBonus',v=>money(v))},
     {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
+    {label:'💎 Mais high ticket',data:top('htTotal',v=>money(v))},
     {label:'📈 Melhora da semana',data:topMelhora},
   ].filter(x=>x.data);
   if(!cards.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem dados suficientes essa semana ainda</div>';return;}
@@ -5034,6 +5036,66 @@ function renderFichaCruzamento(chatterId){
     <div style="font-size:13px;color:var(--text);line-height:1.6">${narrative}${qualNote}</div>
   </div>`;
 }
+// Painéis colapsáveis da Ficha: todos começam fechados e só abrem ao
+// clicar no cabeçalho. `id` precisa ser único por painel (ex: inclui o
+// chatterId) pra não conflitar entre fichas diferentes já renderizadas.
+function toggleFichaPanel(id){
+  const body=document.getElementById('fpbody-'+id);
+  const chev=document.getElementById('fpchev-'+id);
+  if(!body)return;
+  const willOpen=body.style.display==='none';
+  body.style.display=willOpen?'block':'none';
+  if(chev)chev.style.transform=willOpen?'rotate(90deg)':'rotate(0deg)';
+}
+function fichaAccordion(id,extraStyle,headHtml,bodyHtml){
+  return `<div class="panel" style="${extraStyle||''}">
+    <div class="panel-head" style="cursor:pointer;margin-bottom:0" onclick="if(event.target.closest('[data-noaccordion]'))return;toggleFichaPanel('${id}')">
+      ${headHtml}
+      <span id="fpchev-${id}" style="transition:transform .18s;display:inline-block;color:var(--text3);flex-shrink:0;padding-top:2px">▸</span>
+    </div>
+    <div id="fpbody-${id}" style="display:none;margin-top:13px">${bodyHtml}</div>
+  </div>`;
+}
+// Gráfico de barras simples (sem lib externa, consistente com o resto do
+// app) com o faturamento dia a dia da semana atual — substitui a antiga
+// lista de números soltos por algo que dá pra bater o olho rapidinho.
+function renderWeeklyPerformanceChart(chatterId){
+  const f=S.chatterFichas[chatterId];
+  const weekly=f&&f.analytics&&f.analytics.weeklyData||{};
+  if(!Object.keys(weekly).length)return '<div style="color:var(--text3);font-size:12.5px">Sem dados dessa semana ainda</div>';
+  const wd=getWeekDates(0);
+  const DAY_SHORT={0:'Dom',1:'Seg',2:'Ter',3:'Qua',4:'Qui',5:'Sex',6:'Sáb'};
+  const days=wd.map(d=>{
+    const dk=fmt(d);
+    const a=weekly[dk];
+    const total=a?((a.chatterTotal||0)+(a.extraTotal||0)):0;
+    return{dk,label:DAY_SHORT[d.getDay()],total,a};
+  });
+  const max=Math.max(1,...days.map(d=>d.total));
+  const bars=days.map(d=>`
+    <div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:4px;min-width:0">
+      <div style="font-size:9px;color:var(--text3);font-family:var(--font-mono);white-space:nowrap">${d.total>0?moneyShort(d.total):''}</div>
+      <div style="width:100%;max-width:26px;height:90px;display:flex;align-items:flex-end;background:var(--bg-soft);border-radius:5px;overflow:hidden">
+        <div style="width:100%;height:${Math.max(3,Math.round(d.total/max*100))}%;background:${d.total>0?'var(--accent)':'transparent'};border-radius:5px 5px 0 0"></div>
+      </div>
+      <div style="font-size:10px;color:var(--text3);font-weight:700">${d.label}</div>
+    </div>`).join('');
+  const weekTotal=days.reduce((s,d)=>s+d.total,0);
+  const withTicket=days.filter(d=>d.a&&d.a.ticketMedio>0);
+  const avgTicket=withTicket.length?withTicket.reduce((s,d)=>s+d.a.ticketMedio,0)/withTicket.length:0;
+  return`
+    <div style="display:flex;gap:6px;margin-bottom:12px">${bars}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:var(--text3)">Total da semana</div>
+        <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${moneyShort(weekTotal)}</div>
+      </div>
+      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+        <div style="font-size:9px;color:var(--text3)">Ticket médio</div>
+        <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${moneyShort(avgTicket)}</div>
+      </div>
+    </div>`;
+}
 function renderFichaChatter(chatterId){
   const el=document.getElementById('ficha-content');if(!el)return;
   const c=S.chatters.find(ch=>ch.id===chatterId);if(!c){el.innerHTML='';return;}
@@ -5056,90 +5118,45 @@ function renderFichaChatter(chatterId){
 
     ${renderMapeamentoPanel(chatterId)}
 
-    <div class="panel" style="border:2px solid var(--accent)">
-      <div class="panel-head"><div><div class="panel-title">🧭 Mapeamento de Perfil</div><div class="panel-note">Resumo pra saber como liderar essa pessoa rapidinho</div></div></div>
-      ${txtField('resumo','Resumo da história','mapeamento','Breve histórico dessa pessoa na equipe...')}
-      ${txtField('motivacao','O que motiva essa pessoa','mapeamento','O que faz ela querer trabalhar/se esforçar?')}
-      <div class="field">
-        <label class="flabel">Perfil de liderança</label>
-        <select class="fselect" onchange="saveFichaText('${chatterId}','mapeamento','perfil',this.value)">
-          <option value="" ${!f.mapeamento?.perfil?'selected':''}>— selecionar —</option>
-          <option value="analitica" ${f.mapeamento?.perfil==='analitica'?'selected':''}>🔍 Analítica</option>
-          <option value="criativa" ${f.mapeamento?.perfil==='criativa'?'selected':''}>🎨 Criativa</option>
-          <option value="executora" ${f.mapeamento?.perfil==='executora'?'selected':''}>⚡ Executora</option>
-        </select>
-      </div>
-      ${txtField('comoLiderar','Como liderar e motivar','mapeamento','O que funciona bem com essa pessoa? Elogio público, desafio, dado concreto...')}
-      ${txtField('naoFazer','O que NÃO fazer','mapeamento','O que evitar? O que já não funcionou ou irritou essa pessoa?')}
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><div class="panel-title">⚡ Técnica</div></div>
+    ${fichaAccordion('tech-'+chatterId,'','<div class="panel-title">⚡ Técnica</div>',`
       ${txtField('conversao','Conversão','tech','Como está a conversão? Pontos fortes e fracos...')}
       ${txtField('ticket','Ticket médio','tech','Observações sobre ticket e high ticket...')}
       ${txtField('resposta','Tempo de resposta','tech','Como está a agilidade nas respostas?')}
       ${txtField('evolucao','Evolução','tech','Como tem evoluído nas últimas semanas?')}
-    </div>
+    `)}
 
-    <div class="panel">
-      <div class="panel-head"><div class="panel-title">🧠 Comportamento</div></div>
+    ${fichaAccordion('behavior-'+chatterId,'','<div class="panel-title">🧠 Comportamento</div>',`
       ${txtField('intensidade','Intensidade','behavior','Como está o nível de dedicação?')}
       ${txtField('comunicacao','Comunicação','behavior','Como se comunica com a gestão?')}
       ${txtField('comprometimento','Comprometimento','behavior','É pontual? Cumpre metas e combinados?')}
       ${txtField('energia','Energia','behavior','Como está o nível de energia e motivação?')}
-    </div>
+    `)}
 
-    <div class="panel">
-      <div class="panel-head"><div class="panel-title">🚀 Potencial e Risco</div></div>
+    ${fichaAccordion('potential-'+chatterId,'','<div class="panel-title">🚀 Potencial e Risco</div>',`
       ${txtField('potencial','Pontos fortes e potencial','potential','O que essa pessoa tem de melhor? Onde pode chegar?')}
       ${txtField('riscos','Pontos de atenção e riscos','risk','O que precisa melhorar? Quais riscos observados?')}
       ${txtField('proximos','Próximos passos','potential','O que vou trabalhar com essa pessoa?')}
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><div class="panel-title">📝 Observações gerais</div></div>
-      ${txtField('obs','Anotações livres','obs','Qualquer coisa relevante sobre esse chatter...')}
-    </div>
+    `)}
 
     ${renderChatObsPanel(chatterId)}
 
     <button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="saveFichaSnapshot('${chatterId}')">💾 Salvar snapshot semanal</button>
 
-    ${Object.keys(f.analytics?.weeklyData||{}).length?`
-    <div class="panel">
-      <div class="panel-head"><div class="panel-title">📊 Dados dos relatórios</div><div class="panel-note">Preenchido automaticamente</div></div>
-      ${Object.entries(f.analytics.weeklyData).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7).map(([date,a])=>`
-        <div style="padding:8px 0;border-bottom:1px solid var(--line)">
-          <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:5px">${date}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
-            <div style="text-align:center;background:var(--bg-soft);border-radius:6px;padding:5px">
-              <div style="font-size:9px;color:var(--text3)">Faturamento</div>
-              <div style="font-size:12px;font-weight:700;font-family:var(--font-mono)">${moneyShort(a.chatterTotal||0)}</div>
-            </div>
-            <div style="text-align:center;background:var(--bg-soft);border-radius:6px;padding:5px">
-              <div style="font-size:9px;color:var(--text3)">Ticket médio</div>
-              <div style="font-size:12px;font-weight:700;font-family:var(--font-mono)">${moneyShort(a.ticketMedio||0)}</div>
-            </div>
-            <div style="text-align:center;background:var(--bg-soft);border-radius:6px;padding:5px">
-              <div style="font-size:9px;color:var(--text3)">Valor/hora</div>
-              <div style="font-size:12px;font-weight:700;color:${(a.vendasPorHora||0)>=20?'var(--ok)':(a.vendasPorHora||0)>=10?'var(--warn)':'var(--bad)'}">${a.vendasPorHora||0}</div>
-            </div>
-          </div>
-        </div>`).join('')}
-    </div>`:``}
+    ${fichaAccordion('relatorio-'+chatterId,'','<div><div class="panel-title">📊 Desempenho da semana</div><div class="panel-note">Gráfico gerado automaticamente</div></div>',
+      renderWeeklyPerformanceChart(chatterId)
+    )}
 
-    ${history.length?`
-    <div class="panel">
-      <div class="panel-head"><div class="panel-title">📜 Histórico</div></div>
+    ${history.length?fichaAccordion('historico-'+chatterId,'','<div class="panel-title">📜 Histórico</div>',`
       ${[...history].reverse().slice(0,5).map(snap=>`
         <div style="padding:10px 0;border-bottom:1px solid var(--line)">
           <div style="font-weight:700;font-size:12px;color:var(--text3);margin-bottom:6px">${snap.date}</div>
           ${Object.entries(snap).filter(([k])=>k!=='date').map(([k,v])=>v?`<div style="margin-bottom:4px"><span style="font-size:10.5px;font-weight:700;color:var(--text3)">${k.toUpperCase()}</span><div style="font-size:12.5px;color:var(--text2)">${v}</div></div>`:'').join('')}
         </div>`).join('')}
-    </div>`:''}
+    `):''}
 
     ${renderFichaCruzamento(chatterId)}
   `;
+  attachMapeamentoSwipe(chatterId);
 }
 const CHAT_OBS_ITEMS=[
   ['chamouNome','Chamou o cliente pelo nome'],
@@ -5183,8 +5200,7 @@ function renderChatObsPanel(chatterId){
   const entry=ensureChatObsEntry(chatterId,dateKey);
   const all=(S.chatObservacoes[chatterId])||{};
   const pastDates=Object.keys(all).filter(d=>d!==dateKey).sort((a,b)=>b.localeCompare(a));
-  return `<div class="panel">
-    <div class="panel-head"><div><div class="panel-title">💬 Observações de Chat</div><div class="panel-note">Checklist diário — o que avaliar hoje nesse chatter</div></div></div>
+  const body=`
     <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">HOJE · ${dateKey}</div>
     ${CHAT_OBS_ITEMS.map(([k,label])=>`
     <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text2)">
@@ -5196,7 +5212,7 @@ function renderChatObsPanel(chatterId){
         onblur="saveChatObsNote('${chatterId}','${dateKey}',this.value)">${entry.anotacao||''}</textarea>
     </div>
     ${pastDates.length?`
-    <button class="btn btn-ghost btn-xs" style="margin-top:4px" onclick="toggleChatObsHistory('${chatterId}')">📅 Ver histórico (${pastDates.length} ${pastDates.length===1?'dia':'dias'})</button>
+    <button data-noaccordion class="btn btn-ghost btn-xs" style="margin-top:4px" onclick="toggleChatObsHistory('${chatterId}')">📅 Ver histórico (${pastDates.length} ${pastDates.length===1?'dia':'dias'})</button>
     <div id="chatobs-hist-${chatterId}" style="display:none;margin-top:8px">
       ${pastDates.map(date=>{const e=all[date];return `
       <div style="padding:8px 0;border-bottom:1px solid var(--line)">
@@ -5205,7 +5221,8 @@ function renderChatObsPanel(chatterId){
         ${e.anotacao?`<div style="font-size:12.5px;color:var(--text2)">${e.anotacao}</div>`:''}
       </div>`;}).join('')}
     </div>`:''}
-  </div>`;
+  `;
+  return fichaAccordion('chatobs-'+chatterId,'','<div><div class="panel-title">💬 Observações de Chat</div><div class="panel-note">Checklist diário — o que avaliar hoje nesse chatter</div></div>',body);
 }
 /* ===========================================================
    MAPEAMENTO DE PERFORMANCE — entrevista guiada (roteiro fixo de
@@ -5386,6 +5403,88 @@ async function gerarMapeamentoIA(){
   }
 }
 
+// Excluir ou mover (trocar de pessoa) um mapeamento gerado/gravado no
+// chatter errado. Acessado arrastando o card do Mapeamento pra direita,
+// o que revela os botões "Excluir" e "Trocar pessoa" atrás do card.
+function excluirMapeamentoIA(chatterId){
+  const f=S.chatterFichas[chatterId];
+  if(!f||!f.mapeamentoIA)return;
+  if(!confirm('Excluir o mapeamento de performance dessa pessoa? Essa ação não pode ser desfeita.'))return;
+  delete f.mapeamentoIA;
+  save();
+  toast('Mapeamento excluído');
+  renderFichaChatter(chatterId);
+}
+function abrirTrocaMapeamento(chatterId){
+  window._mapTrocaFromId=chatterId;
+  const sel=document.getElementById('map-troca-select');
+  if(sel){
+    const outros=S.chatters.filter(ch=>ch.id!==chatterId);
+    sel.innerHTML=outros.length?outros.map(ch=>`<option value="${ch.id}">${ch.name}</option>`).join(''):'<option value="">Nenhum outro chatter</option>';
+  }
+  const fromC=S.chatters.find(ch=>ch.id===chatterId);
+  const nameEl=document.getElementById('map-troca-from-name');
+  if(nameEl)nameEl.textContent=fromC?fromC.name:'';
+  openModal('m-map-troca');
+}
+function confirmarTrocaMapeamento(){
+  const fromId=window._mapTrocaFromId;
+  const sel=document.getElementById('map-troca-select');
+  const toId=sel?sel.value:'';
+  if(!fromId||!toId||fromId===toId){toast('Selecione um chatter diferente');return;}
+  const fFrom=S.chatterFichas[fromId];
+  if(!fFrom||!fFrom.mapeamentoIA){toast('Não há mapeamento pra mover');return;}
+  if(!S.chatterFichas[toId])S.chatterFichas[toId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  const fTo=S.chatterFichas[toId];
+  if(fTo.mapeamentoIA&&!confirm('O chatter de destino já tem um mapeamento — isso vai substituir o mapeamento existente dele. Continuar?'))return;
+  fTo.mapeamentoIA=fFrom.mapeamentoIA;
+  delete fFrom.mapeamentoIA;
+  save();
+  closeModal('m-map-troca');
+  const cTo=S.chatters.find(ch=>ch.id===toId);
+  toast('Mapeamento movido pra '+(cTo?cTo.name:'?'));
+  renderFichaChatter(fromId);
+}
+// Arrasta o card do Mapeamento pra direita revela as ações Excluir/Trocar
+// atrás dele (mesmo padrão touch/mouse já usado em attachSwipeDismiss,
+// mas aqui o card fica "aberto" mostrando os botões em vez de desaparecer).
+function attachMapeamentoSwipe(chatterId){
+  const card=document.getElementById('map-swipe-card-'+chatterId);
+  if(!card)return;
+  let startX=0,curX=0,dragging=false,revealed=false;
+  const REVEAL=96;
+  const onDown=e=>{
+    if(e.target.closest('button,select,a,textarea'))return;
+    dragging=true;
+    startX=(e.touches?e.touches[0].clientX:e.clientX);
+    card.style.transition='none';
+  };
+  const onMove=e=>{
+    if(!dragging)return;
+    const delta=(e.touches?e.touches[0].clientX:e.clientX)-startX;
+    curX=Math.max(0,Math.min(REVEAL,(revealed?REVEAL:0)+delta));
+    card.style.transform=`translateX(${curX}px)`;
+  };
+  const onUp=()=>{
+    if(!dragging)return;
+    dragging=false;
+    card.style.transition='transform .2s ease';
+    if(curX>REVEAL/2){
+      card.style.transform=`translateX(${REVEAL}px)`;
+      revealed=true;
+    } else {
+      card.style.transform='translateX(0)';
+      revealed=false;
+    }
+  };
+  card.addEventListener('mousedown',onDown);
+  card.addEventListener('touchstart',onDown,{passive:true});
+  card.addEventListener('mousemove',onMove);
+  card.addEventListener('touchmove',onMove,{passive:true});
+  card.addEventListener('mouseup',onUp);
+  card.addEventListener('mouseleave',onUp);
+  card.addEventListener('touchend',onUp);
+}
 function renderMapeamentoPanel(chatterId){
   const f=S.chatterFichas[chatterId]||{};
   const m=f.mapeamentoIA;
@@ -5398,43 +5497,58 @@ function renderMapeamentoPanel(chatterId){
   const perfisTxt=(m.perfis||[]).map(p=>`${p.tipo} ${p.pct}%`).join(' / ');
   const radar=m.radar||{};
   const radarKeys=Object.keys(radar);
-  return `<div class="panel" style="border:2px solid var(--accent)">
-    <div class="panel-head"><div><div class="panel-title">🎯 Mapeamento de Performance</div><div class="panel-note">Gerado em ${m.date||''} · <b>${perfisTxt||'-'}</b></div></div></div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
-        <div style="font-size:9px;color:var(--text3)">Comunicação</div>
-        <div style="font-size:16px;font-weight:800">${m.comunicacao??'-'}/100</div>
+  const body=`
+    <div style="position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;bottom:0;width:96px;display:flex;flex-direction:column;gap:6px;justify-content:center;z-index:0">
+        <button data-noaccordion class="btn btn-ghost btn-xs" style="color:var(--bad);border-color:var(--bad)" onclick="excluirMapeamentoIA('${chatterId}')">🗑️ Excluir</button>
+        <button data-noaccordion class="btn btn-ghost btn-xs" onclick="abrirTrocaMapeamento('${chatterId}')">🔁 Trocar pessoa</button>
       </div>
-      <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
-        <div style="font-size:9px;color:var(--text3)">Intelig. emocional</div>
-        <div style="font-size:16px;font-weight:800">${m.inteligenciaEmocional??'-'}/100</div>
+      <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--surface);z-index:1">
+        <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:12px">
+          <div class="panel-note" style="margin-bottom:6px">👤 Quem é essa pessoa</div>
+          <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${m.resumoHistoria||'-'}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+          <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+            <div style="font-size:9px;color:var(--text3)">Comunicação</div>
+            <div style="font-size:16px;font-weight:800">${m.comunicacao??'-'}/100</div>
+          </div>
+          <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
+            <div style="font-size:9px;color:var(--text3)">Intelig. emocional</div>
+            <div style="font-size:16px;font-weight:800">${m.inteligenciaEmocional??'-'}/100</div>
+          </div>
+        </div>
+
+        <div class="field"><label class="flabel">🎓 Aprende melhor</label><div style="font-size:12.5px;color:var(--text2)">${m.aprendizagem||'-'}</div></div>
+        <div class="field"><label class="flabel">🔥 Motivadores principais</label><div style="font-size:12.5px;color:var(--text2)">${(m.motivadores||[]).join(' · ')||'-'}</div></div>
+
+        <div class="field">
+          <label class="flabel">👑 Liderança ideal${m.liderancaIdeal&&m.liderancaIdeal.estilo?' — '+m.liderancaIdeal.estilo:''}</label>
+          <div style="font-size:11.5px;color:var(--ok);margin-bottom:4px">${((m.liderancaIdeal&&m.liderancaIdeal.funcionaQuando)||[]).map(x=>'✔ '+x).join('<br>')}</div>
+          <div style="font-size:11.5px;color:var(--bad)">${((m.liderancaIdeal&&m.liderancaIdeal.evite)||[]).map(x=>'✖ '+x).join('<br>')}</div>
+        </div>
+
+        <div class="field"><label class="flabel">💡 Como motivar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoMotivar||'-'}</div></div>
+        <div class="field"><label class="flabel">🧭 Como liderar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoLiderar||'-'}</div></div>
+        <div class="field"><label class="flabel">🚫 O que NÃO fazer</label><div style="font-size:12.5px;color:var(--text2)">${m.oQueNaoFazer||'-'}</div></div>
+
+        <div class="panel-note" style="margin:10px 0 6px">📊 Radar de competências (0-10)</div>
+        ${radarKeys.map(k=>`
+          <div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)"><span>${k}</span><span>${radar[k]}</span></div>
+            <div class="goalbar-track"><div class="goalbar-fill" style="width:${Math.max(0,Math.min(100,(Number(radar[k])||0)/10*100))}%"></div></div>
+          </div>`).join('')}
+
+        <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px" onclick="openMapeamentoModal('${chatterId}')">🔁 Refazer mapeamento</button>
       </div>
     </div>
-
-    <div class="field"><label class="flabel">📖 Resumo da história</label><div style="font-size:12.5px;color:var(--text2)">${m.resumoHistoria||'-'}</div></div>
-    <div class="field"><label class="flabel">🎓 Aprende melhor</label><div style="font-size:12.5px;color:var(--text2)">${m.aprendizagem||'-'}</div></div>
-    <div class="field"><label class="flabel">🔥 Motivadores principais</label><div style="font-size:12.5px;color:var(--text2)">${(m.motivadores||[]).join(' · ')||'-'}</div></div>
-
-    <div class="field">
-      <label class="flabel">👑 Liderança ideal${m.liderancaIdeal&&m.liderancaIdeal.estilo?' — '+m.liderancaIdeal.estilo:''}</label>
-      <div style="font-size:11.5px;color:var(--ok);margin-bottom:4px">${((m.liderancaIdeal&&m.liderancaIdeal.funcionaQuando)||[]).map(x=>'✔ '+x).join('<br>')}</div>
-      <div style="font-size:11.5px;color:var(--bad)">${((m.liderancaIdeal&&m.liderancaIdeal.evite)||[]).map(x=>'✖ '+x).join('<br>')}</div>
-    </div>
-
-    <div class="field"><label class="flabel">💡 Como motivar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoMotivar||'-'}</div></div>
-    <div class="field"><label class="flabel">🧭 Como liderar</label><div style="font-size:12.5px;color:var(--text2)">${m.comoLiderar||'-'}</div></div>
-    <div class="field"><label class="flabel">🚫 O que NÃO fazer</label><div style="font-size:12.5px;color:var(--text2)">${m.oQueNaoFazer||'-'}</div></div>
-
-    <div class="panel-note" style="margin:10px 0 6px">📊 Radar de competências (0-10)</div>
-    ${radarKeys.map(k=>`
-      <div style="margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)"><span>${k}</span><span>${radar[k]}</span></div>
-        <div class="goalbar-track"><div class="goalbar-fill" style="width:${Math.max(0,Math.min(100,(Number(radar[k])||0)/10*100))}%"></div></div>
-      </div>`).join('')}
-
-    <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="openMapeamentoModal('${chatterId}')">🔁 Refazer mapeamento</button>
-  </div>`;
+    <div class="panel-note" style="margin-top:8px;text-align:center">⬅️ Arraste esse card pra direita pra excluir ou trocar de pessoa</div>
+  `;
+  return fichaAccordion('mapeamento-'+chatterId,'border:2px solid var(--accent)',
+    `<div><div class="panel-title">🎯 Mapeamento de Performance</div><div class="panel-note">Gerado em ${m.date||''} · <b>${perfisTxt||'-'}</b></div></div>`,
+    body
+  );
 }
 
 function formatFichaSnapshot(snap){
