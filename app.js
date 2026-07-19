@@ -39,6 +39,8 @@ function migrateState(s){
   if(!s.dailyTasksByDay)s.dailyTasksByDay={dom:[],seg:[],ter:[],qua:[],qui:[],sex:[],sab:[]};
   if(!s.weeklyTasks)s.weeklyTasks={};
   if(!s.monthlyTasks)s.monthlyTasks={};
+  if(!s.taskDoneLog)s.taskDoneLog={};
+  if(!s.triagemCandidatos)s.triagemCandidatos=[];
   if(!s.orientedThisWeek)s.orientedThisWeek={};
   if(!s.weekPrize)s.weekPrize={};
   if(!s.motivational)s.motivational={};
@@ -691,6 +693,8 @@ let S={
   dailyTasksByDay:{dom:[],seg:[],ter:[],qua:[],qui:[],sex:[],sab:[]}, // recorrentes por dia da semana
   weeklyTasks:{},  // weekKey -> [{id,text,time,urgent,done}]
   monthlyTasks:{}, // monthKey (YYYY-MM) -> [{id,text,time,urgent,done}]
+  taskDoneLog:{},  // dateKey -> {taskId:true} — reset diário de tarefas semanais/mensais sem prazo fixo (t.date vazio)
+  triagemCandidatos:[], // perfis de triagem ainda não vinculados a um tester — [{id,nome,...,date}]
   orientedThisWeek:{}, // weekKey -> [chatterId,...]
   weekPrize:{},          // weekKey -> {goal, winner, prize}
   motivational:{},       // weekKey -> {idea, chatters:{id:{issue, help}}}
@@ -5415,6 +5419,259 @@ function excluirMapeamentoIA(chatterId){
   toast('Mapeamento excluído');
   renderFichaChatter(chatterId);
 }
+
+/* ===========================================================
+   MAPEAMENTO DE TRIAGEM — diferente do Mapeamento de Performance
+   (que analisa 1 chatter já contratado com roteiro de 20 perguntas).
+   Esse aqui é usado numa CALL EM GRUPO com vários candidatos ainda não
+   contratados: você fala o nome de cada um e pergunta onde mora, o que
+   faz, se conhece o mercado e a pretensão salarial. A IA transcreve tudo
+   de uma vez e separa por pessoa, com foco em risco/potencial de
+   contratação (não em desenvolvimento de quem já está no time).
+   Perfis gerados ficam numa pool (S.triagemCandidatos) até serem
+   vinculados a um tester — aí viram S.chatterFichas[id].triagemIA.
+   Se o tester for efetivado, a triagem some (substituída, no tempo, pelo
+   Mapeamento de Performance de verdade, feito já como chatter contratado).
+   =========================================================== */
+let _triRecognition=null;
+let _triMediaRecorder=null;
+let _triMediaStream=null;
+let _triRecording=false;
+
+function openTriagemModal(){
+  const ta=document.getElementById('triagem-transcript');
+  if(ta)ta.value=S.triagemDraftTranscript||'';
+  const st=document.getElementById('triagem-status');
+  if(st)st.textContent='';
+  const gerarBtn=document.getElementById('triagem-gerar-btn');
+  if(gerarBtn){gerarBtn.disabled=!(S.triagemDraftTranscript||'').trim();gerarBtn.textContent='🤖 Gerar perfis com IA';}
+  const recBtn=document.getElementById('triagem-rec-btn');
+  if(recBtn)recBtn.textContent='🎙️ Iniciar gravação';
+  openModal('m-triagem');
+}
+
+function toggleTriagemRecording(){
+  if(_triRecording)stopTriagemRecording();else startTriagemRecording();
+}
+
+function startTriagemRecording(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    toast('⚠️ Seu navegador não suporta gravação de áudio — cole a conversa manualmente no campo de texto.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+    _triMediaStream=stream;
+    try{ _triMediaRecorder=new MediaRecorder(stream); _triMediaRecorder.start(); }catch(e){ console.warn('MediaRecorder indisponível',e); }
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    const ta=document.getElementById('triagem-transcript');
+    if(SR&&ta){
+      _triRecognition=new SR();
+      _triRecognition.lang='pt-BR';
+      _triRecognition.continuous=true;
+      _triRecognition.interimResults=true;
+      let baseText=ta.value;
+      if(baseText&&!/\s$/.test(baseText))baseText+=' ';
+      _triRecognition.onresult=(ev)=>{
+        let finalTxt='';let interimTxt='';
+        for(let i=ev.resultIndex;i<ev.results.length;i++){
+          const t=ev.results[i][0].transcript;
+          if(ev.results[i].isFinal)finalTxt+=t+' ';else interimTxt+=t;
+        }
+        if(finalTxt)baseText+=finalTxt;
+        ta.value=baseText+interimTxt;
+      };
+      _triRecognition.onerror=(ev)=>console.warn('Erro no reconhecimento de voz',ev.error);
+      _triRecognition.onend=()=>{ if(_triRecording){ try{_triRecognition.start();}catch(e){} } };
+      try{_triRecognition.start();}catch(e){console.warn(e);}
+    } else {
+      toast('⚠️ Transcrição automática não é suportada nesse navegador (funciona melhor no Chrome/Android) — grave normalmente e depois cole/edite o texto da conversa no campo abaixo.');
+    }
+    _triRecording=true;
+    const recBtn=document.getElementById('triagem-rec-btn');
+    if(recBtn)recBtn.textContent='⏹️ Parar gravação';
+    const st=document.getElementById('triagem-status');
+    if(st)st.textContent='🔴 Gravando... diga o nome de cada pessoa antes de perguntar.';
+  }).catch(err=>{
+    console.error(err);
+    toast('⚠️ Não foi possível acessar o microfone. Verifique a permissão do navegador.');
+  });
+}
+
+function stopTriagemRecording(silent){
+  _triRecording=false;
+  if(_triRecognition){ try{_triRecognition.onend=null;_triRecognition.stop();}catch(e){} _triRecognition=null; }
+  if(_triMediaRecorder){ try{_triMediaRecorder.stop();}catch(e){} _triMediaRecorder=null; }
+  if(_triMediaStream){ try{_triMediaStream.getTracks().forEach(t=>t.stop());}catch(e){} _triMediaStream=null; }
+  const recBtn=document.getElementById('triagem-rec-btn');
+  if(recBtn)recBtn.textContent='🎙️ Iniciar gravação';
+  const ta=document.getElementById('triagem-transcript');
+  const st=document.getElementById('triagem-status');
+  if(st&&!silent)st.textContent='⏸️ Gravação parada — revise o texto abaixo antes de gerar os perfis.';
+  const gerarBtn=document.getElementById('triagem-gerar-btn');
+  if(gerarBtn&&ta)gerarBtn.disabled=!ta.value.trim();
+  if(ta){S.triagemDraftTranscript=ta.value;save();}
+}
+
+const TRIAGEM_SYSTEM=`Você é um recrutador sênior especialista em triagem de candidatos para vagas de chatter/atendimento em redes sociais (OnlyFans). Você recebe a TRANSCRIÇÃO de uma call em grupo, onde o recrutador fala com VÁRIAS pessoas diferentes, uma de cada vez, geralmente dizendo o nome da pessoa antes de perguntar: onde mora, o que faz, se conhece o mercado, e pretensão salarial.
+
+Sua tarefa é separar a transcrição POR PESSOA (usando os nomes citados como referência) e, para cada uma, montar um perfil de triagem focado em risco de contratação — isso é DIFERENTE de uma análise de desenvolvimento de alguém que já está no time: aqui o objetivo é decidir quem vale a pena colocar pra testar.
+
+Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
+{
+  "candidatos": [
+    {
+      "nome": "nome da pessoa como foi dito na conversa",
+      "ondeMora": "cidade/estado mencionados, ou 'não informado'",
+      "oQueFaz": "resumo objetivo da ocupação/situação atual dela",
+      "conheceMercado": "não conhece" | "conhece pouco" | "conhece bem" | "já trabalhou no mercado",
+      "pretensaoSalarial": "valor/faixa mencionada, ou 'não informado'",
+      "padraoFala": "resumo curto (1 frase) do jeito de falar: direto, enrolado, confiante, inseguro, animado, monótono etc — baseado em como ela respondeu, não só no conteúdo",
+      "autoridade": "baixa" | "média" | "alta",
+      "autoridadeMotivo": "1-2 frases justificando o nível de autoridade percebido (se ela se posiciona, impõe ritmo na conversa, ou se é mais passiva/deixa o recrutador conduzir tudo)",
+      "engajamento": "baixo" | "médio" | "alto",
+      "engajamentoMotivo": "1-2 frases justificando (entusiasmo, iniciativa, perguntas que ela fez de volta, objetividade nas respostas)",
+      "classificacao": "Alto potencial · baixo risco" | "Alto potencial · risco médio" | "Potencial médio · baixo risco" | "Potencial médio · risco médio" | "Baixo potencial" | "Alto risco — não recomendado",
+      "resumo": "2-4 frases de parecer geral sobre colocar essa pessoa pra testar, considerando tudo acima"
+    }
+  ]
+}
+
+O array "candidatos" deve ter uma entrada pra cada pessoa diferente identificada na transcrição (pode ser 1 ou várias). Se a transcrição não trouxer informação suficiente pra algum campo, use seu melhor julgamento com base no que foi dito e no tom da conversa — nunca deixe um campo vazio ou fora do formato pedido. Nunca invente pessoas que não foram mencionadas.`;
+
+async function gerarTriagemIA(){
+  const ta=document.getElementById('triagem-transcript');
+  const transcript=(ta?ta.value:'').trim();
+  if(!transcript){toast('Grave ou cole a call antes de gerar os perfis.');return;}
+  stopTriagemRecording(true);
+  const btn=document.getElementById('triagem-gerar-btn');
+  const st=document.getElementById('triagem-status');
+  if(btn){btn.disabled=true;btn.textContent='🤖 Analisando...';}
+  if(st)st.textContent='Enviando pra IA, isso pode levar alguns segundos...';
+  try{
+    const prompt=`Transcrição da call de triagem em grupo:\n\n${transcript}`;
+    const res=await fetch(AI_PROXY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:TRIAGEM_SYSTEM,messages:[{role:'user',content:prompt}]})
+    });
+    const data=await res.json();
+    let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
+    if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
+    let parsed;
+    try{
+      parsed=JSON.parse(text.slice(jsonStart,jsonEnd+1));
+    }catch(parseErr){
+      const looksTruncated=data.stop_reason==='max_tokens'||jsonEnd<text.length-3;
+      throw new Error(looksTruncated
+        ?'A resposta da IA veio incompleta (cortada no meio). Tente gerar novamente — o texto gravado/colado continua salvo.'
+        :'Não consegui interpretar o JSON da IA ('+parseErr.message+'). Tente gerar novamente.');
+    }
+    const candidatos=Array.isArray(parsed.candidatos)?parsed.candidatos:[];
+    if(!candidatos.length)throw new Error('Não encontrei nenhuma pessoa identificável na transcrição.');
+    candidatos.forEach(cand=>{
+      S.triagemCandidatos.push({id:'tri'+Date.now()+Math.random().toString(36).slice(2,5),...cand,date:todayKey()});
+    });
+    delete S.triagemDraftTranscript;
+    save();
+    toast('🔍 '+candidatos.length+' perfil'+(candidatos.length>1?'is':'')+' de triagem gerado'+(candidatos.length>1?'s':'')+'!');
+    closeModal('m-triagem');
+    renderTriagemPool();
+  }catch(e){
+    console.error('Erro ao gerar triagem',e);
+    toast('⚠️ Erro ao gerar triagem: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🤖 Gerar perfis com IA';}
+    if(st)st.textContent='';
+  }
+}
+
+function renderTriagemPool(){
+  const el=document.getElementById('triagem-pool-list');
+  if(!el)return;
+  const pool=S.triagemCandidatos||[];
+  if(!pool.length){el.innerHTML='<div style="font-size:12.5px;color:var(--text3);padding:8px 0">Nenhum candidato triado ainda — grave ou cole a call em grupo pra gerar os perfis.</div>';return;}
+  const badgeColor={
+    'Alto potencial · baixo risco':'var(--ok)','Alto potencial · risco médio':'var(--ok)',
+    'Potencial médio · baixo risco':'var(--warn)','Potencial médio · risco médio':'var(--warn)',
+    'Baixo potencial':'var(--bad)','Alto risco — não recomendado':'var(--bad)'
+  };
+  el.innerHTML=pool.map(cand=>{
+    const color=badgeColor[cand.classificacao]||'var(--text3)';
+    return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:14px">${cand.nome||'—'}</div>
+          <div style="font-size:11.5px;color:var(--text2);margin-top:2px">${cand.ondeMora||'-'} · ${cand.oQueFaz||'-'}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">💰 ${cand.pretensaoSalarial||'-'} · 📈 ${cand.conheceMercado||'-'}</div>
+        </div>
+        <span class="pill" style="font-size:9px;flex-shrink:0;border-color:${color};color:${color}">${cand.classificacao||'-'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-top:8px;line-height:1.5">${cand.resumo||''}</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary btn-xs" style="flex:1" onclick="openVincularTriagemModal('${cand.id}')">🔗 Vincular a um tester</button>
+        <button class="btn btn-ghost btn-xs" onclick="removerTriagemCandidato('${cand.id}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function removerTriagemCandidato(candId){
+  if(!confirm('Descartar esse perfil de triagem? Essa ação não pode ser desfeita.'))return;
+  S.triagemCandidatos=S.triagemCandidatos.filter(c=>c.id!==candId);
+  save();
+  renderTriagemPool();
+}
+
+function openVincularTriagemModal(candId){
+  const cand=S.triagemCandidatos.find(c=>c.id===candId);
+  if(!cand)return;
+  window._triagemVincularId=candId;
+  const nameEl=document.getElementById('triagem-vincular-nome');
+  if(nameEl)nameEl.textContent=cand.nome||'';
+  const sel=document.getElementById('triagem-vincular-select');
+  if(sel){
+    const testers=S.chatters.filter(c=>c.time==='tester');
+    sel.innerHTML='<option value="">— nenhum —</option>'+testers.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  }
+  openModal('m-triagem-vincular');
+}
+
+function excluirTriagemIA(chatterId){
+  const f=S.chatterFichas[chatterId];
+  if(!f||!f.triagemIA)return;
+  if(!confirm('Excluir o mapeamento de triagem dessa pessoa? Essa ação não pode ser desfeita.'))return;
+  delete f.triagemIA;
+  save();
+  toast('Triagem excluída');
+  renderTesterDetail(chatterId);
+}
+function confirmarVincularTriagem(mode){
+  const candId=window._triagemVincularId;
+  const cand=S.triagemCandidatos.find(c=>c.id===candId);
+  if(!cand)return;
+  let chatterId='';
+  if(mode==='new'){
+    chatterId='c'+Date.now();
+    S.chatters.push({id:chatterId,name:cand.nome||'Novo candidato',discord:'',level:'teste',time:'tester',notes:'',watchtime:'',createdAt:new Date().toISOString()});
+  } else {
+    const sel=document.getElementById('triagem-vincular-select');
+    chatterId=sel?sel.value:'';
+    if(!chatterId){toast('Selecione um tester ou crie um novo');return;}
+  }
+  if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  const{id,...profile}=cand;
+  S.chatterFichas[chatterId].triagemIA={...profile,date:cand.date};
+  S.triagemCandidatos=S.triagemCandidatos.filter(c=>c.id!==candId);
+  save();
+  closeModal('m-triagem-vincular');
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  toast('🔗 Triagem vinculada a '+(c?c.name:'?'));
+  renderTriagemPool();
+  renderTesters();
+}
 function abrirTrocaMapeamento(chatterId){
   window._mapTrocaFromId=chatterId;
   const sel=document.getElementById('map-troca-select');
@@ -6261,9 +6518,28 @@ function addTaskGeneric(scope,key,inputId,timeId,dateId){
 function addDailyTask(){addTaskGeneric('daily',selectedTaskDay,'daily-task-input','daily-task-time');}
 function addWeeklyTask(){addTaskGeneric('weekly',getWeekKey(),'weekly-task-input','weekly-task-time','weekly-task-date');}
 function addMonthlyTask(){addTaskGeneric('monthly',todayKey().slice(0,7),'monthly-task-input','monthly-task-time','monthly-task-date');}
+// Tarefas semanais/mensais SEM data marcada (t.date vazio) são recorrentes —
+// precisam "repetir diariamente", ou seja, o check de feito reseta todo dia,
+// em vez de ficar marcado a semana/mês inteiro depois de feito uma vez.
+// Tarefas COM data+hora marcada continuam com o comportamento antigo (prazo
+// real: uma vez feita, fica feita — é isso que alimenta o alerta de prazo).
+function recurresDaily(scope,t){
+  return(scope==='weekly'||scope==='monthly')&&!t.date;
+}
+function isTaskDoneToday(scope,t){
+  if(recurresDaily(scope,t))return!!(S.taskDoneLog[todayKey()]||{})[t.id];
+  return!!t.done;
+}
 function toggleTaskDone(scope,key,id){
   const t=getTaskStore(scope,key).find(x=>x.id===id);
-  if(t)t.done=!t.done;
+  if(!t)return;
+  if(recurresDaily(scope,t)){
+    const dk=todayKey();
+    if(!S.taskDoneLog[dk])S.taskDoneLog[dk]={};
+    S.taskDoneLog[dk][id]=!S.taskDoneLog[dk][id];
+  } else {
+    t.done=!t.done;
+  }
   save();renderTaskBoards();
 }
 function toggleTaskUrgent(scope,key,id){
@@ -6302,7 +6578,7 @@ function renderTaskBoard(containerId,scope,key){
   const late=scope==='daily';
   const sorted=[...list].sort((a,b)=>taskSortKey(a,late).localeCompare(taskSortKey(b,late)));
   if(!sorted.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:6px 0">Nenhuma tarefa</div>';return;}
-  el.innerHTML=sorted.map(t=>taskRowHtml(t,`${scope}|${key}|${t.id}`,t.done,{
+  el.innerHTML=sorted.map(t=>taskRowHtml(t,`${scope}|${key}|${t.id}`,isTaskDoneToday(scope,t),{
     toggleDone:`toggleTaskDone('${scope}','${key}','${t.id}')`,
     togglePriority:`toggleTaskUrgent('${scope}','${key}','${t.id}')`,
     del:`deleteTask('${scope}','${key}','${t.id}')`,
@@ -8236,6 +8512,10 @@ function setTesterDecision(chatterId,decision){
     c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
     if(c.level==='teste'||c.level==='treinamento')c.level='junior'; // promove o nível também, senão fica filtrado de fora em quadros que checam nível separado do cargo
     c.testerApprovalDate=todayKey(); // a partir dessa data os relatórios entram nas análises (Evolução etc)
+    // O Mapeamento de Triagem (feito antes de contratar) some quando a pessoa
+    // é efetivada — a partir de agora ela é avaliada pelo Mapeamento de
+    // Performance de verdade (entrevista completa, feita já como chatter).
+    if(S.chatterFichas[chatterId])delete S.chatterFichas[chatterId].triagemIA;
     toast(`✅ ${c.name} aprovado! Já passou pro Time Base e entra em todas as análises de desenvolvimento a partir de hoje.`);
   } else if(decision==='reprovado'){
     toast(`${c.name} marcado como reprovado.`);
@@ -8246,6 +8526,7 @@ function setTesterDecision(chatterId,decision){
   renderTesters();
 }
 function renderTesters(){
+  renderTriagemPool();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
   const testers=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
@@ -8415,7 +8696,22 @@ function renderTesterDetail(cid){
     </div>`;
   })():'';
 
-  el.innerHTML=reservaPanel+analysisPanel+`
+  const triagem=S.chatterFichas?.[cid]?.triagemIA;
+  const triagemPanel=triagem?fichaAccordion('triagem-'+cid,'border:2px solid var(--accent)',
+    `<div><div class="panel-title">🔍 Mapeamento de Triagem</div><div class="panel-note">Gerado em ${triagem.date||''} · <b>${triagem.classificacao||''}</b></div></div>`,
+    `<div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div class="panel-note" style="margin-bottom:6px">👤 Sobre a pessoa</div>
+      <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${triagem.ondeMora||'-'} · ${triagem.oQueFaz||'-'}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">💰 Pretensão: ${triagem.pretensaoSalarial||'-'} · 📈 Mercado: ${triagem.conheceMercado||'-'}</div>
+    </div>
+    <div class="field"><label class="flabel">🗣️ Padrão de fala</label><div style="font-size:12.5px;color:var(--text2)">${triagem.padraoFala||'-'}</div></div>
+    <div class="field"><label class="flabel">👑 Autoridade — ${triagem.autoridade||'-'}</label><div style="font-size:12.5px;color:var(--text2)">${triagem.autoridadeMotivo||'-'}</div></div>
+    <div class="field"><label class="flabel">🔥 Engajamento — ${triagem.engajamento||'-'}</label><div style="font-size:12.5px;color:var(--text2)">${triagem.engajamentoMotivo||'-'}</div></div>
+    <div class="field"><label class="flabel">📋 Parecer</label><div style="font-size:12.5px;color:var(--text2)">${triagem.resumo||'-'}</div></div>
+    <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--bad);border-color:var(--bad)" onclick="excluirTriagemIA('${cid}')">🗑️ Excluir triagem</button>`
+  ):'';
+
+  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-weight:800;font-size:16px">${c.name}</div>
