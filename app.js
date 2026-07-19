@@ -1188,7 +1188,7 @@ function renderGoals(){
   if(!goals.length){el.innerHTML='<div class="empty"><div class="empty-ic">🎯</div><div class="empty-tx">Nenhum objetivo definido para esta semana.<br>Defina metas para guiar o time.</div></div>';return;}
   el.innerHTML=goals.map(g=>{
     if(g.type==='simples'){
-      return`<div class="goalcard ${g.done?'met':''}">
+      return`<div class="goalcard ${g.done?'met':''}" data-key="${g.id}" style="touch-action:pan-y">
         <div class="goal-top">
           <div class="goal-text" style="${g.done?'text-decoration:line-through;color:var(--text3)':''}">${g.text}</div>
           <button class="tcheck ${g.done?'done':''}" onclick="toggleGoalDone('${g.id}')">${g.done?'✓':''}</button>
@@ -1198,7 +1198,7 @@ function renderGoals(){
     }
     const pct=g.target>0?Math.min(100,Math.round((g.current/g.target)*100)):0;
     const met=pct>=100;
-    return`<div class="goalcard ${met?'met':''}">
+    return`<div class="goalcard ${met?'met':''}" data-key="${g.id}" style="touch-action:pan-y">
       <div class="goal-top">
         <div class="goal-text">${g.text}</div>
         <button class="btn btn-icon btn-line" onclick="deleteGoal('${g.id}')">✕</button>
@@ -1214,6 +1214,7 @@ function renderGoals(){
       </div>
     </div>`;
   }).join('');
+  attachSwipeToDelete(el,'.goalcard',id=>deleteGoal(id),renderGoals);
 }
 function saveGoal(){
   const text=document.getElementById('goal-text').value.trim();
@@ -1806,6 +1807,19 @@ function attachSwipeDismiss(container,selector,onDismiss){
     row.addEventListener('mouseup',onUp);
     row.addEventListener('mouseleave',onUp);
     row.addEventListener('touchend',onUp);
+  });
+}
+
+// Wrapper padrão pra "arrastar pro lado = excluir", usado em todas as listas
+// do app (metas, orientações, estudos, treinamentos, etc). Reusa o motor de
+// attachSwipeDismiss acima. Depois de excluir, sempre re-renderiza a lista —
+// isso cobre tanto o caso de sucesso quanto o caso em que deleteFn tem um
+// confirm() interno e o usuário cancela (o card volta a aparecer certinho).
+function attachSwipeToDelete(container,selector,deleteFn,renderFn){
+  if(!container)return;
+  attachSwipeDismiss(container,selector,key=>{
+    deleteFn(key);
+    if(renderFn)setTimeout(renderFn,0);
   });
 }
 
@@ -2909,23 +2923,25 @@ function renderOrientList(){
   else{
     html+='<div class="sectionlb">hoje</div>';
     html+=todayO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);
-      return`<div class="logitem"><div class="logdate">${c?c.name:'?'} · turno ${o.shift}</div><div class="logtext">${o.text}</div>
+      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y"><div class="logdate">${c?c.name:'?'} · turno ${o.shift}</div><div class="logtext">${o.text}</div>
       ${o.goal?`<div style="margin-top:5px;font-family:var(--font-mono);font-size:12px;color:var(--ok)">meta: ${money(parseFloat(o.goal))}</div>`:''}
       <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="deleteOrientation('${o.id}')">✕</button></div>`;
     }).join('');
   }
   el.innerHTML=html;
+  attachSwipeToDelete(el,'.orient-swipe-row',id=>deleteOrientation(id),renderOrientList);
 }
 function renderStudyList(){
   const el=document.getElementById('study-list');
   if(!S.studies.length){el.innerHTML='<div class="empty"><div class="empty-ic">📚</div><div class="empty-tx">Adicione itens de estudo</div></div>';return;}
   const pb={alta:'pill-bad',media:'pill-warn',baixa:'pill-flat'};
-  el.innerHTML='<div class="tasklist">'+S.studies.map(s=>`<div class="taskrow ${s.done?'done':''}">
+  el.innerHTML='<div class="tasklist">'+S.studies.map(s=>`<div class="taskrow ${s.done?'done':''}" data-key="${s.id}" style="touch-action:pan-y">
     <div class="tcheck ${s.done?'done':''}" onclick="toggleStudy('${s.id}')">${s.done?'✓':''}</div>
     <div class="tbody"><div class="ttext">${s.title}</div>
     <div class="tmeta-row"><span class="pill pill-info">${s.category}</span><span class="pill ${pb[s.priority]||'pill-flat'}">${s.priority}</span></div></div>
     <button class="btn btn-icon btn-line" onclick="deleteStudy('${s.id}')">✕</button>
   </div>`).join('')+'</div>';
+  attachSwipeToDelete(el,'.taskrow',id=>deleteStudy(id),renderStudyList);
 }
 
 /* ===========================================================
@@ -3362,11 +3378,12 @@ function refreshChatterDetailTrainings(chatterId){
   const items=S.chatterTrainings.filter(t=>t.chatterId===chatterId);
   if(!items.length){el.innerHTML='<div style="font-size:12px;color:var(--text3)">Nenhum treinamento cadastrado</div>';return;}
   el.innerHTML=items.map(t=>`
-    <div class="taskrow ${t.done?'done':''}" style="margin-bottom:6px">
+    <div class="taskrow ${t.done?'done':''}" data-key="${t.id}" style="margin-bottom:6px;touch-action:pan-y">
       <div class="tcheck ${t.done?'done':''}" onclick="toggleChatterTraining('${t.id}','${chatterId}')">${t.done?'✓':''}</div>
       <div class="tbody"><div class="ttext" style="font-size:12.5px">${t.title}</div></div>
       <button class="btn btn-icon btn-line" onclick="deleteChatterTraining('${t.id}','${chatterId}')">✕</button>
     </div>`).join('');
+  attachSwipeToDelete(el,'.taskrow',id=>deleteChatterTraining(id,chatterId),()=>refreshChatterDetailTrainings(chatterId));
 }
 
 /* ===========================================================
@@ -3526,11 +3543,11 @@ function renderReport_Weekly(){
     const decisionsWeek=Object.values(S.chatterFichas||{}).filter(f=>f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd).length;
     const catsSetWeek=Object.values(S.chatterFichas||{}).filter(f=>f.pagCategoria).length;
     s6.innerHTML=`
-      <div class="reprow"><div class="replb">Treinamentos feitos</div><div class="repval">${trainsDone}</div></div>
-      <div class="reprow"><div class="replb">Orientações/correções</div><div class="repval">${corrections}</div></div>
-      <div class="reprow"><div class="replb">Trocas de turno cobertas</div><div class="repval">${swapsWeek}</div></div>
-      <div class="reprow"><div class="replb">Decisões de teste (aprovado/reprovado)</div><div class="repval">${decisionsWeek}</div></div>
-      <div class="reprow"><div class="replb">Categorias de pagamento definidas</div><div class="repval">${catsSetWeek}</div></div>
+      ${acoesMetricRow('Treinamentos feitos',trainsDone,'acoes-treinos')}
+      ${acoesMetricRow('Orientações/correções',corrections,'acoes-correcoes')}
+      ${acoesMetricRow('Trocas de turno cobertas',swapsWeek,'acoes-trocas')}
+      ${acoesMetricRow('Decisões de teste (aprovado/reprovado)',decisionsWeek,'acoes-decisoes')}
+      ${acoesMetricRow('Categorias de pagamento definidas',catsSetWeek,'acoes-categorias')}
     `;
     // Auto-preenche "Ajustes na operação" com um resumo, só se estiver vazio
     const ajustesEl=document.getElementById('rpt-ajustes');
@@ -3608,6 +3625,20 @@ function autoSuggestReportIssues(wd){
   });
 }
 
+// Linha da seção "Ações Realizadas": mostra o valor automático quando o app
+// detecta alguma coisa (>0); quando não detecta nada (0), abre um campo pra
+// preencher manualmente (ex: um treinamento feito fora do app).
+function acoesMetricRow(label,autoVal,draftKey){
+  if(autoVal>0){
+    return`<div class="reprow"><div class="replb">${label}</div><div class="repval">${autoVal}</div></div>`;
+  }
+  const manual=getReportDraft(draftKey);
+  return`<div class="reprow"><div class="replb">${label}</div><input type="number" class="finput" style="width:64px;text-align:right;padding:4px 8px;flex:none" id="rpt-${draftKey}" value="${manual||''}" placeholder="0" onblur="saveReportDraftField('${draftKey}',this.value)"></div>`;
+}
+function getAcoesMetric(autoVal,draftKey){
+  if(autoVal>0)return autoVal;
+  return parseInt(getReportDraft(draftKey))||0;
+}
 function getReportDraft(key){
   const wkey=getWeekKey();
   return(S.reportDrafts&&S.reportDrafts[wkey]&&S.reportDrafts[wkey][key])||'';
@@ -3758,8 +3789,8 @@ function buildReportLines(){
   }).length;
   const corrections=S.orientations.filter(o=>o.date>=wkStart&&o.date<=wkEnd).length;
   lines.push(`6. AÇÕES REALIZADAS`);
-  lines.push(`● Treinamentos feitos: ${trainsDone}`);
-  lines.push(`● Correções aplicadas: ${corrections}`);
+  lines.push(`● Treinamentos feitos: ${getAcoesMetric(trainsDone,'acoes-treinos')}`);
+  lines.push(`● Correções aplicadas: ${getAcoesMetric(corrections,'acoes-correcoes')}`);
   lines.push(`● Ajustes na operação: ${d('ajustes')||'—'}`);
   lines.push(``);
   lines.push(`7. PROBLEMAS ENCONTRADOS`);
@@ -4884,7 +4915,7 @@ function renderEventActionList(){
   if(!el)return;
   const list=(S.problemsToday||[]).slice().reverse();
   if(!list.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:4px 0">Nenhum registro ainda</div>';return;}
-  el.innerHTML=list.map(x=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+  el.innerHTML=list.map(x=>`<div class="eventaction-row" data-key="${x.id}" style="padding:8px 0;border-bottom:1px solid var(--line);touch-action:pan-y">
     <div style="display:flex;justify-content:space-between;gap:8px">
       <div style="font-size:13px;font-weight:600;flex:1">${x.event}</div>
       <button onclick="deleteEventAction('${x.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;flex-shrink:0">✕</button>
@@ -4892,6 +4923,7 @@ function renderEventActionList(){
     ${x.action?`<div style="font-size:12px;color:var(--ok);margin-top:2px">✅ ${x.action}</div>`:'<div style="font-size:11.5px;color:var(--text3);margin-top:2px;font-style:italic">sem ação registrada ainda</div>'}
     <div style="font-size:10px;color:var(--text3);margin-top:2px">${(x.date||'').split('-').reverse().join('/')}</div>
   </div>`).join('');
+  attachSwipeToDelete(el,'.eventaction-row',id=>deleteEventAction(id),renderEventActionList);
 }
 function addDemanda(){
   const inp=document.getElementById('demandas-input');
@@ -4921,7 +4953,7 @@ function renderTrainings(){
     const daysAgo=Math.floor((new Date(today)-new Date(t.date))/86400000);
     const currentDay=daysAgo>=0?daysAgo+1:null;
     const dayScript=currentDay?t.days.find(d=>d.day===currentDay)?.script||null:null;
-    return`<div style="background:var(--warn-soft);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid var(--warn)">
+    return`<div class="training-swipe-row" data-key="${t.id}" style="background:var(--warn-soft);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid var(--warn);touch-action:pan-y">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleTrainingDetail('${t.id}')">
         <div>
           <div style="font-weight:700;font-size:14px">🎓 ${t.title}</div>
@@ -4940,6 +4972,7 @@ function renderTrainings(){
       </div>
     </div>`;
   }).join('');
+  attachSwipeToDelete(el,'.training-swipe-row',id=>deleteTraining(id),renderTrainings);
 }
 function toggleTrainingDetail(id){const el=document.getElementById('train-detail-'+id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 function saveTrainingDayScript(trainingId,day){
@@ -8880,7 +8913,7 @@ function renderTesterDetail(cid){
     <!-- HISTÓRICO DE DIAS -->
     ${logs.length?`<div class="panel"><div class="panel-head"><div class="panel-title">📅 Histórico diário</div></div>
       ${[...logs].sort((a,b)=>b.date.localeCompare(a.date)).map(log=>`
-        <div style="padding:12px 0;border-bottom:1px solid var(--line)">
+        <div class="tlog-swipe-row" data-key="${log.id}" style="padding:12px 0;border-bottom:1px solid var(--line);touch-action:pan-y">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <div style="font-weight:700;font-size:13px">${log.date}</div>
             <button onclick="deleteTesterDay('${cid}','${log.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px">✕</button>
@@ -8905,6 +8938,7 @@ function renderTesterDetail(cid){
     </div>`:
     '<div style="color:var(--text3);font-size:13px;padding:8px 0">Nenhum dia registrado ainda — clique em + Registrar dia</div>'}
   `;
+  attachSwipeToDelete(el,'.tlog-swipe-row',id=>deleteTesterDay(cid,id),()=>renderTesterDetail(cid));
 }
 
 function addTesterDay(cid){
