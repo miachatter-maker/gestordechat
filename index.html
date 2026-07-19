@@ -13,6 +13,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
 <title>GestorPro</title>
 <style>
 /* ============================================================
@@ -666,9 +667,21 @@ body{
     <div id="rpt-performance"></div>
   </div>
 
+  <!-- Seção 3: Chatters em Teste — semi-automático -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">3. Chatters em Teste</div><span class="pill pill-ok" style="font-size:10px">semi-automático</span></div>
+    <div id="rpt-testers"></div>
+  </div>
+
+  <!-- Seção 4: Evolução dos Novos (Resumo) — automático -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">4. Evolução dos Novos (Resumo)</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
+    <div id="rpt-novos-resumo"></div>
+  </div>
+
   <!-- Seção 5: Seus erros — manual -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">3. Seus Principais Erros da Semana</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
+    <div class="panel-head"><div class="panel-title">5. Seus Principais Erros da Semana</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
     <div class="field"><label class="flabel">Erro 1</label><input class="finput" id="rpt-erro1" placeholder="Descreva o erro..."></div>
     <div class="field"><label class="flabel">Erro 2</label><input class="finput" id="rpt-erro2" placeholder="Descreva o erro..."></div>
     <div class="field"><label class="flabel">Erro 3</label><input class="finput" id="rpt-erro3" placeholder="Descreva o erro..."></div>
@@ -676,27 +689,28 @@ body{
 
   <!-- Seção 6: Ações realizadas — semi-automático -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">4. Ações Realizadas</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
+    <div class="panel-head"><div class="panel-title">6. Ações Realizadas</div><span class="pill pill-ok" style="font-size:10px">automático</span></div>
     <div id="rpt-acoes"></div>
     <div class="field" style="margin-top:10px"><label class="flabel">Ajustes na operação</label><input class="finput" id="rpt-ajustes" placeholder="Ex: mudei horário do turno da tarde..."></div>
   </div>
 
   <!-- Seção 7: Problemas — manual -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">5. Problemas Encontrados</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
+    <div class="panel-head"><div class="panel-title">7. Problemas Encontrados</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
     <div class="field"><label class="flabel">Problema 1</label><input class="finput" id="rpt-prob1" placeholder="Descreva o problema..."></div>
     <div class="field"><label class="flabel">Problema 2</label><input class="finput" id="rpt-prob2" placeholder="Descreva o problema..."></div>
   </div>
 
   <!-- Seção 8: Plano próxima semana — manual -->
   <div class="panel">
-    <div class="panel-head"><div class="panel-title">6. Plano para Próxima Semana</div><span class="pill pill-flat" style="font-size:10px">manual</span></div>
+    <div class="panel-head"><div class="panel-title">8. Plano para Próxima Semana</div><span class="pill pill-flat" style="font-size:10px">manual</span></div>
     <div class="field"><label class="flabel">Ação 1</label><input class="finput" id="rpt-plano1" placeholder="Ex: focar em chatter X..."></div>
     <div class="field"><label class="flabel">Ação 2</label><input class="finput" id="rpt-plano2" placeholder=""></div>
     <div class="field"><label class="flabel">Ação 3</label><input class="finput" id="rpt-plano3" placeholder=""></div>
   </div>
 
   <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="generateFullReport()">📋 Gerar relatório completo</button>
+  <button class="btn btn-primary btn-block" style="margin-bottom:8px;background:var(--accent2,#d8367f)" onclick="downloadReportPDF()">📄 PDF</button>
   <button class="btn btn-ghost btn-block" onclick="saveReportDraft()">💾 Salvar rascunho</button>
 
   <!-- Preview do relatório gerado -->

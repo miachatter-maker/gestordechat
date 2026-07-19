@@ -3382,6 +3382,7 @@ function renderReport_Weekly(){
   const wd=getWeekDates();
   const wkey=getWeekKey();
   const goals=S.chatterWeekGoals[wkey]||{};
+  const wkStart=fmt(wd[0]),wkEnd=fmt(wd[6]);
 
   // Update week range header
   const rangeEl=document.getElementById('report-wk-range');
@@ -3457,10 +3458,63 @@ function renderReport_Weekly(){
     }).join('');
   }
 
+  // ---- Section 3: Chatters em Teste ----
+  const testersRep=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
+  const s3=document.getElementById('rpt-testers');
+  if(s3){
+    if(!testersRep.length){s3.innerHTML='<div style="color:var(--text3);font-size:12px">Nenhum tester em teste esta semana</div>';}
+    else{
+      s3.innerHTML=testersRep.map(c=>{
+        const f=S.chatterFichas?.[c.id]||{};
+        const decision=f.testerDecision||'';
+        const decLabel={aprovado:'✅ Aprovado',espera:'🔵 Continuar (reservas)',reprovado:'❌ Reprovado','':'⏳ Pendente'}[decision];
+        const decColor={aprovado:'var(--ok)',espera:'var(--warn)',reprovado:'var(--bad)','':'var(--text3)'}[decision];
+        const daysInTest=c.createdAt?Math.floor((new Date()-new Date(c.createdAt))/86400000):0;
+        let rev=0;wd.forEach(dd=>{S.models.forEach(m=>{rev+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(dd)}`])||0;});});
+        return`<div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;border-left:3px solid ${decColor}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700;font-size:14px">${c.name}</div>
+            <span class="pill" style="background:${decColor}22;color:${decColor};border:1px solid ${decColor}">${decLabel}</span>
+          </div>
+          <div class="reprow"><div class="replb">Dias em teste</div><div class="repval">${daysInTest}</div></div>
+          <div class="reprow"><div class="replb">Faturamento (semana)</div><div class="repval">${money(rev)}</div></div>
+          <div class="field" style="margin-top:8px">
+            <label class="flabel">Evolução</label>
+            <div style="display:flex;gap:6px">
+              ${['Boa','Média','Ruim'].map(op=>`<button id="rpt-evol-${c.id}-${op}" onclick="setReportToggle('evoltest-${c.id}','${op}','rpt-evol-${c.id}',['Boa','Média','Ruim'])" style="flex:1;padding:6px 4px;border-radius:8px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:11.5px;color:var(--text2)">${op}</button>`).join('')}
+            </div>
+          </div>
+          <div class="field"><label class="flabel">Principais erros</label><input class="finput" id="rpt-erroteste-${c.id}" value="${getReportDraft('erroteste-'+c.id)}" placeholder="Descreva os principais erros..."></div>
+          ${decision===''?`<div style="font-size:11px;color:var(--text3);margin-top:4px">Decisão (Aprovar/Continuar/Reprovar) é definida na aba Testers</div>`:''}
+        </div>`;
+      }).join('');
+      testersRep.forEach(c=>applyReportToggleVisual(getReportDraft('evoltest-'+c.id),`rpt-evol-${c.id}`,['Boa','Média','Ruim']));
+    }
+  }
+
+  // ---- Section 4: Evolução dos Novos (Resumo) ----
+  const s4=document.getElementById('rpt-novos-resumo');
+  if(s4){
+    const entraram=testersRep.filter(c=>c.createdAt&&c.createdAt.slice(0,10)>=wkStart&&c.createdAt.slice(0,10)<=wkEnd).length;
+    const aprovadosWeek=testersRep.filter(c=>{const f=S.chatterFichas?.[c.id];return f?.testerDecision==='aprovado'&&f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd;}).length;
+    const reprovadosWeek=testersRep.filter(c=>{const f=S.chatterFichas?.[c.id];return f?.testerDecision==='reprovado'&&f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd;}).length;
+    const comDificuldade=testersRep.filter(c=>{
+      const dec=S.chatterFichas?.[c.id]?.testerDecision;
+      if(dec==='aprovado'||dec==='reprovado')return false;
+      const ev=getReportDraft('evoltest-'+c.id);
+      return ev==='Ruim'||ev==='Média';
+    }).length;
+    s4.innerHTML=`
+      <div class="reprow"><div class="replb">Quantos entraram</div><div class="repval">${entraram}</div></div>
+      <div class="reprow"><div class="replb">Evoluíram bem</div><div class="repval" style="color:var(--ok)">${aprovadosWeek}</div></div>
+      <div class="reprow"><div class="replb">Com dificuldade</div><div class="repval" style="color:var(--warn)">${comDificuldade}</div></div>
+      <div class="reprow"><div class="replb">Foram reprovados</div><div class="repval" style="color:var(--bad)">${reprovadosWeek}</div></div>
+    `;
+  }
+
   // ---- Section 6: Ações Realizadas ----
   const s6=document.getElementById('rpt-acoes');
   if(s6){
-    const wkStart=fmt(wd[0]),wkEnd=fmt(wd[6]);
     // Count trainings marked done this week (use doneAt if available, else createdAt)
     const trainsDone=S.chatterTrainings.filter(t=>{
       if(!t.done)return false;
@@ -3565,16 +3619,13 @@ function saveReportDraftField(key,value){
   S.reportDrafts[wkey][key]=value;
   save();
 }
-function setReportToggle(draftKey,value,btnGroupPrefix){
-  saveReportDraftField(draftKey,value);
-  // Update button visual states
-  const options=value==='Boa'||value==='Ruim'?['Boa','Ruim']:['Aprovar','Continuar','Reprovar'];
+function applyReportToggleVisual(value,btnGroupPrefix,options){
   const colorMap={
-    Boa:'var(--ok)',Ruim:'var(--bad)',
+    Boa:'var(--ok)',Média:'var(--warn)',Ruim:'var(--bad)',
     Aprovar:'var(--ok)',Continuar:'var(--warn)',Reprovar:'var(--bad)'
   };
   const bgMap={
-    Boa:'var(--ok-soft)',Ruim:'var(--bad-soft)',
+    Boa:'var(--ok-soft)',Média:'var(--warn-soft)',Ruim:'var(--bad-soft)',
     Aprovar:'var(--ok-soft)',Continuar:'var(--warn-soft)',Reprovar:'var(--bad-soft)'
   };
   options.forEach(op=>{
@@ -3585,6 +3636,10 @@ function setReportToggle(draftKey,value,btnGroupPrefix){
     btn.style.background=sel?bgMap[op]:'var(--bg)';
     btn.style.color=sel?colorMap[op]:'var(--text2)';
   });
+}
+function setReportToggle(draftKey,value,btnGroupPrefix,options){
+  saveReportDraftField(draftKey,value);
+  applyReportToggleVisual(value,btnGroupPrefix,options||(value==='Boa'||value==='Ruim'||value==='Média'?['Boa','Média','Ruim']:['Aprovar','Continuar','Reprovar']));
 }
 function saveReportDraft(){
   const wkey=getWeekKey();
@@ -3605,8 +3660,7 @@ function saveReportDraft(){
   save();
   toast('💾 Rascunho salvo!');
 }
-function generateFullReport(){
-  saveReportDraft();
+function buildReportLines(){
   const wd=getWeekDates();
   const wkey=getWeekKey();
   const goals=S.chatterWeekGoals[wkey]||{};
@@ -3653,7 +3707,46 @@ function generateFullReport(){
     lines.push(`● Ação tomada: ${d('acao-'+c.id)||'—'}`);
     lines.push(``);
   });
-  lines.push(`3. MEUS PRINCIPAIS ERROS DA SEMANA`);
+
+  lines.push(`3. CHATTERS EM TESTE`);
+  const testersRep=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
+  if(!testersRep.length){
+    lines.push(`Nenhum tester em teste esta semana.`);
+    lines.push(``);
+  } else {
+    testersRep.forEach(c=>{
+      const f=S.chatterFichas?.[c.id]||{};
+      const decision=f.testerDecision||'';
+      const decLabel={aprovado:'Aprovar',espera:'Continuar',reprovado:'Reprovar','':'Pendente'}[decision];
+      const daysInTest=c.createdAt?Math.floor((new Date()-new Date(c.createdAt))/86400000):0;
+      let rev=0;wd.forEach(dd=>{S.models.forEach(m=>{rev+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(dd)}`])||0;});});
+      lines.push(`Nome: ${c.name}`);
+      lines.push(`● Dias em teste: ${daysInTest}`);
+      lines.push(`● Faturamento: ${money(rev)}`);
+      lines.push(`● Evolução: ${d('evoltest-'+c.id)||'—'}`);
+      lines.push(`● Principais erros: ${d('erroteste-'+c.id)||'—'}`);
+      lines.push(`● Decisão: ${decLabel}`);
+      lines.push(``);
+    });
+  }
+
+  lines.push(`4. EVOLUÇÃO DOS NOVOS (RESUMO)`);
+  const entraram=testersRep.filter(c=>c.createdAt&&c.createdAt.slice(0,10)>=wkStart&&c.createdAt.slice(0,10)<=wkEnd).length;
+  const aprovadosWeek=testersRep.filter(c=>{const f=S.chatterFichas?.[c.id];return f?.testerDecision==='aprovado'&&f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd;}).length;
+  const reprovadosWeek=testersRep.filter(c=>{const f=S.chatterFichas?.[c.id];return f?.testerDecision==='reprovado'&&f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd;}).length;
+  const comDificuldade=testersRep.filter(c=>{
+    const dec=S.chatterFichas?.[c.id]?.testerDecision;
+    if(dec==='aprovado'||dec==='reprovado')return false;
+    const ev=d('evoltest-'+c.id);
+    return ev==='Ruim'||ev==='Média';
+  }).length;
+  lines.push(`● Quantos entraram: ${entraram}`);
+  lines.push(`● Quantos evoluíram bem: ${aprovadosWeek}`);
+  lines.push(`● Quantos estão com dificuldade: ${comDificuldade}`);
+  lines.push(`● Quantos foram reprovados: ${reprovadosWeek}`);
+  lines.push(``);
+
+  lines.push(`5. SEUS PRINCIPAIS ERROS DA SEMANA`);
   lines.push(`● Erro 1: ${d('erro1')||'—'}`);
   lines.push(`● Erro 2: ${d('erro2')||'—'}`);
   lines.push(`● Erro 3: ${d('erro3')||'—'}`);
@@ -3664,25 +3757,65 @@ function generateFullReport(){
     return doneDate>=wkStart&&doneDate<=wkEnd;
   }).length;
   const corrections=S.orientations.filter(o=>o.date>=wkStart&&o.date<=wkEnd).length;
-  lines.push(`4. AÇÕES REALIZADAS`);
+  lines.push(`6. AÇÕES REALIZADAS`);
   lines.push(`● Treinamentos feitos: ${trainsDone}`);
   lines.push(`● Correções aplicadas: ${corrections}`);
   lines.push(`● Ajustes na operação: ${d('ajustes')||'—'}`);
   lines.push(``);
-  lines.push(`5. PROBLEMAS ENCONTRADOS`);
+  lines.push(`7. PROBLEMAS ENCONTRADOS`);
   lines.push(`● Problema 1: ${d('prob1')||'—'}`);
   lines.push(`● Problema 2: ${d('prob2')||'—'}`);
   lines.push(``);
-  lines.push(`6. PLANO PARA PRÓXIMA SEMANA`);
+  lines.push(`8. PLANO PARA PRÓXIMA SEMANA`);
   lines.push(`● Ação 1: ${d('plano1')||'—'}`);
   lines.push(`● Ação 2: ${d('plano2')||'—'}`);
   lines.push(`● Ação 3: ${d('plano3')||'—'}`);
 
+  return lines;
+}
+function generateFullReport(){
+  saveReportDraft();
+  const lines=buildReportLines();
   const text=lines.join('\n');
   document.getElementById('rpt-output').value=text;
   document.getElementById('rpt-output-panel').style.display='block';
   document.getElementById('rpt-output-panel').scrollIntoView({behavior:'smooth'});
   toast('✅ Relatório gerado!');
+}
+function downloadReportPDF(){
+  saveReportDraft();
+  if(!window.jspdf||!window.jspdf.jsPDF){
+    toast('⏳ PDF ainda carregando, tente de novo em instantes');
+    return;
+  }
+  const lines=buildReportLines();
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'a4'});
+  const marginL=42,marginR=42;
+  const pageW=doc.internal.pageSize.getWidth();
+  const pageH=doc.internal.pageSize.getHeight();
+  const maxW=pageW-marginL-marginR;
+  const lineH=14;
+  let y=48;
+  lines.forEach((raw,i)=>{
+    if(raw===''){y+=lineH*0.6;return;}
+    const isMainTitle=i===0;
+    const isSectionTitle=/^\d+\.\s/.test(raw);
+    const isName=/^Nome:/.test(raw);
+    doc.setFontSize(isMainTitle?14:isSectionTitle?11.5:10);
+    doc.setFont('helvetica',isMainTitle||isSectionTitle||isName?'bold':'normal');
+    const wrapped=doc.splitTextToSize(raw,maxW);
+    wrapped.forEach(wl=>{
+      if(y>pageH-50){doc.addPage();y=48;}
+      doc.text(wl,marginL,y);
+      y+=lineH;
+    });
+    if(isSectionTitle)y+=2;
+  });
+  const wd=getWeekDates();
+  const fname=`relatorio-semanal_${fmt(wd[0])}_a_${fmt(wd[6])}.pdf`;
+  doc.save(fname);
+  toast('✅ PDF baixado!');
 }
 function copyFullReport(){
   const ta=document.getElementById('rpt-output');
