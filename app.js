@@ -3522,10 +3522,10 @@ function renderReport_Weekly(){
       return ev==='Ruim'||ev==='Média';
     }).length;
     s4.innerHTML=`
-      <div class="reprow"><div class="replb">Quantos entraram</div><div class="repval">${entraram}</div></div>
-      <div class="reprow"><div class="replb">Evoluíram bem</div><div class="repval" style="color:var(--ok)">${aprovadosWeek}</div></div>
-      <div class="reprow"><div class="replb">Com dificuldade</div><div class="repval" style="color:var(--warn)">${comDificuldade}</div></div>
-      <div class="reprow"><div class="replb">Foram reprovados</div><div class="repval" style="color:var(--bad)">${reprovadosWeek}</div></div>
+      ${reportMetricRow('Quantos entraram',entraram,'novos-entraram')}
+      ${reportMetricRow('Quantos evoluíram bem',aprovadosWeek,'novos-bem')}
+      ${reportMetricRow('Quantos estão com dificuldade',comDificuldade,'novos-dificuldade')}
+      ${reportMetricRow('Quantos foram reprovados',reprovadosWeek,'novos-reprovados')}
     `;
   }
 
@@ -3543,11 +3543,11 @@ function renderReport_Weekly(){
     const decisionsWeek=Object.values(S.chatterFichas||{}).filter(f=>f.testerDecisionDate>=wkStart&&f.testerDecisionDate<=wkEnd).length;
     const catsSetWeek=Object.values(S.chatterFichas||{}).filter(f=>f.pagCategoria).length;
     s6.innerHTML=`
-      ${acoesMetricRow('Treinamentos feitos',trainsDone,'acoes-treinos')}
-      ${acoesMetricRow('Orientações/correções',corrections,'acoes-correcoes')}
-      ${acoesMetricRow('Trocas de turno cobertas',swapsWeek,'acoes-trocas')}
-      ${acoesMetricRow('Decisões de teste (aprovado/reprovado)',decisionsWeek,'acoes-decisoes')}
-      ${acoesMetricRow('Categorias de pagamento definidas',catsSetWeek,'acoes-categorias')}
+      ${reportMetricRow('Treinamentos feitos',trainsDone,'acoes-treinos')}
+      ${reportMetricRow('Orientações/correções',corrections,'acoes-correcoes')}
+      ${reportMetricRow('Trocas de turno cobertas',swapsWeek,'acoes-trocas')}
+      ${reportMetricRow('Decisões de teste (aprovado/reprovado)',decisionsWeek,'acoes-decisoes')}
+      ${reportMetricRow('Categorias de pagamento definidas',catsSetWeek,'acoes-categorias')}
     `;
     // Auto-preenche "Ajustes na operação" com um resumo, só se estiver vazio
     const ajustesEl=document.getElementById('rpt-ajustes');
@@ -3625,19 +3625,31 @@ function autoSuggestReportIssues(wd){
   });
 }
 
-// Linha da seção "Ações Realizadas": mostra o valor automático quando o app
-// detecta alguma coisa (>0); quando não detecta nada (0), abre um campo pra
-// preencher manualmente (ex: um treinamento feito fora do app).
-function acoesMetricRow(label,autoVal,draftKey){
-  if(autoVal>0){
-    return`<div class="reprow"><div class="replb">${label}</div><div class="repval">${autoVal}</div></div>`;
-  }
+// Linha de métrica usada nas seções "Evolução dos Novos" e "Ações Realizadas"
+// do relatório: sempre editável. Mostra o valor automático detectado pelo
+// app, mas o gestor pode corrigir a qualquer momento — se ele digitar um
+// valor diferente do automático, essa correção fica salva (é o "não
+// reconheceu automaticamente, preciso colocar"). Se ele deixar igual ao
+// automático (ou apagar), volta a acompanhar o número calculado pelo app.
+function reportMetricRow(label,autoVal,draftKey){
   const manual=getReportDraft(draftKey);
-  return`<div class="reprow"><div class="replb">${label}</div><input type="number" class="finput" style="width:64px;text-align:right;padding:4px 8px;flex:none" id="rpt-${draftKey}" value="${manual||''}" placeholder="0" onblur="saveReportDraftField('${draftKey}',this.value)"></div>`;
+  const hasManual=manual!==''&&manual!==undefined&&manual!==null;
+  const val=hasManual?manual:autoVal;
+  return`<div class="reprow"><div class="replb">${label}</div><input type="number" class="finput" style="width:64px;text-align:right;padding:4px 8px;flex:none" id="rpt-${draftKey}" value="${val}" data-auto="${autoVal}" onblur="saveReportMetric('${draftKey}',this)"></div>`;
 }
-function getAcoesMetric(autoVal,draftKey){
-  if(autoVal>0)return autoVal;
-  return parseInt(getReportDraft(draftKey))||0;
+function saveReportMetric(draftKey,el){
+  const auto=parseInt(el.dataset.auto)||0;
+  const typed=el.value.trim();
+  if(typed===''||parseInt(typed)===auto){
+    saveReportDraftField(draftKey,'');
+  } else {
+    saveReportDraftField(draftKey,typed);
+  }
+}
+function getReportMetric(autoVal,draftKey){
+  const manual=getReportDraft(draftKey);
+  if(manual!==''&&manual!==undefined&&manual!==null)return parseInt(manual)||0;
+  return autoVal;
 }
 function getReportDraft(key){
   const wkey=getWeekKey();
@@ -3771,10 +3783,10 @@ function buildReportLines(){
     const ev=d('evoltest-'+c.id);
     return ev==='Ruim'||ev==='Média';
   }).length;
-  lines.push(`● Quantos entraram: ${entraram}`);
-  lines.push(`● Quantos evoluíram bem: ${aprovadosWeek}`);
-  lines.push(`● Quantos estão com dificuldade: ${comDificuldade}`);
-  lines.push(`● Quantos foram reprovados: ${reprovadosWeek}`);
+  lines.push(`● Quantos entraram: ${getReportMetric(entraram,'novos-entraram')}`);
+  lines.push(`● Quantos evoluíram bem: ${getReportMetric(aprovadosWeek,'novos-bem')}`);
+  lines.push(`● Quantos estão com dificuldade: ${getReportMetric(comDificuldade,'novos-dificuldade')}`);
+  lines.push(`● Quantos foram reprovados: ${getReportMetric(reprovadosWeek,'novos-reprovados')}`);
   lines.push(``);
 
   lines.push(`5. SEUS PRINCIPAIS ERROS DA SEMANA`);
@@ -3789,8 +3801,8 @@ function buildReportLines(){
   }).length;
   const corrections=S.orientations.filter(o=>o.date>=wkStart&&o.date<=wkEnd).length;
   lines.push(`6. AÇÕES REALIZADAS`);
-  lines.push(`● Treinamentos feitos: ${getAcoesMetric(trainsDone,'acoes-treinos')}`);
-  lines.push(`● Correções aplicadas: ${getAcoesMetric(corrections,'acoes-correcoes')}`);
+  lines.push(`● Treinamentos feitos: ${getReportMetric(trainsDone,'acoes-treinos')}`);
+  lines.push(`● Correções aplicadas: ${getReportMetric(corrections,'acoes-correcoes')}`);
   lines.push(`● Ajustes na operação: ${d('ajustes')||'—'}`);
   lines.push(``);
   lines.push(`7. PROBLEMAS ENCONTRADOS`);
