@@ -5629,6 +5629,7 @@ Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (seg
 
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
 {
+  "personalidadeUmaFrase": "desafio: descreva a personalidade dessa pessoa em UMA ÚNICA FRASE curta, direta e específica — nada de clichê genérico tipo 'pessoa esforçada e comunicativa', tem que soar como algo que só se diria sobre ELA",
   "resumoHistoria": "resumo objetivo em 2-4 frases da trajetória e do contexto da pessoa",
   "comunicacao": (número de 0 a 100),
   "inteligenciaEmocional": (número de 0 a 100),
@@ -6232,6 +6233,7 @@ function renderMapeamentoPanel(chatterId){
         <button data-noaccordion class="btn btn-ghost btn-xs" onclick="abrirTrocaMapeamento('${chatterId}')">🔁 Trocar pessoa</button>
       </div>
       <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--bg-soft);border-radius:10px;padding:12px;z-index:1">
+        ${m.personalidadeUmaFrase?`<div style="font-size:14px;font-weight:700;color:var(--accent);font-style:italic;margin-bottom:8px">"${m.personalidadeUmaFrase}"</div>`:''}
         <div class="panel-note" style="margin-bottom:6px">👤 Quem é essa pessoa</div>
         <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${m.resumoHistoria||'-'}</div>
       </div>
