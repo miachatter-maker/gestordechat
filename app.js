@@ -791,11 +791,20 @@ function getTodayDayKey(){return DAY_KEYS[new Date().getDay()];}
 // weekOffset: 0=current, -1=last week, -2=two weeks ago, etc.
 let weekOffset=0;
 
+// Semana de análise da empresa: SEGUNDA a DOMINGO (não domingo a sábado).
+// Ex: 06-12, 13-19, 20-26, 27-2 ... — toda semana começa na segunda-feira.
+function getMondayOfWeek(d){
+  const dow=d.getDay(); // 0=dom..6=sab
+  const diff=dow===0?6:dow-1; // dias desde a última segunda-feira
+  const mon=new Date(d);
+  mon.setDate(d.getDate()-diff);
+  return mon;
+}
 function getWeekDates(offset){
   const off=offset!==undefined?offset:weekOffset;
-  const now=new Date(),dow=now.getDay();
-  const sun=new Date(now);sun.setDate(now.getDate()-dow + off*7);
-  return Array.from({length:7},(_,i)=>{const d=new Date(sun);d.setDate(sun.getDate()+i);return d;});
+  const mon=getMondayOfWeek(new Date());
+  mon.setDate(mon.getDate()+off*7);
+  return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});
 }
 function getWeekKey(offset){const wd=getWeekDates(offset!==undefined?offset:weekOffset);return fmt(wd[0]);}
 function weekLabel(offset){
@@ -5217,8 +5226,7 @@ function renderFichaCruzamento(chatterId){
   const weekGroups={};
   Object.keys(analytics).forEach(dk=>{
     const d=new Date(dk+'T12:00:00');
-    const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());
-    const wk=fmt(sun);
+    const wk=fmt(getMondayOfWeek(d));
     if(!weekGroups[wk])weekGroups[wk]={rev:0,tickets:[],vphs:[]};
     const a=analytics[dk];
     weekGroups[wk].rev+=a.chatterTotal||0;
@@ -9848,8 +9856,7 @@ function getChatterAvgWeeklyRevenue(cid){
   const weekGroups={};
   Object.keys(analytics).forEach(dk=>{
     const d=new Date(dk+'T12:00:00');
-    const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());
-    const wk=fmt(sun);
+    const wk=fmt(getMondayOfWeek(d));
     weekGroups[wk]=(weekGroups[wk]||0)+(analytics[dk].chatterTotal||0);
   });
   const recentWeeks=Object.keys(weekGroups).sort().reverse().slice(0,4);
@@ -9875,12 +9882,11 @@ function renderProjecaoChatter(cid,containerId){
   const weekKeys=Object.keys(analytics).sort();
   const clAnalyses=(S.chatlabAnalyses||[]).filter(a=>a.chatterId===cid).sort((a,b)=>a.date.localeCompare(b.date));
 
-  // Group by week (Sun-Sat)
+  // Group by week (Seg-Dom)
   const weekGroups={};
   weekKeys.forEach(dk=>{
     const d=new Date(dk+'T12:00:00');
-    const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());
-    const wk=fmt(sun);
+    const wk=fmt(getMondayOfWeek(d));
     if(!weekGroups[wk])weekGroups[wk]=[];
     weekGroups[wk].push({date:dk,...analytics[dk]});
   });
