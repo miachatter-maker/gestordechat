@@ -5436,17 +5436,12 @@ function renderFichaChatter(chatterId){
       renderWeeklyPerformanceChart(chatterId)
     )}
 
-    ${history.length?fichaAccordion('historico-'+chatterId,'','<div class="panel-title">📜 Histórico</div>',`
-      ${[...history].reverse().slice(0,5).map(snap=>`
-        <div style="padding:10px 0;border-bottom:1px solid var(--line)">
-          <div style="font-weight:700;font-size:12px;color:var(--text3);margin-bottom:6px">${snap.date}</div>
-          ${Object.entries(snap).filter(([k])=>k!=='date').map(([k,v])=>v?`<div style="margin-bottom:4px"><span style="font-size:10.5px;font-weight:700;color:var(--text3)">${k.toUpperCase()}</span><div style="font-size:12.5px;color:var(--text2)">${v}</div></div>`:'').join('')}
-        </div>`).join('')}
-    `):''}
+    ${renderOrientacaoPanel(chatterId)}
 
     ${renderFichaCruzamento(chatterId)}
   `;
   attachMapeamentoSwipe(chatterId);
+  attachOrientacaoSwipe(chatterId);
 }
 const CHAT_OBS_ITEMS=[
   ['chamouNome','Chamou o cliente pelo nome'],
@@ -5704,6 +5699,144 @@ function excluirMapeamentoIA(chatterId){
   save();
   toast('Mapeamento excluído');
   renderFichaChatter(chatterId);
+}
+
+/* ===========================================================
+   ORIENTAÇÃO — planejamento assistido por IA de como aplicar uma
+   orientação específica (material teórico + finalidade) numa pessoa,
+   levando em conta o perfil dela (fichas técnica/comportamento/
+   potencial/risco + Mapeamento de Performance, se já existir). Fica
+   no lugar do antigo quadro "Histórico" na Ficha — o mecanismo de
+   snapshot semanal (f.history) continua existindo por baixo, só não
+   tem mais uma lista bruta exibida (a Evolução/cruzamento ainda usa).
+   =========================================================== */
+const ORIENTACAO_SYSTEM=`Você é uma consultora sênior de desenvolvimento de pessoas e liderança situacional, especialista em treinar chatters de operações de vendas por chat (atendimento/vendas de conteúdo adulto). Você recebe o perfil de UM chatter — observações técnicas, comportamentais, de potencial e de risco registradas na ficha dele, e opcionalmente um Mapeamento de Performance já feito por IA (perfil comportamental, motivadores, estilo de liderança ideal, radar de competências) — além da descrição do material teórico que a gestora vai mostrar pra essa pessoa e a finalidade dessa orientação.
+
+Sua tarefa é dizer, de forma bem específica e prática, COMO aplicar essa orientação especificamente com ESSA pessoa (nunca uma orientação genérica) — de um jeito que a motive a melhorar e garanta que ela realmente entenda, usando o que se sabe do perfil dela a favor da conversa.
+
+Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
+{
+  "abordagemSugerida": "3 a 5 frases de como conduzir a conversa com essa pessoa especificamente, considerando o perfil dela",
+  "comoConectarComPerfil": "2 a 4 frases citando explicitamente traços do perfil (motivadores, estilo de liderança ideal, comportamento registrado) e como usar isso a favor dessa orientação",
+  "roteiroSugerido": ["passo 1 objetivo", "passo 2", "passo 3"] (3 a 6 passos de como estruturar a apresentação do material teórico),
+  "fraseDeAbertura": "uma sugestão de frase ou pergunta de abertura que já conecta com o que motiva essa pessoa",
+  "oQueEvitar": "2 a 3 frases do que evitar especificamente com essa pessoa nessa conversa"
+}
+
+Se faltar informação de perfil (fichas vazias, sem mapeamento), diga isso dentro dos campos e dê recomendações mais genéricas mas ainda assim úteis — nunca deixe um campo vazio, nulo ou fora do formato pedido.`;
+
+async function gerarOrientacaoIA(chatterId){
+  const c=S.chatters.find(ch=>ch.id===chatterId);if(!c)return;
+  const material=(document.getElementById('orient-material-'+chatterId)?.value||'').trim();
+  const finalidade=(document.getElementById('orient-finalidade-'+chatterId)?.value||'').trim();
+  if(!material||!finalidade){toast('⚠️ Descreva o material teórico e a finalidade antes de gerar.');return;}
+  const btn=document.getElementById('orient-gerar-btn-'+chatterId);
+  const st=document.getElementById('orient-status-'+chatterId);
+  if(btn){btn.disabled=true;btn.textContent='🤖 Analisando...';}
+  if(st)st.textContent='Enviando pra IA, isso pode levar alguns segundos...';
+  try{
+    const f=S.chatterFichas[chatterId]||{};
+    let perfilTxt='';
+    if(f.mapeamentoIA){
+      const m=f.mapeamentoIA;
+      perfilTxt+=`Mapeamento de Performance (IA):\n`+
+        `Perfil: ${(m.perfis||[]).map(p=>`${p.tipo} ${p.pct}%`).join(', ')||'—'}\n`+
+        `Motivadores: ${(m.motivadores||[]).join(', ')||'—'}\n`+
+        `Estilo de liderança ideal: ${m.liderancaIdeal?.estilo||'—'}\n`+
+        `Funciona quando: ${(m.liderancaIdeal?.funcionaQuando||[]).join('; ')||'—'}\n`+
+        `Evite: ${(m.liderancaIdeal?.evite||[]).join('; ')||'—'}\n`+
+        `Como motivar: ${m.comoMotivar||'—'}\n`+
+        `Como liderar: ${m.comoLiderar||'—'}\n`+
+        `O que não fazer: ${m.oQueNaoFazer||'—'}\n\n`;
+    }
+    const fichaTxt=['tech','behavior','potential','risk'].map(store=>{
+      const entries=Object.entries(f[store]||{}).filter(([,v])=>v);
+      if(!entries.length)return'';
+      return`${store.toUpperCase()}:\n`+entries.map(([k,v])=>`- ${k}: ${v}`).join('\n');
+    }).filter(Boolean).join('\n\n');
+    const prompt=`Chatter: ${c.name} (nível: ${c.level})\n\n${perfilTxt}${fichaTxt||'Sem observações registradas na ficha ainda.'}\n\n---\nMaterial teórico que a gestora vai mostrar: ${material}\n\nFinalidade / o que ela quer alcançar com isso: ${finalidade}`;
+    const res=await fetch(AI_PROXY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2048,system:ORIENTACAO_SYSTEM,messages:[{role:'user',content:prompt}]})
+    });
+    const data=await res.json();
+    let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
+    if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
+    let parsed;
+    try{
+      parsed=JSON.parse(text.slice(jsonStart,jsonEnd+1));
+    }catch(parseErr){
+      const looksTruncated=data.stop_reason==='max_tokens'||jsonEnd<text.length-3;
+      throw new Error(looksTruncated
+        ?'A resposta da IA veio incompleta (cortada no meio). Tente gerar novamente.'
+        :'Não consegui interpretar o JSON da IA ('+parseErr.message+'). Tente gerar novamente.');
+    }
+    if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    if(!S.chatterFichas[chatterId].orientacoes)S.chatterFichas[chatterId].orientacoes=[];
+    S.chatterFichas[chatterId].orientacoes.push({id:'or'+Date.now(),date:todayKey(),material,finalidade,sugestao:parsed});
+    save();
+    toast('🎯 Orientação gerada!');
+    renderFichaChatter(chatterId);
+  }catch(e){
+    console.error('Erro ao gerar orientação',e);
+    toast('⚠️ Erro ao gerar orientação: '+e.message);
+    const btn2=document.getElementById('orient-gerar-btn-'+chatterId);
+    const st2=document.getElementById('orient-status-'+chatterId);
+    if(btn2){btn2.disabled=false;btn2.textContent='🤖 Gerar orientação assertiva';}
+    if(st2)st2.textContent='';
+  }
+}
+function excluirOrientacao(chatterId,orientId){
+  const f=S.chatterFichas[chatterId];
+  if(!f||!f.orientacoes)return;
+  f.orientacoes=f.orientacoes.filter(o=>o.id!==orientId);
+  save();
+  toast('Orientação removida');
+  renderFichaChatter(chatterId);
+}
+function orientacaoCardHtml(o){
+  const s=o.sugestao||{};
+  const dateBR=o.date?o.date.split('-').reverse().join('/'):'';
+  return`<div class="orient-card" data-key="${o.id}" style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;touch-action:pan-y">
+    <div style="font-size:11px;color:var(--text3);margin-bottom:6px">${dateBR}</div>
+    <div style="font-size:12.5px;margin-bottom:6px"><strong>Material:</strong> ${o.material}</div>
+    <div style="font-size:12.5px;margin-bottom:6px"><strong>Finalidade:</strong> ${o.finalidade}</div>
+    ${s.abordagemSugerida?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">ABORDAGEM SUGERIDA</div><div style="font-size:12.5px;color:var(--text2);margin-top:2px">${s.abordagemSugerida}</div></div>`:''}
+    ${s.comoConectarComPerfil?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">COMO CONECTAR COM O PERFIL DELA</div><div style="font-size:12.5px;color:var(--text2);margin-top:2px">${s.comoConectarComPerfil}</div></div>`:''}
+    ${s.fraseDeAbertura?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">FRASE DE ABERTURA</div><div style="font-size:12.5px;color:var(--accent);margin-top:2px;font-style:italic">"${s.fraseDeAbertura}"</div></div>`:''}
+    ${Array.isArray(s.roteiroSugerido)&&s.roteiroSugerido.length?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">ROTEIRO</div><ol style="margin:4px 0 0 18px;padding:0;font-size:12.5px;color:var(--text2)">${s.roteiroSugerido.map(step=>`<li style="margin-bottom:3px">${step}</li>`).join('')}</ol></div>`:''}
+    ${s.oQueEvitar?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--bad)">O QUE EVITAR</div><div style="font-size:12.5px;color:var(--text2);margin-top:2px">${s.oQueEvitar}</div></div>`:''}
+  </div>`;
+}
+function renderOrientacaoPanel(chatterId){
+  const f=S.chatterFichas[chatterId]||{};
+  const list=(f.orientacoes||[]).slice().reverse();
+  const body=`
+    <div class="field">
+      <label class="flabel">Material teórico que vou mostrar</label>
+      <textarea class="ftext" id="orient-material-${chatterId}" placeholder="Descreva exatamente o que você vai apresentar (ex: vídeo sobre upsell, texto sobre gatilhos de urgência...)"></textarea>
+    </div>
+    <div class="field">
+      <label class="flabel">Finalidade — o que você quer alcançar com isso</label>
+      <textarea class="ftext" id="orient-finalidade-${chatterId}" placeholder="Por que está mostrando isso agora e o que espera que mude..."></textarea>
+    </div>
+    <button class="btn btn-primary btn-block" id="orient-gerar-btn-${chatterId}" onclick="gerarOrientacaoIA('${chatterId}')">🤖 Gerar orientação assertiva</button>
+    <div id="orient-status-${chatterId}" style="font-size:11.5px;color:var(--text3);text-align:center;margin-top:6px"></div>
+    ${list.length?`<div style="margin-top:16px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Orientações já planejadas</div>
+      ${list.map(o=>orientacaoCardHtml(o)).join('')}
+    </div>`:''}
+  `;
+  return fichaAccordion('orientacao-'+chatterId,'','<div><div class="panel-title">🎯 Orientação</div><div class="panel-note">Planeje com a IA como aplicar essa orientação de forma assertiva pra essa pessoa</div></div>',body);
+}
+function attachOrientacaoSwipe(chatterId){
+  const container=document.getElementById('ficha-content');
+  if(!container)return;
+  attachSwipeToDelete(container,'.orient-card',id=>excluirOrientacao(chatterId,id),()=>renderFichaChatter(chatterId));
 }
 
 /* ===========================================================
@@ -8870,7 +9003,7 @@ function renderTesters(){
       const daysLabel=analysis.testDays.length?analysis.testDays.map(td=>dayName(td.date)).join(', '):'sem dias de teste ainda';
       const workDays=getTesterAllWorkDays(c.id);
       const contractDate=c.createdAt?fmtBR(c.createdAt.slice(0,10)):'—';
-      return`<div style="padding:12px;background:var(--surface);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;margin-bottom:9px">
+      return`<div class="tester-pending-row" data-key="${c.id}" style="padding:12px;background:var(--surface);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;margin-bottom:9px;touch-action:pan-y">
         <div style="display:flex;align-items:flex-start;gap:12px;cursor:pointer" onclick="document.getElementById('tester-select').value='${c.id}';renderTesterDetail('${c.id}')">
           <div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:${color};min-width:26px;flex-shrink:0">${isTop3?['🥇','🥈','🥉'][idx]:`${idx+1}º`}</div>
           <div style="flex:1;min-width:0">
@@ -8889,13 +9022,15 @@ function renderTesters(){
         ${decided.sort((a,b)=>(S.chatterFichas[b.id]?.testerDecisionDate||'').localeCompare(S.chatterFichas[a.id]?.testerDecisionDate||'')).map(c=>{
           const f=S.chatterFichas[c.id]||{};
           const isAprov=f.testerDecision==='aprovado';
-          return`<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px">
+          return`<div class="tester-decided-row" data-key="${c.id}" style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px;touch-action:pan-y">
             <div><strong>${c.name}</strong> <span style="color:${isAprov?'var(--ok)':'var(--bad)'}">${isAprov?'✅ aprovado':'❌ reprovado'}</span></div>
             <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
           </div>`;
         }).join('')}
       </div>`:''}
   `;
+  attachSwipeToDelete(el,'.tester-pending-row',id=>deleteChatter(id),renderTesters);
+  attachSwipeToDelete(el,'.tester-decided-row',id=>deleteChatter(id),renderTesters);
 }
 
 function renderTesterDetail(cid){
