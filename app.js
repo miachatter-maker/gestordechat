@@ -680,6 +680,7 @@ let S={
   hasSeededStudies:false,
   folgas:{},             // date -> [chatterId, ...] — manual day-off registrations
   reportDrafts:{},        // weekKey -> {field: value} — manual fields of weekly report
+  reportTesterHidden:{},  // weekKey -> [chatterId,...] — testers removidos manualmente (arrastar pro lado) da seção "Chatters em Teste" daquele relatório
   smartAlertsDone:{},    // dateKey -> [alertId, ...]
   alertNotes:{},         // 'date_alertId' -> text
   horaExtraSlots:{},     // weekKey -> [{...}]
@@ -3503,7 +3504,17 @@ function renderReport_Weekly(){
   }
 
   // ---- Section 3: Chatters em Teste ----
-  const testersRep=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
+  // Só entra quem já existia até o fim dessa semana (não dá pra "estar em
+  // teste" numa semana antes de ter sido cadastrado) e quem não foi removido
+  // manualmente (arrastar pro lado) desse relatório específico — cobre os
+  // casos que o filtro automático não pega.
+  const hiddenTestersWk=(S.reportTesterHidden&&S.reportTesterHidden[wkey])||[];
+  const testersRep=S.chatters.filter(c=>{
+    if(!(c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision))return false;
+    if(hiddenTestersWk.includes(c.id))return false;
+    if(c.createdAt&&c.createdAt.slice(0,10)>wkEnd)return false;
+    return true;
+  });
   const s3=document.getElementById('rpt-testers');
   if(s3){
     if(!testersRep.length){s3.innerHTML='<div style="color:var(--text3);font-size:12px">Nenhum tester em teste esta semana</div>';}
@@ -3515,7 +3526,7 @@ function renderReport_Weekly(){
         const decColor={aprovado:'var(--ok)',espera:'var(--warn)',reprovado:'var(--bad)','':'var(--text3)'}[decision];
         const daysInTest=c.createdAt?Math.floor((new Date()-new Date(c.createdAt))/86400000):0;
         let rev=0;wd.forEach(dd=>{S.models.forEach(m=>{rev+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(dd)}`])||0;});});
-        return`<div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;border-left:3px solid ${decColor}">
+        return`<div class="tester-report-row" data-key="${c.id}" style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;border-left:3px solid ${decColor};touch-action:pan-y">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <div style="font-weight:700;font-size:14px">${c.name}</div>
             <span class="pill" style="background:${decColor}22;color:${decColor};border:1px solid ${decColor}">${decLabel}</span>
@@ -3530,9 +3541,11 @@ function renderReport_Weekly(){
           </div>
           <div class="field"><label class="flabel">Principais erros</label><input class="finput" id="rpt-erroteste-${c.id}" value="${getReportDraft('erroteste-'+c.id)}" placeholder="Descreva os principais erros..."></div>
           ${decision===''?`<div style="font-size:11px;color:var(--text3);margin-top:4px">Decisão (Aprovar/Continuar/Reprovar) é definida na aba Testers</div>`:''}
+          <div style="font-size:10.5px;color:var(--text3);margin-top:6px">⇠ arraste pro lado se ele não estava nessa semana</div>
         </div>`;
       }).join('');
       testersRep.forEach(c=>applyReportToggleVisual(getReportDraft('evoltest-'+c.id),`rpt-evol-${c.id}`,['Boa','Média','Ruim']));
+      attachSwipeToDelete(s3,'.tester-report-row',id=>hideTesterFromReport(id),renderReport_Weekly);
     }
   }
 
@@ -3688,6 +3701,19 @@ function saveReportDraftField(key,value){
   if(!S.reportDrafts[wkey])S.reportDrafts[wkey]={};
   S.reportDrafts[wkey][key]=value;
   save();
+}
+// Arrastar pro lado na seção "Chatters em Teste" do relatório: não apaga o
+// tester (ele continua existindo normalmente em Testers/Fichas/etc), só some
+// dele NESSE relatório específico — pra quando o filtro automático (data de
+// cadastro) não pega o caso (ex: tester antigo que não estava ativo naquela
+// semana por outro motivo).
+function hideTesterFromReport(chatterId){
+  const wkey=getWeekKey();
+  if(!S.reportTesterHidden)S.reportTesterHidden={};
+  if(!S.reportTesterHidden[wkey])S.reportTesterHidden[wkey]=[];
+  if(!S.reportTesterHidden[wkey].includes(chatterId))S.reportTesterHidden[wkey].push(chatterId);
+  save();
+  toast('Removido desse relatório');
 }
 function applyReportToggleVisual(value,btnGroupPrefix,options){
   const colorMap={
