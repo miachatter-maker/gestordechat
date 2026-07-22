@@ -1151,6 +1151,23 @@ function renderWeeklyRanking(){
     const htTotal=getChatterWeekHighTicket(c.id,weekOffset).htTotal;
     return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal};
   });
+  // Produto mais vendido da semana (time inteiro): tally por tipo de high
+  // ticket (Personalizado/Foto/Vídeo/Mimo) detectado nos relatórios colados.
+  const produtoTally={};
+  chatters.forEach(c=>{
+    const f=S.chatterFichas[c.id];
+    const analytics=f?.analytics?.weeklyData||{};
+    getWeekDates(weekOffset).forEach(d=>{
+      const a=analytics[fmt(d)];
+      (a&&a.highTicketItems||[]).forEach(item=>{
+        if(!produtoTally[item.tipo])produtoTally[item.tipo]={count:0,total:0};
+        produtoTally[item.tipo].count++;
+        produtoTally[item.tipo].total+=item.val;
+      });
+    });
+  });
+  const produtoSorted=Object.entries(produtoTally).sort((a,b)=>b[1].count-a[1].count);
+  const produtoMaisVendido=produtoSorted.length?{name:`${HT_TIPO_ICON[produtoSorted[0][0]]||'💎'} ${produtoSorted[0][0]}`,val:`${produtoSorted[0][1].count} venda${produtoSorted[0][1].count>1?'s':''} · ${money(produtoSorted[0][1].total)}`}:null;
   const top=(key,fmtFn)=>{
     const sorted=[...rows].filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
     if(!sorted.length)return null;
@@ -1171,6 +1188,7 @@ function renderWeeklyRanking(){
     {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
     {label:'💎 Mais high ticket',data:top('htTotal',v=>money(v))},
+    {label:'🏆 Produto mais vendido',data:produtoMaisVendido},
     {label:'📈 Melhora da semana',data:topMelhora},
   ].filter(x=>x.data);
   if(!cards.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Sem dados suficientes essa semana ainda</div>';return;}
@@ -4500,6 +4518,23 @@ function toggleExtraDone(shiftId,slotIdx){
      HH:MM - R$ XX,XX
      Total de comissões: R$ XX,XX
    =========================================================== */
+// Remove acentos e caixa pra comparar nomes com tolerância — "Jose Martins"
+// (sem acento, como às vezes vem no relatório colado) precisa casar com o
+// chatter cadastrado como "José Martins".
+function normalizeName(s){
+  return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+}
+// Categorias de venda "high ticket" reconhecidas quando a linha da venda
+// vem com um link + rótulo no final (ex: "15:38 - R$ 800,00 - https://... - Personalizado").
+const HT_TIPO_ICON={Personalizado:'🎨',Foto:'📸',Vídeo:'🎥',Mimo:'🎁'};
+function normalizeHighTicketTipo(raw){
+  const n=normalizeName(raw);
+  if(n.startsWith('personaliz'))return'Personalizado';
+  if(n.startsWith('foto'))return'Foto';
+  if(n.startsWith('video'))return'Vídeo';
+  if(n.startsWith('mimo'))return'Mimo';
+  return(raw||'').trim();
+}
 function renderTeamReports(){
   // Just ensure the input area is visible — processing happens on button click
 }
@@ -4534,16 +4569,33 @@ function parseTeamReportsCore(forceExtra){
       const modelName=mm[1].trim();
       const shiftStart=mm[2],shiftEnd=mm[3];
       const body=mm[4];
-      const sales=[],saleTimes=[];
+      const sales=[],saleTimes=[],highTicketItems=[];
       const saleRegex=/(\d{2}:\d{2})\s*-\s*R\$\s*([\d.,]+)/g;
+      const saleMatches=[];
       let sm;
       while((sm=saleRegex.exec(body))!==null){
-        const val=parseFloat(sm[2].replace(/\./g,'').replace(',','.'));
-        if(val>0){sales.push(val);saleTimes.push(sm[1]);}
+        saleMatches.push({time:sm[1],valRaw:sm[2],idx:sm.index,endIdx:sm.index+sm[0].length});
       }
+      const totalIdxInBody=body.search(/Total de comiss[õo]es/i);
+      saleMatches.forEach((sMatch,i)=>{
+        const val=parseFloat(sMatch.valRaw.replace(/\./g,'').replace(',','.'));
+        if(!(val>0))return;
+        sales.push(val);saleTimes.push(sMatch.time);
+        // Vendas "high ticket" vêm com um link + categoria colados logo depois
+        // do valor (ex: "- https://... - Personalizado"), antes da próxima
+        // venda ou do "Total de comissões". Se achar essa marcação, guarda o
+        // tipo (Personalizado/Foto/Vídeo/Mimo) pra análises e ranking.
+        const nextIdx=i+1<saleMatches.length?saleMatches[i+1].idx:(totalIdxInBody>=0?totalIdxInBody:body.length);
+        const tail=body.slice(sMatch.endIdx,nextIdx);
+        const catMatch=tail.match(/\b(Personalizad[oa]s?|Fotos?|V[ií]deos?|Mimos?)\b/i);
+        if(catMatch){
+          const linkMatch=tail.match(/https?:\/\/\S+/);
+          highTicketItems.push({time:sMatch.time,val,tipo:normalizeHighTicketTipo(catMatch[1]),link:linkMatch?linkMatch[0]:''});
+        }
+      });
       const totalMatch=body.match(/Total de comiss[õo]es\s*:\s*R\$\s*([\d.,]+)/i);
       const total=totalMatch?parseFloat(totalMatch[1].replace(/\./g,'').replace(',','.')):undefined;
-      if(modelName)modelBlocks.push({name:modelName,sales,saleTimes,shiftStart,shiftEnd,total});
+      if(modelName)modelBlocks.push({name:modelName,sales,saleTimes,shiftStart,shiftEnd,total,highTicketItems});
     }
     blocks.push({dateRaw,name,modelBlocks,rawSales:[]});
   });
@@ -4559,9 +4611,9 @@ function parseTeamReportsCore(forceExtra){
   let totalEquipe=0;
 
   const resultsHtml=blocks.map(block=>{
-    const chatter=S.chatters.find(c=>c.name.toLowerCase()===block.name.toLowerCase())||
-      S.chatters.find(c=>block.name.toLowerCase().includes(c.name.toLowerCase().split(' ')[0]))||
-      S.chatters.find(c=>c.name.toLowerCase().includes(block.name.toLowerCase().split(' ')[0]));
+    const chatter=S.chatters.find(c=>normalizeName(c.name)===normalizeName(block.name))||
+      S.chatters.find(c=>normalizeName(block.name).includes(normalizeName(c.name).split(' ')[0]))||
+      S.chatters.find(c=>normalizeName(c.name).includes(normalizeName(block.name).split(' ')[0]));
 
     let dateKey=todayKey();
     if(block.dateRaw){
@@ -4575,11 +4627,13 @@ function parseTeamReportsCore(forceExtra){
     let chatterTotal=0,extraTotal=0;
     let anyMerge=false; // true se o usuário escolheu SOMAR em algum conflito — funde com o que já existia em vez de substituir as métricas do dia
     const allSales=[];
+    const allHighTicketItems=[];
     const modelResults=block.modelBlocks.map(mb=>{
       const total=mb.total||mb.sales.reduce((s,v)=>s+v,0);
       const isExtra=forceExtra||/hora extra/i.test(mb.name);
       if(isExtra)extraTotal+=total; else chatterTotal+=total;
       mb.sales.forEach((v,i)=>allSales.push({val:v,time:mb.saleTimes[i]||null,isExtra}));
+      (mb.highTicketItems||[]).forEach(hti=>allHighTicketItems.push({...hti,model:mb.name.replace(/hora extra/gi,'').trim()}));
 
       const cleanName=mb.name.replace(/hora extra/gi,'').trim();
       // Try multiple matching strategies:
@@ -4719,9 +4773,10 @@ function parseTeamReportsCore(forceExtra){
           extraTotal:combExtraTotal,
           shiftHours:prevDay.shiftHours+shiftHours,
           saleTimes:[...(prevDay.saleTimes||[]),...saleTsAll].sort((x,y)=>x-y),
+          highTicketItems:[...(prevDay.highTicketItems||[]),...allHighTicketItems],
         };
       } else {
-        dayEntry={ticketMedio,vendasPorHora,highTicketPct,highTicketTotal,maxGapMin,totalVendas:allSalesForMetrics.length,chatterTotal,extraTotal,shiftHours,saleTimes:saleTsAll};
+        dayEntry={ticketMedio,vendasPorHora,highTicketPct,highTicketTotal,maxGapMin,totalVendas:allSalesForMetrics.length,chatterTotal,extraTotal,shiftHours,saleTimes:saleTsAll,highTicketItems:allHighTicketItems};
       }
       a.weeklyData[dateKey]=dayEntry;
       // Auto-fill ficha técnica from analytics
@@ -5265,6 +5320,24 @@ function renderWeeklyPerformanceChart(chatterId){
   const weekTotal=days.reduce((s,d)=>s+d.total,0);
   const withTicket=days.filter(d=>d.a&&d.a.ticketMedio>0);
   const avgTicket=withTicket.length?withTicket.reduce((s,d)=>s+d.a.ticketMedio,0)/withTicket.length:0;
+  // High ticket vendido essa semana, por tipo (Personalizado/Foto/Vídeo/Mimo) —
+  // vem das vendas marcadas com link+categoria no relatório colado.
+  const htTally={};
+  days.forEach(d=>{
+    (d.a&&d.a.highTicketItems||[]).forEach(item=>{
+      if(!htTally[item.tipo])htTally[item.tipo]={count:0,total:0};
+      htTally[item.tipo].count++;
+      htTally[item.tipo].total+=item.val;
+    });
+  });
+  const htEntries=Object.entries(htTally).sort((a,b)=>b[1].total-a[1].total);
+  const htHtml=htEntries.length?`<div style="margin-top:10px">
+    <div style="font-size:10px;color:var(--text3);margin-bottom:6px">💎 High ticket vendido essa semana</div>
+    ${htEntries.map(([tipo,v])=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;border-bottom:1px solid var(--line)">
+      <span>${HT_TIPO_ICON[tipo]||'💎'} ${tipo}</span>
+      <span style="font-family:var(--font-mono);font-weight:700">${v.count}x · ${money(v.total)}</span>
+    </div>`).join('')}
+  </div>`:'';
   return`
     <div style="display:flex;gap:6px;margin-bottom:12px">${bars}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -5276,7 +5349,8 @@ function renderWeeklyPerformanceChart(chatterId){
         <div style="font-size:9px;color:var(--text3)">Ticket médio</div>
         <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${moneyShort(avgTicket)}</div>
       </div>
-    </div>`;
+    </div>
+    ${htHtml}`;
 }
 function renderFichaChatter(chatterId){
   const el=document.getElementById('ficha-content');if(!el)return;
