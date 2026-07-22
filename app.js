@@ -1500,6 +1500,23 @@ function getSmartAlerts(){
     });
   });
 
+  // Orientações agendadas com horário marcado (via quadro Orientação da
+  // Ficha) — avisa a partir de 24h antes, igual às tarefas com prazo acima.
+  // Só pega orientações que TÊM .time (as agendadas manualmente); as
+  // antigas com só "shift" não entram aqui, continuam só na Agenda.
+  S.orientations.filter(o=>o.time&&o.date).forEach(o=>{
+    const dt=new Date(`${o.date}T${o.time}:00`);
+    if(isNaN(dt.getTime()))return;
+    if(dt<=in24h){
+      const overdue=dt<now;
+      const c=S.chatters.find(ch=>ch.id===o.chatterId);
+      alerts.push({id:`orient-agendada-${o.id}`,type:overdue?'bad':'warn',icon:'🎯',
+        title:`${overdue?'Atrasada: ':''}Orientação com ${c?c.name:'?'}`,
+        body:`${o.text} — prevista para ${o.date.split('-').reverse().join('/')} às ${o.time}`,
+        chatterId:o.chatterId,priority:overdue?0:1});
+    }
+  });
+
   S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c)).forEach(c=>{
     const id=c.id;
     const target=parseFloat(goals[id])||0;
@@ -2951,7 +2968,7 @@ function renderOrientList(){
   else{
     html+='<div class="sectionlb">hoje</div>';
     html+=todayO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);
-      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y"><div class="logdate">${c?c.name:'?'} · turno ${o.shift}</div><div class="logtext">${o.text}</div>
+      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y"><div class="logdate">${c?c.name:'?'} · ${o.time?`⏰ ${o.time}`:`turno ${o.shift}`}</div><div class="logtext">${o.text}</div>
       ${o.goal?`<div style="margin-top:5px;font-family:var(--font-mono);font-size:12px;color:var(--ok)">meta: ${money(parseFloat(o.goal))}</div>`:''}
       <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="deleteOrientation('${o.id}')">✕</button></div>`;
     }).join('');
@@ -5606,9 +5623,9 @@ function stopMapeamentoRecording(silent){
   }
 }
 
-const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista estruturada de 20 perguntas em 6 blocos (História, Motivação, Tomada de decisão, Relação com liderança, Trabalho em equipe, Ambição) e deve produzir um mapeamento de performance completo da pessoa entrevistada.
+const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista estruturada de 11 perguntas curtas e assertivas em 6 blocos (Vida pessoal, Autoridade, Motivação real, Como aprende de verdade, Personalidade e talento, Ambição) — poucas perguntas, mas cada uma pensada pra revelar algo específico e difícil de fingir: história pessoal real, que tipo de autoridade funciona com essa pessoa, o que a motiva de verdade no dia a dia, como ela aprende de fato, um traço real de personalidade e um talento genuíno — e deve produzir um mapeamento de performance completo da pessoa entrevistada.
 
-Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito.
+Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real (pra preencher comoMotivar de forma específica, não genérica).
 
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
 {
@@ -5798,9 +5815,10 @@ function excluirOrientacao(chatterId,orientId){
   toast('Orientação removida');
   renderFichaChatter(chatterId);
 }
-function orientacaoCardHtml(o){
+function orientacaoCardHtml(chatterId,o){
   const s=o.sugestao||{};
   const dateBR=o.date?o.date.split('-').reverse().join('/'):'';
+  const scheduledBadge=o.scheduledDate?`<div style="margin-top:8px;font-size:11px;color:var(--ok);font-weight:700">📅 Agendado para ${o.scheduledDate.split('-').reverse().join('/')} às ${o.scheduledTime}</div>`:'';
   return`<div class="orient-card" data-key="${o.id}" style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;touch-action:pan-y">
     <div style="font-size:11px;color:var(--text3);margin-bottom:6px">${dateBR}</div>
     <div style="font-size:12.5px;margin-bottom:6px"><strong>Material:</strong> ${o.material}</div>
@@ -5810,7 +5828,41 @@ function orientacaoCardHtml(o){
     ${s.fraseDeAbertura?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">FRASE DE ABERTURA</div><div style="font-size:12.5px;color:var(--accent);margin-top:2px;font-style:italic">"${s.fraseDeAbertura}"</div></div>`:''}
     ${Array.isArray(s.roteiroSugerido)&&s.roteiroSugerido.length?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">ROTEIRO</div><ol style="margin:4px 0 0 18px;padding:0;font-size:12.5px;color:var(--text2)">${s.roteiroSugerido.map(step=>`<li style="margin-bottom:3px">${step}</li>`).join('')}</ol></div>`:''}
     ${s.oQueEvitar?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--bad)">O QUE EVITAR</div><div style="font-size:12.5px;color:var(--text2);margin-top:2px">${s.oQueEvitar}</div></div>`:''}
+    ${scheduledBadge}
+    <button class="btn btn-ghost btn-xs" style="margin-top:8px" onclick="event.stopPropagation();toggleOrientSchedule('${o.id}')">📅 ${o.scheduledDate?'Reagendar':'Agendar horário'}</button>
+    <div id="orient-schedule-${o.id}" style="display:none;gap:8px;margin-top:8px;align-items:center">
+      <input type="date" class="finput" id="orient-sched-date-${o.id}" value="${o.scheduledDate||todayKey()}" style="flex:1">
+      <input type="time" class="finput" id="orient-sched-time-${o.id}" value="${o.scheduledTime||''}" style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();agendarOrientacao('${chatterId}','${o.id}')">OK</button>
+    </div>
   </div>`;
+}
+function toggleOrientSchedule(orientId){
+  const el=document.getElementById('orient-schedule-'+orientId);
+  if(!el)return;
+  el.style.display=el.style.display==='none'?'flex':'none';
+}
+// Agenda a orientação (data+horário) e reflete em 3 lugares que já existem no
+// app: Agenda (S.orientations, aba "Agenda"), quadro da Semana (S.weekOrients)
+// e alerta no painel Home (getSmartAlerts, via S.orientations com .time). Se
+// já estava agendada antes, substitui o agendamento anterior em vez de duplicar.
+function agendarOrientacao(chatterId,orientId){
+  const f=S.chatterFichas[chatterId];
+  const o=f&&f.orientacoes&&f.orientacoes.find(x=>x.id===orientId);
+  if(!o)return;
+  const date=document.getElementById('orient-sched-date-'+orientId)?.value;
+  const time=document.getElementById('orient-sched-time-'+orientId)?.value;
+  if(!date||!time){toast('⚠️ Escolha data e horário');return;}
+  const label=o.material.length>60?o.material.slice(0,60)+'…':o.material;
+  S.orientations=S.orientations.filter(x=>x.linkedOrientId!==orientId);
+  S.weekOrients=S.weekOrients.filter(x=>x.linkedOrientId!==orientId);
+  S.orientations.push({id:'o'+Date.now(),chatterId,text:label,date,time,shift:'',goal:'',linkedOrientId:orientId});
+  S.weekOrients.push({id:'wo'+Date.now(),chatterId,text:label,done:false,doneWeek:null,date,time,linkedOrientId:orientId});
+  o.scheduledDate=date;
+  o.scheduledTime=time;
+  save();
+  toast('📅 Agendado! Já aparece na Agenda, no quadro da Semana e vai avisar no painel perto do horário.');
+  renderFichaChatter(chatterId);
 }
 function renderOrientacaoPanel(chatterId){
   const f=S.chatterFichas[chatterId]||{};
@@ -5828,7 +5880,7 @@ function renderOrientacaoPanel(chatterId){
     <div id="orient-status-${chatterId}" style="font-size:11.5px;color:var(--text3);text-align:center;margin-top:6px"></div>
     ${list.length?`<div style="margin-top:16px">
       <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Orientações já planejadas</div>
-      ${list.map(o=>orientacaoCardHtml(o)).join('')}
+      ${list.map(o=>orientacaoCardHtml(chatterId,o)).join('')}
     </div>`:''}
   `;
   return fichaAccordion('orientacao-'+chatterId,'','<div><div class="panel-title">🎯 Orientação</div><div class="panel-note">Planeje com a IA como aplicar essa orientação de forma assertiva pra essa pessoa</div></div>',body);
@@ -5841,7 +5893,7 @@ function attachOrientacaoSwipe(chatterId){
 
 /* ===========================================================
    MAPEAMENTO DE TRIAGEM — diferente do Mapeamento de Performance
-   (que analisa 1 chatter já contratado com roteiro de 20 perguntas).
+   (que analisa 1 chatter já contratado com roteiro de 11 perguntas).
    Esse aqui é usado numa CALL EM GRUPO com vários candidatos ainda não
    contratados: você fala o nome de cada um e pergunta onde mora, o que
    faz, se conhece o mercado e a pretensão salarial. A IA transcreve tudo
@@ -7871,7 +7923,7 @@ function renderWeekOrients(){
       <button onclick="toggleWeekOrient('${o.id}')" style="width:20px;height:20px;border-radius:5px;border:2px solid ${o.done?'var(--ok)':'var(--line-strong)'};background:${o.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;margin-top:1px">${o.done?'<span style="color:#fff">✓</span>':''}</button>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;${o.done?'text-decoration:line-through;color:var(--text3)':''}">${o.text}${o.auto?' <span class="pill pill-info" style="font-size:9px">auto</span>':''}</div>
-        ${c?`<div style="font-size:10.5px;color:var(--accent);margin-top:1px">👤 ${c.name}</div>`:''}
+        ${c?`<div style="font-size:10.5px;color:var(--accent);margin-top:1px">👤 ${c.name}${o.time?` · ⏰ ${o.time}${o.date?' ('+o.date.split('-').reverse().join('/')+')':''}`:''}</div>`:''}
       </div>
       <button onclick="removeWeekOrient('${o.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
     </div>`;
