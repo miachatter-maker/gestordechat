@@ -17,11 +17,48 @@ const AI_PROXY_URL='/api/claude';
 function aiQuotaError(data){
   const raw=typeof data?.error==='string'?data.error:(data?.error?.message||'');
   if(/quota|rate.?limit/i.test(raw)){
-    const err=new Error('Limite de uso da IA no momento — costuma voltar sozinho em cerca de 1 minuto.');
+    // O proxy (api/claude.js) já calcula o tempo real de espera (extraído da
+    // própria resposta do Gemini) e manda numa frase tipo "espere cerca de
+    // 47s" — extrai esse número aqui pra alimentar uma contagem regressiva
+    // real na tela, em vez de um "tente de novo em ~1 minuto" genérico.
+    const m=raw.match(/(\d+)\s*s\b/i);
+    const err=new Error(raw||'Limite de uso da IA no momento — costuma voltar sozinho em cerca de 1 minuto.');
     err.quota=true;
+    err.waitSeconds=m?parseInt(m[1],10):60;
     return err;
   }
   return null;
+}
+// Contagem regressiva ao vivo (atualiza a cada segundo) pra mostrar EXATAMENTE
+// quanto falta até a IA liberar de novo, em vez de um texto estático parado.
+// mode 'panel' (usado no ChatLab, dentro de áreas de resultado maiores) monta
+// um cartão; sem isso, escreve como texto simples (usado nas linhas de status
+// do Mapeamento/Triagem/Orientação).
+function renderAIWaitCountdown(elId,waitSeconds,opts){
+  const el=document.getElementById(elId);
+  if(!el)return;
+  if(el._aiCountdownIv)clearInterval(el._aiCountdownIv);
+  let remaining=Math.max(1,Math.round(waitSeconds||60));
+  const prefix=opts?.prefix||'⏳ Limite de uso da IA no momento';
+  const suffix=opts?.suffix||'';
+  const panel=!!opts?.panel;
+  const clockStr=()=>{const mm=Math.floor(remaining/60),ss=remaining%60;return mm>0?`${mm}:${String(ss).padStart(2,'0')}`:`${ss}s`;};
+  const paint=()=>{
+    const line=`${prefix} — volta em <span style="font-family:var(--font-mono);font-weight:800">${clockStr()}</span>${suffix?' · '+suffix:''}`;
+    if(panel)el.innerHTML=`<div class="panel" style="border-color:var(--warn)"><div style="color:var(--warn);font-size:12.5px;font-weight:700">${line}</div></div>`;
+    else el.innerHTML=`<span style="color:var(--warn)">${line}</span>`;
+  };
+  paint();
+  el._aiCountdownIv=setInterval(()=>{
+    remaining--;
+    if(remaining<=0){
+      clearInterval(el._aiCountdownIv);
+      const doneLine=`✅ Já deve ter liberado — pode tentar de novo${suffix?' ('+suffix+')':''}.`;
+      el.innerHTML=panel?`<div class="panel" style="border-color:var(--ok)"><div style="color:var(--ok);font-size:12.5px;font-weight:700">${doneLine}</div></div>`:`<span style="color:var(--ok)">${doneLine}</span>`;
+      return;
+    }
+    paint();
+  },1000);
 }
 const FIREBASE_DOC_ID='central-dados';
 const SCHEMA_VERSION=2; // bump this when S structure changes to trigger migrations
@@ -5721,16 +5758,21 @@ async function gerarMapeamentoIA(){
     // no início da função) — então em QUALQUER erro, inclusive limite de uso da IA,
     // ela não se perde. Só avisa diferente quando for especificamente limite de uso.
     if(e.quota){
-      toast('⏳ Limite de uso da IA no momento — sua transcrição já está salva, tente gerar de novo em ~1 minuto.');
+      toast('⏳ Limite de uso da IA no momento — sua transcrição já está salva.');
     }else{
       toast('⚠️ Erro ao gerar mapeamento: '+e.message+' — sua transcrição continua salva.');
     }
     window._mapLastErrQuota=!!e.quota;
-    window._mapLastErrMsg=e.message;
+    window._mapLastErrWait=e.waitSeconds;
+    window._mapLastErrMsg=e.quota?'':e.message;
   }finally{
     if(btn){btn.disabled=false;btn.textContent='🤖 Gerar Mapeamento com IA';}
-    if(st)st.textContent=window._mapLastErrMsg?`⏳ ${window._mapLastErrMsg} Sua transcrição está salva — feche e abra esse mapeamento de novo quando quiser tentar.`:'';
-    window._mapLastErrMsg=null;
+    if(window._mapLastErrQuota&&st){
+      renderAIWaitCountdown('mapeamento-status',window._mapLastErrWait,{prefix:'⏳ Limite de uso da IA',suffix:'transcrição já está salva'});
+    }else if(st){
+      st.textContent=window._mapLastErrMsg?`⚠️ ${window._mapLastErrMsg} Sua transcrição está salva — feche e abra esse mapeamento de novo quando quiser tentar.`:'';
+    }
+    window._mapLastErrMsg=null;window._mapLastErrQuota=false;window._mapLastErrWait=null;
   }
 }
 
@@ -5832,14 +5874,17 @@ async function gerarOrientacaoIA(chatterId){
     // O material/finalidade digitados continuam no formulário (não recarrega
     // a página) — só o aviso muda quando é especificamente limite de uso da IA.
     if(e.quota){
-      toast('⏳ Limite de uso da IA no momento — o que você escreveu continua no formulário, tente de novo em ~1 minuto.');
+      toast('⏳ Limite de uso da IA no momento — o que você escreveu continua no formulário.');
     }else{
       toast('⚠️ Erro ao gerar orientação: '+e.message);
     }
     const btn2=document.getElementById('orient-gerar-btn-'+chatterId);
     const st2=document.getElementById('orient-status-'+chatterId);
     if(btn2){btn2.disabled=false;btn2.textContent='🤖 Gerar orientação assertiva';}
-    if(st2)st2.textContent=e.quota?'⏳ Limite de uso da IA no momento. O texto continua aqui — tente de novo em ~1 minuto.':'';
+    if(st2){
+      if(e.quota)renderAIWaitCountdown('orient-status-'+chatterId,e.waitSeconds,{prefix:'⏳ Limite de uso da IA',suffix:'texto continua no formulário'});
+      else st2.textContent='';
+    }
   }
 }
 function excluirOrientacao(chatterId,orientId){
@@ -6090,15 +6135,21 @@ async function gerarTriagemIA(){
     // A transcrição já foi salva em S.triagemDraftTranscript (stopTriagemRecording no
     // início da função) — em qualquer erro, inclusive limite de uso da IA, ela não se perde.
     if(e.quota){
-      toast('⏳ Limite de uso da IA no momento — sua transcrição já está salva, tente gerar de novo em ~1 minuto.');
+      toast('⏳ Limite de uso da IA no momento — sua transcrição já está salva.');
     }else{
       toast('⚠️ Erro ao gerar triagem: '+e.message+' — sua transcrição continua salva.');
     }
-    window._triLastErrMsg=e.message;
+    window._triLastErrQuota=!!e.quota;
+    window._triLastErrWait=e.waitSeconds;
+    window._triLastErrMsg=e.quota?'':e.message;
   }finally{
     if(btn){btn.disabled=false;btn.textContent='🤖 Gerar perfis com IA';}
-    if(st)st.textContent=window._triLastErrMsg?`⏳ ${window._triLastErrMsg} Sua transcrição está salva — feche e abra a triagem de novo quando quiser tentar.`:'';
-    window._triLastErrMsg=null;
+    if(window._triLastErrQuota&&st){
+      renderAIWaitCountdown('triagem-status',window._triLastErrWait,{prefix:'⏳ Limite de uso da IA',suffix:'transcrição já está salva'});
+    }else if(st){
+      st.textContent=window._triLastErrMsg?`⚠️ ${window._triLastErrMsg} Sua transcrição está salva — feche e abra a triagem de novo quando quiser tentar.`:'';
+    }
+    window._triLastErrMsg=null;window._triLastErrQuota=false;window._triLastErrWait=null;
   }
 }
 
@@ -8169,7 +8220,15 @@ async function clFetchAI(system,userContent,maxTokens){
     body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,system,messages:[{role:'user',content:userContent}]})
   });
   const data=await res.json();
-  return data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+  const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+  if(!text){
+    // Se for especificamente limite de uso da IA, joga o erro real (com o
+    // tempo de espera calculado pelo proxy) pra quem chamou poder mostrar
+    // a contagem regressiva exata — em vez de só devolver texto vazio.
+    const qerr=aiQuotaError(data);
+    if(qerr)throw qerr;
+  }
+  return text;
 }
 async function clRunCopiloto(conv){
   let lastErr=null;
@@ -8180,7 +8239,13 @@ async function clRunCopiloto(conv){
       const s=text.indexOf('{'),e=text.lastIndexOf('}');
       if(s<0||e<0)throw new Error('Resposta cortada, tentando de novo…');
       return JSON.parse(text.slice(s,e+1));
-    }catch(err){lastErr=err;if(attempt===0)await new Promise(r=>setTimeout(r,1500));}
+    }catch(err){
+      lastErr=err;
+      // Se já é erro de limite de uso, já sabemos o tempo real de espera —
+      // tentar de novo em 1.5s só gastaria mais uma requisição da cota.
+      if(err.quota)break;
+      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+    }
   }
   throw lastErr;
 }
@@ -8188,7 +8253,10 @@ function renderClCopilotoResult(state,obj){
   const el=document.getElementById('cl-copiloto');
   if(!el)return;
   if(state==='loading'){el.innerHTML='<div class="panel" style="border-left:3px solid var(--accent)"><div style="font-size:12.5px;color:var(--text2)">🎯 Copiloto tático calculando…</div></div>';return;}
-  if(state==='error'){el.innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:12.5px">❌ Copiloto tático: ${obj?.message||'erro'}</div></div>`;return;}
+  if(state==='error'){
+    if(obj?.quota){renderAIWaitCountdown('cl-copiloto',obj.waitSeconds,{prefix:'⏳ Copiloto tático — limite de uso da IA',panel:true});return;}
+    el.innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:12.5px">❌ Copiloto tático: ${obj?.message||'erro'}</div></div>`;return;
+  }
   const t=obj.temperatura||{},a=obj.arquetipo||{},g=obj.gatilhoRecomendado||{};
   const tCol=t.nivel>=9?'var(--ok)':t.nivel>=7?'var(--warn)':'var(--text3)';
   el.innerHTML=`<div class="panel" style="border-left:3px solid var(--accent)">
@@ -8344,7 +8412,17 @@ async function rodarChatLab(){
     // (sem a seção Resumo Executivo, que é sempre a última do relatório).
     let text='',lastErr=null;
     for(let attempt=0;attempt<2;attempt++){
-      text=await clFetchAI(system,prompt,4000);
+      try{
+        text=await clFetchAI(system,prompt,4000);
+      }catch(err){
+        lastErr=err;
+        text='';
+        // Erro de limite de uso já vem com o tempo real de espera — tentar
+        // de novo em 1.5s só gastaria mais uma requisição da cota.
+        if(err.quota)break;
+        if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+        continue;
+      }
       if(text&&/## 🎯 Resumo Executivo/i.test(text))break;
       lastErr=new Error('Resposta incompleta da IA (provavelmente limite de uso da IA no momento — espere um minuto e tente de novo)');
       text='';
@@ -8378,7 +8456,11 @@ async function rodarChatLab(){
     renderChatLabRanking();
     toast('✅ Análise salva — aparece na Evolução');
   }catch(err){
-    document.getElementById('cl-resultado').innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:13px">❌ ${err.message}</div><div style="font-size:12px;color:var(--text3);margin-top:5px">Verifique a conexão e tente novamente.</div></div>`;
+    if(err.quota){
+      renderAIWaitCountdown('cl-resultado',err.waitSeconds,{prefix:'⏳ Análise completa — limite de uso da IA',panel:true,suffix:'a conversa colada continua no campo'});
+    }else{
+      document.getElementById('cl-resultado').innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:13px">❌ ${err.message}</div><div style="font-size:12px;color:var(--text3);margin-top:5px">Verifique a conexão e tente novamente.</div></div>`;
+    }
   }finally{
     btn.disabled=false;btn.textContent='⚡ Analisar';
   }
@@ -9397,9 +9479,16 @@ function renderTesters(){
         ${decided.sort((a,b)=>(S.chatterFichas[b.id]?.testerDecisionDate||'').localeCompare(S.chatterFichas[a.id]?.testerDecisionDate||'')).map(c=>{
           const f=S.chatterFichas[c.id]||{};
           const isAprov=f.testerDecision==='aprovado';
+          // Faturamento continua visível independente da decisão — inclusive
+          // reprovado — pra sempre poder consultar quanto essa pessoa gerou
+          // no período de teste, mesmo depois de reprovada.
+          const analysis=getTesterAnalysis(c.id);
           return`<div class="tester-decided-row" data-key="${c.id}" style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px;touch-action:pan-y">
             <div><strong>${c.name}</strong> <span style="color:${isAprov?'var(--ok)':'var(--bad)'}">${isAprov?'✅ aprovado':'❌ reprovado'}</span></div>
-            <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
+            <div style="text-align:right">
+              <div style="font-weight:700;font-family:var(--font-mono)">${money(analysis.totalRev)}</div>
+              <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
+            </div>
           </div>`;
         }).join('')}
       </div>`:''}
