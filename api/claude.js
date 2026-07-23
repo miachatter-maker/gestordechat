@@ -7,11 +7,13 @@
 // o pedido/resposta para o formato do Gemini por dentro, então NADA no
 // app.js precisa mudar.
 
-// gemini-2.5-flash-lite tem cota gratuita bem maior que gemini-2.5-flash
-// (mais requisições por minuto e por dia, sem custo, sem cartão) — trocado
-// porque o app estava batendo no limite de 20 req/min do flash normal com
-// uso leve de teste (Mapeamento, ChatLab, Orientação dividem a mesma cota).
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+// gemini-2.0-flash tem cota gratuita maior que gemini-2.5-flash (mais
+// requisições por minuto e por dia, sem custo, sem cartão) — trocado porque
+// o app estava batendo no limite de 20 req/min do flash normal com uso leve
+// de teste (Mapeamento, ChatLab, Orientação dividem a mesma cota).
+// Obs: 'gemini-2.5-flash-lite' foi tentado primeiro mas essa chave/projeto
+// não tem acesso a ele ("no longer available to new users").
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
 // Se o Gemini responder 429 (limite momentâneo), tenta de novo sozinho
 // antes de devolver erro pro app — evita que uma janela de poucos segundos
