@@ -8,6 +8,21 @@ const DB='gestorpro_v4';
 // Se você hospedar o front-end em outro domínio que não seja o mesmo da função Vercel,
 // troque para a URL completa, ex: 'https://seu-projeto.vercel.app/api/claude'.
 const AI_PROXY_URL='/api/claude';
+// O free tier do Gemini (usado pelo AI_PROXY_URL) tem limite de 20
+// requisições/minuto, compartilhado entre TODAS as telas de IA do app
+// (Mapeamento, Triagem, Orientação, ChatLab...). Quando bate no limite, a
+// API volta com data.error como STRING (não objeto) contendo "quota" — essa
+// função detecta esse caso específico pra dar um aviso claro (em vez de erro
+// genérico) e sinalizar que o texto já digitado/gravado continua salvo.
+function aiQuotaError(data){
+  const raw=typeof data?.error==='string'?data.error:(data?.error?.message||'');
+  if(/quota|rate.?limit/i.test(raw)){
+    const err=new Error('Limite de uso da IA no momento — costuma voltar sozinho em cerca de 1 minuto.');
+    err.quota=true;
+    return err;
+  }
+  return null;
+}
 const FIREBASE_DOC_ID='central-dados';
 const SCHEMA_VERSION=2; // bump this when S structure changes to trigger migrations
 
@@ -5676,7 +5691,7 @@ async function gerarMapeamentoIA(){
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
-    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    if(!text)throw aiQuotaError(data)||new Error('Resposta vazia da IA');
     text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
     const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
     if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
@@ -5702,10 +5717,20 @@ async function gerarMapeamentoIA(){
     renderFichaChatter(chatterId);
   }catch(e){
     console.error('Erro ao gerar mapeamento',e);
-    toast('⚠️ Erro ao gerar mapeamento: '+e.message);
+    // A transcrição já foi salva em mapeamentoDraftTranscript (stopMapeamentoRecording
+    // no início da função) — então em QUALQUER erro, inclusive limite de uso da IA,
+    // ela não se perde. Só avisa diferente quando for especificamente limite de uso.
+    if(e.quota){
+      toast('⏳ Limite de uso da IA no momento — sua transcrição já está salva, tente gerar de novo em ~1 minuto.');
+    }else{
+      toast('⚠️ Erro ao gerar mapeamento: '+e.message+' — sua transcrição continua salva.');
+    }
+    window._mapLastErrQuota=!!e.quota;
+    window._mapLastErrMsg=e.message;
   }finally{
     if(btn){btn.disabled=false;btn.textContent='🤖 Gerar Mapeamento com IA';}
-    if(st)st.textContent='';
+    if(st)st.textContent=window._mapLastErrMsg?`⏳ ${window._mapLastErrMsg} Sua transcrição está salva — feche e abra esse mapeamento de novo quando quiser tentar.`:'';
+    window._mapLastErrMsg=null;
   }
 }
 
@@ -5783,7 +5808,7 @@ async function gerarOrientacaoIA(chatterId){
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
-    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    if(!text)throw aiQuotaError(data)||new Error('Resposta vazia da IA');
     text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
     const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
     if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
@@ -5804,11 +5829,17 @@ async function gerarOrientacaoIA(chatterId){
     renderFichaChatter(chatterId);
   }catch(e){
     console.error('Erro ao gerar orientação',e);
-    toast('⚠️ Erro ao gerar orientação: '+e.message);
+    // O material/finalidade digitados continuam no formulário (não recarrega
+    // a página) — só o aviso muda quando é especificamente limite de uso da IA.
+    if(e.quota){
+      toast('⏳ Limite de uso da IA no momento — o que você escreveu continua no formulário, tente de novo em ~1 minuto.');
+    }else{
+      toast('⚠️ Erro ao gerar orientação: '+e.message);
+    }
     const btn2=document.getElementById('orient-gerar-btn-'+chatterId);
     const st2=document.getElementById('orient-status-'+chatterId);
     if(btn2){btn2.disabled=false;btn2.textContent='🤖 Gerar orientação assertiva';}
-    if(st2)st2.textContent='';
+    if(st2)st2.textContent=e.quota?'⏳ Limite de uso da IA no momento. O texto continua aqui — tente de novo em ~1 minuto.':'';
   }
 }
 function excluirOrientacao(chatterId,orientId){
@@ -6031,7 +6062,7 @@ async function gerarTriagemIA(){
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
-    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    if(!text)throw aiQuotaError(data)||new Error('Resposta vazia da IA');
     text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
     const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
     if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
@@ -6056,10 +6087,18 @@ async function gerarTriagemIA(){
     renderTriagemPool();
   }catch(e){
     console.error('Erro ao gerar triagem',e);
-    toast('⚠️ Erro ao gerar triagem: '+e.message);
+    // A transcrição já foi salva em S.triagemDraftTranscript (stopTriagemRecording no
+    // início da função) — em qualquer erro, inclusive limite de uso da IA, ela não se perde.
+    if(e.quota){
+      toast('⏳ Limite de uso da IA no momento — sua transcrição já está salva, tente gerar de novo em ~1 minuto.');
+    }else{
+      toast('⚠️ Erro ao gerar triagem: '+e.message+' — sua transcrição continua salva.');
+    }
+    window._triLastErrMsg=e.message;
   }finally{
     if(btn){btn.disabled=false;btn.textContent='🤖 Gerar perfis com IA';}
-    if(st)st.textContent='';
+    if(st)st.textContent=window._triLastErrMsg?`⏳ ${window._triLastErrMsg} Sua transcrição está salva — feche e abra a triagem de novo quando quiser tentar.`:'';
+    window._triLastErrMsg=null;
   }
 }
 
