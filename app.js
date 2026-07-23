@@ -5068,6 +5068,7 @@ function saveTraining(){
 function renderTrainings(){
   const el=document.getElementById('training-list');
   if(!el)return;
+  if(ensureRetentionTrainingEntry())save();
   if(!S.trainings.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhum treinamento. Use + novo acima.</div>';return;}
   el.innerHTML=S.trainings.map(t=>{
     const today=todayKey();
@@ -7180,26 +7181,29 @@ function getRetentionAgendaItems(){
 }
 function toggleRetentionDay(date){
   S.retentionDone[date]=!S.retentionDone[date];
-  save();renderRetentionAgenda();renderTaskBoards();
+  save();renderTaskBoards();
 }
-function renderRetentionAgenda(){
-  const el=document.getElementById('retention-agenda-board');
-  if(!el)return;
-  const items=getRetentionAgendaItems();
-  const today=todayKey();
-  el.innerHTML=items.map(it=>{
-    const done=!!S.retentionDone[it.date];
-    const isToday=it.date===today;
-    const dateBR=it.date.split('-').reverse().join('/');
-    return`<div style="display:flex;gap:10px;padding:10px 8px;border-bottom:1px solid var(--line);border-radius:8px;${isToday?'background:var(--accent-soft)':''}">
-      <button onclick="toggleRetentionDay('${it.date}')" style="width:22px;height:22px;border-radius:6px;border:2px solid ${done?'var(--ok)':'var(--line-strong)'};background:${done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;margin-top:2px">${done?'<span style="color:#fff">✓</span>':''}</button>
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">Dia ${it.dia} · ${dateBR}${isToday?' · HOJE · 13h':''}</div>
-        <div style="font-weight:700;font-size:13px;margin:2px 0 4px;${done?'text-decoration:line-through;opacity:.6':''}">${it.titulo}</div>
-        <div style="font-size:12px;color:var(--text2);line-height:1.4">${it.texto}</div>
-      </div>
-    </div>`;
-  }).join('')+`<div style="margin-top:10px;padding:0 8px;font-size:11px;color:var(--text3);line-height:1.5">📌 Regra: 1 interação por dia, nunca duas — excesso de estímulo vira ruído. Tom nunca ansioso, nunca suplicante: a agência não precisa dos candidatos, os candidatos precisam da agência.</div>`;
+// Mantém, dentro do quadro clicável 🎓 TREINAMENTO que já existe (aba
+// Agenda/Gestão, S.trainings), UMA entrada automática representando o ciclo
+// de Aquecimento Discord da semana ativa (Seg-Sex), com o roteiro exato do
+// PDF já preenchido dia a dia. Sempre que o ciclo atual termina (o
+// treinamento de sexta acaba e vira sábado/domingo), essa entrada é
+// substituída por uma nova já com as datas da PRÓXIMA turma — não fica presa
+// numa semana antiga. Edições manuais dela durante a semana são preservadas
+// (só troca quando a data muda). Não mexe nos treinamentos criados por você.
+function ensureRetentionTrainingEntry(){
+  const mon=fmt(getRetentionWeekMonday());
+  const existing=S.trainings.find(t=>t.autoRetention);
+  if(existing&&existing.date===mon)return false;
+  S.trainings=S.trainings.filter(t=>!t.autoRetention);
+  S.trainings.push({
+    id:'tr-retention-'+mon,
+    title:'🔥 Aquecimento Discord — Turma da semana (Seg-Sex)',
+    date:mon,
+    autoRetention:true,
+    days:RETENTION_AGENDA_DAYS.map(d=>({day:d.dia,script:`${d.titulo}\n\n${d.texto}`}))
+  });
+  return true;
 }
 
 /* ===========================================================
@@ -9129,7 +9133,6 @@ function setTesterDecision(chatterId,decision){
   renderTesters();
 }
 function renderTesters(){
-  renderRetentionAgenda();
   renderTriagemPool();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
