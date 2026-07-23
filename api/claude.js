@@ -82,9 +82,17 @@ export default async function handler(req, res) {
 
     if (!upstream.ok) {
       const msg = data?.error?.message || 'Erro ao chamar o Gemini';
-      const friendly = upstream.status === 429
-        ? 'Limite de uso da IA no momento (mesmo depois de tentar de novo algumas vezes) — espere um pouco e tente de novo.'
-        : msg;
+      let friendly = msg;
+      if (upstream.status === 429) {
+        // O Gemini manda quanto tempo esperar dentro da própria mensagem
+        // de erro (ex: "Please retry in 47.3s") — extrai esse número em vez
+        // de um "espere um pouco" genérico, pra dar um tempo real pra pessoa.
+        const waitM = msg.match(/retry in ([\d.]+)s/i);
+        const waitS = waitM ? Math.ceil(parseFloat(waitM[1])) : null;
+        friendly = waitS
+          ? `Limite de uso da IA no momento — espere cerca de ${waitS}s e tente de novo.`
+          : 'Limite de uso da IA no momento — espere cerca de 1 minuto e tente de novo.';
+      }
       res.status(upstream.status).json({ error: friendly });
       return;
     }
