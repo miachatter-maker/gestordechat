@@ -3016,8 +3016,20 @@ function renderAgenda(){renderStudyList();renderOrientList();renderMidnightList(
 function renderOrientList(){
   const el=document.getElementById('orient-list');
   const today=todayKey();const todayO=S.orientations.filter(o=>o.date===today);
-  const yest=new Date();yest.setDate(yest.getDate()-1);const yO=S.orientations.filter(o=>o.date===fmt(yest));
+  const yest=new Date();yest.setDate(yest.getDate()-1);const yKey=fmt(yest);const yO=S.orientations.filter(o=>o.date===yKey);
+  // Orientações com mais de 1 dia de atraso e ainda não feitas — continuam
+  // visíveis e clicáveis aqui (não só em Tarefas Diárias) até serem feitas
+  // ou apagadas, pra nunca "sumir" de vez.
+  const overdueO=S.orientations.filter(o=>o.date<yKey&&!o.done);
   let html='';
+  if(overdueO.length){
+    html+=`<div style="margin-bottom:12px"><div class="sectionlb" style="color:var(--bad)">⚠️ atrasadas</div>
+    ${overdueO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);
+      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y;border-left:3px solid var(--bad)">
+      <div class="logdate">${c?c.name:'?'} · ${o.date.split('-').reverse().join('/')}${o.time?` ⏰ ${o.time}`:''}</div><div class="logtext">${o.text}</div>
+      <button class="btn btn-primary btn-xs" style="margin-top:8px" onclick="toggleOrientationDone('${o.id}')">✓ Marcar como feita</button>
+      <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="deleteOrientation('${o.id}')">✕</button></div>`;}).join('')}</div>`;
+  }
   if(yO.length){
     html+=`<div style="margin-bottom:12px"><div class="sectionlb" style="color:var(--warn)">↻ follow-up de ontem</div>
     ${yO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);return`<div class="logitem alt"><div class="logdate">${c?c.name:'?'} · ${o.shift}</div><div class="logtext">${o.text}</div></div>`;}).join('')}</div>`;
@@ -7148,11 +7160,16 @@ function updateTaskField(scope,key,id,field,value){
 // direto nessa lista, então não têm swap/edição de texto: o feito e o dado
 // em si moram na fonte original (Agenda, Semana, etc), aqui é só espelho.
 function autoTaskRowHtml(t){
+  // Compromissos atrasados (data já passou e ainda não foram marcados como
+  // feitos) ganham uma tag vermelha "Atrasada" em vez da tag normal — pra
+  // ficar claro que não é um item de hoje, mas continua acessível/clicável
+  // até ser marcado como feito (não soma mais depois disso).
+  const isOverdue=/^Atrasad/.test(t.tag);
   return`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
-    <button onclick="${t.toggle}" style="width:20px;height:20px;border-radius:5px;border:2px solid ${t.isDone?'var(--ok)':'var(--line-strong)'};background:${t.isDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${t.isDone?'<span style="color:#fff">✓</span>':''}</button>
+    <button onclick="${t.toggle}" style="width:20px;height:20px;border-radius:5px;border:2px solid ${t.isDone?'var(--ok)':isOverdue?'var(--bad)':'var(--line-strong)'};background:${t.isDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${t.isDone?'<span style="color:#fff">✓</span>':''}</button>
     <span style="font-size:10.5px;font-family:var(--font-mono);color:var(--text3);width:38px;flex-shrink:0">${t.time}</span>
     <span style="flex:1;font-size:13px;${t.isDone?'text-decoration:line-through;opacity:.5':''}">${t.text}</span>
-    <span style="font-size:9.5px;color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:5px;flex-shrink:0;white-space:nowrap">${t.tag}</span>
+    <span style="font-size:9.5px;color:${isOverdue?'var(--bad)':'var(--accent)'};background:${isOverdue?'var(--bad-soft)':'var(--accent-soft)'};padding:2px 6px;border-radius:5px;flex-shrink:0;white-space:nowrap">${t.tag}</span>
   </div>`;
 }
 // Junta, pra uma data específica, todo compromisso com HORA e DATA marcadas
@@ -7162,27 +7179,38 @@ function autoTaskRowHtml(t){
 // lugares. Cada item aponta o "feito" pro dado original (não duplica estado).
 function getAutoDailyAgendaItems(dateKey){
   const items=[];
-  S.orientations.filter(o=>o.date===dateKey&&o.time).forEach(o=>{
+  // Compromissos com data+hora que já passaram e ainda não foram marcados
+  // como feitos CONTINUAM aparecendo aqui (com tag "Atrasada · DD/MM") em vez
+  // de sumir quando o dia vira — senão a pessoa perde o acesso pra marcar
+  // como feito ou dar um follow-up. Some da lista só quando ela realmente
+  // conclui o item (o.done/t.done vira true).
+  S.orientations.filter(o=>o.time&&(o.date===dateKey||(o.date<dateKey&&!o.done))).forEach(o=>{
     const c=S.chatters.find(ch=>ch.id===o.chatterId);
+    const overdue=o.date<dateKey;
     items.push({key:`orient|${o.id}`,time:o.time,date:'',
       text:`🎯 Orientação — ${c?c.name:'?'}: ${o.text}`,
-      isDone:!!o.done,toggle:`toggleOrientationDone('${o.id}')`,tag:'Orientação'});
+      isDone:!!o.done,toggle:`toggleOrientationDone('${o.id}')`,
+      tag:overdue?`Atrasada · ${o.date.split('-').reverse().join('/')}`:'Orientação'});
   });
   Object.keys(S.weeklyTasks).forEach(wk=>{
     (S.weeklyTasks[wk]||[]).forEach(t=>{
-      if(t.date===dateKey&&t.time){
+      if(t.date&&t.time&&(t.date===dateKey||(t.date<dateKey&&!t.done))){
+        const overdue=t.date<dateKey;
         items.push({key:`weekly|${wk}|${t.id}`,time:t.time,date:'',
           text:`📅 ${t.text}`,isDone:!!t.done,
-          toggle:`toggleTaskDone('weekly','${wk}','${t.id}')`,tag:'Semanal'});
+          toggle:`toggleTaskDone('weekly','${wk}','${t.id}')`,
+          tag:overdue?`Atrasada · ${t.date.split('-').reverse().join('/')}`:'Semanal'});
       }
     });
   });
   Object.keys(S.monthlyTasks).forEach(mk=>{
     (S.monthlyTasks[mk]||[]).forEach(t=>{
-      if(t.date===dateKey&&t.time){
+      if(t.date&&t.time&&(t.date===dateKey||(t.date<dateKey&&!t.done))){
+        const overdue=t.date<dateKey;
         items.push({key:`monthly|${mk}|${t.id}`,time:t.time,date:'',
           text:`🗓️ ${t.text}`,isDone:!!t.done,
-          toggle:`toggleTaskDone('monthly','${mk}','${t.id}')`,tag:'Mensal'});
+          toggle:`toggleTaskDone('monthly','${mk}','${t.id}')`,
+          tag:overdue?`Atrasada · ${t.date.split('-').reverse().join('/')}`:'Mensal'});
       }
     });
   });
