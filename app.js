@@ -8121,17 +8121,29 @@ const CHATLAB_COPILOTO_SYSTEM=`Você é o Copiloto Tático da equipe de chat —
 ${PLAYBOOK_CATALOGO}
 
 Se a conversa for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" nesse campo — nunca invente evidência que não está no texto colado. Campos sem achado relevante (alerta, sinalDeWhale) podem ficar como string vazia.`;
-async function clRunCopiloto(conv){
+// A infra de IA (AI_PROXY_URL) às vezes corta a resposta no meio (flaky —
+// varia de tentativa pra tentativa, não é sempre no mesmo ponto) — por
+// isso tenta de novo automaticamente antes de mostrar erro pro chatter.
+async function clFetchAI(system,userContent,maxTokens){
   const res=await fetch(AI_PROXY_URL,{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:700,system:CHATLAB_COPILOTO_SYSTEM,messages:[{role:'user',content:'CONVERSA:\n'+conv}]})
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,system,messages:[{role:'user',content:userContent}]})
   });
   const data=await res.json();
-  const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
-  if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
-  const s=text.indexOf('{'),e=text.lastIndexOf('}');
-  if(s<0||e<0)throw new Error('Resposta da IA sem JSON');
-  return JSON.parse(text.slice(s,e+1));
+  return data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+}
+async function clRunCopiloto(conv){
+  let lastErr=null;
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,600);
+      if(!text)throw new Error('Resposta vazia da IA (provavelmente limite de uso da IA no momento)');
+      const s=text.indexOf('{'),e=text.lastIndexOf('}');
+      if(s<0||e<0)throw new Error('Resposta cortada, tentando de novo…');
+      return JSON.parse(text.slice(s,e+1));
+    }catch(err){lastErr=err;if(attempt===0)await new Promise(r=>setTimeout(r,1500));}
+  }
+  throw lastErr;
 }
 function renderClCopilotoResult(state,obj){
   const el=document.getElementById('cl-copiloto');
@@ -8288,13 +8300,18 @@ async function rodarChatLab(){
   const prompt=`Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prev.length?'\nAnálise nº '+(prev.length+1)+' — compare evolução quando relevante.':''}\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
 
   try{
-    const res=await fetch(AI_PROXY_URL,{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,system,messages:[{role:'user',content:prompt}]})
-    });
-    const data=await res.json();
-    let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
-    if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+    // A infra de IA às vezes corta a resposta no meio (flaky, não é sempre
+    // no mesmo ponto) — tenta de novo automaticamente se vier incompleta
+    // (sem a seção Resumo Executivo, que é sempre a última do relatório).
+    let text='',lastErr=null;
+    for(let attempt=0;attempt<2;attempt++){
+      text=await clFetchAI(system,prompt,4000);
+      if(text&&/## 🎯 Resumo Executivo/i.test(text))break;
+      lastErr=new Error('Resposta incompleta da IA (provavelmente limite de uso da IA no momento — espere um minuto e tente de novo)');
+      text='';
+      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+    }
+    if(!text)throw lastErr||new Error('Resposta vazia da IA');
     const igpM=text.match(/IGP[^:]*:\s*\**\s*(\d+)/i);
     const igp=igpM?parseInt(igpM[1]):null;
     // Extract resumo executivo snippet for the Evolução diagnostic square
