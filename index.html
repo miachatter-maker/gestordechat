@@ -236,6 +236,7 @@ body{
 .lvl-junior{color:var(--info);background:var(--info-soft);}
 .lvl-pleno{color:var(--warn);background:var(--warn-soft);}
 .lvl-senior{color:var(--ok);background:var(--ok-soft);}
+.lvl-padrinho{color:#B8860B;background:rgba(184,134,11,.16);}
 
 /* ---------- TASK / CHECK LIST ---------- */
 .tasklist{display:flex;flex-direction:column;gap:1px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;}
@@ -589,6 +590,7 @@ body{
     <button class="segtab" data-lvl="junior">Júnior</button>
     <button class="segtab" data-lvl="pleno">Pleno</button>
     <button class="segtab" data-lvl="senior">Sênior</button>
+    <button class="segtab" data-lvl="padrinho">👑 Padrinho</button>
   </div>
   <div id="team-list"></div>
   <button class="fab" onclick="openModal('m-chatter')">+</button>
@@ -1360,6 +1362,7 @@ body{
     <select class="fselect" id="ch-level">
       <option value="treinamento">Treinamento</option><option value="teste">Teste</option>
       <option value="junior">Júnior</option><option value="pleno">Pleno</option><option value="senior">Sênior</option>
+      <option value="padrinho">👑 Padrinho</option>
     </select>
   </div>
   <div class="field"><label class="flabel">Notas</label><textarea class="ftext" id="ch-notes" placeholder="Observações..."></textarea></div>

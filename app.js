@@ -821,8 +821,8 @@ function updateBackupStatus(msg,pillClass){
 const DAYS=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 const MONTHS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const DAY_KEYS=['dom','seg','ter','qua','qui','sex','sab'];
-const LVLCLASS={treinamento:'lvl-treinamento',teste:'lvl-teste',junior:'lvl-junior',pleno:'lvl-pleno',senior:'lvl-senior'};
-const LVLEMOJI={treinamento:'◆',teste:'○',junior:'▲',pleno:'●',senior:'★'};
+const LVLCLASS={treinamento:'lvl-treinamento',teste:'lvl-teste',junior:'lvl-junior',pleno:'lvl-pleno',senior:'lvl-senior',padrinho:'lvl-padrinho'};
+const LVLEMOJI={treinamento:'◆',teste:'○',junior:'▲',pleno:'●',senior:'★',padrinho:'👑'};
 
 // Tabela de metas semanais por categoria (Pagamento) — precisa vir logo no
 // início do arquivo porque o Painel (Home) e outras telas já usam isso na
@@ -1123,7 +1123,7 @@ function renderWatchBanner(){
   </div>`;
 }
 function getComputedLevelColor(level){
-  const map={treinamento:'#6E6AF0',teste:'#8A8A93',junior:'#2F8FE0',pleno:'#C98A1F',senior:'#1F9E6E'};
+  const map={treinamento:'#6E6AF0',teste:'#8A8A93',junior:'#2F8FE0',pleno:'#C98A1F',senior:'#1F9E6E',padrinho:'#B8860B'};
   return map[level]||'#8A8A93';
 }
 
@@ -3282,6 +3282,7 @@ function openChatterDetail(id){
         <option value="junior" ${c.level==='junior'?'selected':''}>Júnior</option>
         <option value="pleno" ${c.level==='pleno'?'selected':''}>Pleno</option>
         <option value="senior" ${c.level==='senior'?'selected':''}>Sênior</option>
+        <option value="padrinho" ${c.level==='padrinho'?'selected':''}>👑 Padrinho</option>
       </select>
     </div>
     <div class="field"><label class="flabel">Time</label>
@@ -9688,6 +9689,14 @@ function saveMandamentoNota(cid,critId,val){
   ev[critId].nota=val;
   save();
 }
+// Padrinho responsável — chatter com cargo/medalha "Padrinho" designado como
+// responsável por acompanhar esse tester específico durante o período de teste.
+function setPadrinhoResponsavel(cid,padrinhoId){
+  if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[cid].padrinhoId=padrinhoId||'';
+  save();
+  renderTesterDetail(cid);
+}
 function mandamentosPanelHtml(cid){
   const ev=S.chatterFichas?.[cid]?.mandamentosEval||{};
   const statusMeta={
@@ -9698,8 +9707,17 @@ function mandamentosPanelHtml(cid){
   const total=MANDAMENTOS_CRITERIOS.length;
   const atendeCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='atende').length;
   const naoCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='nao').length;
+  const padrinhoId=S.chatterFichas?.[cid]?.padrinhoId||'';
+  const padrinhos=S.chatters.filter(ch=>ch.level==='padrinho'&&ch.id!==cid);
+  const padrinhoSelectHtml=`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-top:2px">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">👑 Padrinho responsável</div>
+    ${padrinhos.length?`<select class="fselect" onchange="setPadrinhoResponsavel('${cid}',this.value)">
+      <option value="">— selecionar —</option>
+      ${padrinhos.map(p=>`<option value="${p.id}" ${padrinhoId===p.id?'selected':''}>${p.name}</option>`).join('')}
+    </select>`:`<div style="font-size:12px;color:var(--text3)">Nenhum chatter marcado como 👑 Padrinho ainda — defina o cargo na aba Equipe pra poder escolher aqui.</div>`}
+  </div>`;
   return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
-    <div class="panel-head"><div><div class="panel-title">📜 Mandamentos do Chatter — avaliação</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div></div>
+    <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div></div>
     ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
       const e=ev[c.id]||{};
       return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
@@ -9715,6 +9733,7 @@ function mandamentosPanelHtml(cid){
         <textarea class="ftext" style="min-height:38px;font-size:12px" placeholder="Observação (espaço de resposta)..." onblur="saveMandamentoNota('${cid}','${c.id}',this.value)">${e.nota||''}</textarea>
       </div>`;
     }).join('')}
+    ${padrinhoSelectHtml}
   </div>`;
 }
 function renderTesterDetail(cid){
