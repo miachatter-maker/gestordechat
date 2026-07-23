@@ -7,7 +7,20 @@
 // o pedido/resposta para o formato do Gemini por dentro, então NADA no
 // app.js precisa mudar.
 
-const GEMINI_MODEL = 'gemini-2.5-flash'; // rápido e gratuito; troque para 'gemini-2.5-flash-lite' se precisar de mais requisições/dia
+// gemini-2.5-flash-lite tem cota gratuita bem maior que gemini-2.5-flash
+// (mais requisições por minuto e por dia, sem custo, sem cartão) — trocado
+// porque o app estava batendo no limite de 20 req/min do flash normal com
+// uso leve de teste (Mapeamento, ChatLab, Orientação dividem a mesma cota).
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+
+// Se o Gemini responder 429 (limite momentâneo), tenta de novo sozinho
+// antes de devolver erro pro app — evita que uma janela de poucos segundos
+// de pico vire uma falha visível pra quem está usando. Mantido curto de
+// propósito (no máximo ~4s de espera total) pra não estourar o tempo
+// limite da função serverless da Vercel (padrão 10s no plano gratuito).
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 2000;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export default async function handler(req, res) {
   // CORS — permite chamar este proxy mesmo de outro domínio (ex: GitHub Pages)
@@ -52,15 +65,25 @@ export default async function handler(req, res) {
     if (system) geminiBody.systemInstruction = { parts: [{ text: system }] };
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const upstream = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(geminiBody)
-    });
-    const data = await upstream.json();
+
+    let upstream, data;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      upstream = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(geminiBody)
+      });
+      data = await upstream.json();
+      if (upstream.status !== 429) break; // só espera e tenta de novo em caso de limite de uso
+      if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS);
+    }
 
     if (!upstream.ok) {
-      res.status(upstream.status).json({ error: data?.error?.message || 'Erro ao chamar o Gemini' });
+      const msg = data?.error?.message || 'Erro ao chamar o Gemini';
+      const friendly = upstream.status === 429
+        ? 'Limite de uso da IA no momento (mesmo depois de tentar de novo algumas vezes) — espere um pouco e tente de novo.'
+        : msg;
+      res.status(upstream.status).json({ error: friendly });
       return;
     }
 
