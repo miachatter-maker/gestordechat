@@ -136,6 +136,8 @@ function migrateState(s){
   if(!s.midnightTasks)s.midnightTasks={};
   if(!s.dailyTasks)s.dailyTasks={};
   if(!s.retentionDone)s.retentionDone={};
+  if(!s.creativityLog)s.creativityLog={}; // dateKey -> {habitId:true} — reset diário dos hábitos de criatividade
+  if(!s.creativityWeekly)s.creativityWeekly={}; // weekKey(seg) -> {done, review:{...}} — desafio semanal + revisão
   if(!s.weekGoals)s.weekGoals={};
   if(!s.revenues)s.revenues={};
   if(!s.models)s.models=[];
@@ -749,6 +751,8 @@ let S={
   monthlyTasks:{}, // monthKey (YYYY-MM) -> [{id,text,time,urgent,done}]
   taskDoneLog:{},  // dateKey -> {taskId:true} — reset diário de tarefas semanais/mensais sem prazo fixo (t.date vazio)
   retentionDone:{}, // 'YYYY-MM-DD' (data daquele dia do ciclo Seg-Sex) -> true/false — feito do quadro de Aquecimento Discord
+  creativityLog:{}, // dateKey -> {habitId:true} — hábitos diários do quadro de Exercício de Criatividade (Estudos)
+  creativityWeekly:{}, // weekKey(seg) -> {done, review:{...}} — desafio semanal de exploração + revisão semanal
   triagemCandidatos:[], // perfis de triagem ainda não vinculados a um tester — [{id,nome,...,date}]
   orientedThisWeek:{}, // weekKey -> [chatterId,...]
   weekPrize:{},          // weekKey -> {goal, winner, prize}
@@ -8924,6 +8928,141 @@ function gerParseDiscord(txt){
 }
 
 /* ===========================================================
+   ESTUDOS — EXERCÍCIO DIÁRIO DE CRIATIVIDADE
+   3 hábitos diários (resetam à meia-noite, via creativityLog[dateKey])
+   + 1 desafio semanal de exploração (reseta toda semana, via
+   creativityWeekly[weekKey].done) + revisão semanal (5 perguntas,
+   salvas por semana, com histórico das semanas anteriores).
+   =========================================================== */
+const CREATIVITY_HABITS=[
+  {id:'ideias',icon:'💡',freq:'Diário · 15–20 min',
+    habito:'Gerar 10 ideias sobre um problema, projeto ou oportunidade. Não julgar as ideias durante a escrita.',
+    objetivo:'Desenvolver fluência criativa e pensamento divergente.'},
+  {id:'consumo',icon:'📖',freq:'Diário · 30 min',
+    habito:'Consumir conteúdo fora da sua área (livros, artigos, documentários, podcasts, museus, ciência, história, arquitetura, arte etc.) e anotar uma conexão com seu trabalho.',
+    objetivo:'Expandir repertório e criar novas associações.'},
+  {id:'observacao',icon:'🔍',freq:'Diário · 10 min',
+    habito:'Registrar observações: uma percepção, um problema identificado e uma ideia ou pergunta que surgiu durante o dia.',
+    objetivo:'Exercitar observação e identificar oportunidades de inovação.'}
+];
+const CREATIVITY_CHALLENGE={icon:'🌍',freq:'Semanal · 2–4h',
+  habito:'Explorar um lugar completamente novo (bairro, parque, café, exposição, trilha, biblioteca, cidade, evento, feira ou espaço cultural) sem um objetivo específico além de observar.',
+  objetivo:'Romper a rotina, estimular a curiosidade e renovar perspectivas.'};
+const CREATIVITY_QUESTIONS=[
+  {title:'💡 Ideias',qs:['Como isso poderia ser feito pela metade do custo?','O que eu eliminaria se começasse do zero?','Como outra indústria resolveria esse problema?']},
+  {title:'🔍 Observação',qs:['O que me surpreendeu hoje?','Onde encontrei uma dificuldade recorrente?','O que funcionou melhor do que eu esperava?']},
+  {title:'🌍 Exploração',qs:['O que há de diferente aqui?','Que experiência chamou minha atenção?','O que posso adaptar para minha realidade?','Que ideia surgiu por estar em um ambiente diferente?']}
+];
+const CREATIVITY_REVIEW_QUESTIONS=[
+  {id:'melhorIdeia',label:'Qual foi a melhor ideia que tive?'},
+  {id:'aprendizado',label:'O que aprendi fora da minha área?'},
+  {id:'padrao',label:'Que padrão comecei a perceber?'},
+  {id:'lugarNovo',label:'O que o lugar novo me fez enxergar de diferente?'},
+  {id:'experimento',label:'Qual experimento ou ação vou testar na próxima semana?'}
+];
+function toggleCreativityHabit(id){
+  const dk=todayKey();
+  if(!S.creativityLog[dk])S.creativityLog[dk]={};
+  S.creativityLog[dk][id]=!S.creativityLog[dk][id];
+  save();
+  renderCreatividade();
+}
+function toggleCreativityChallenge(){
+  const wk=getWeekKey(0); // sempre a semana calendário atual, independente de qual semana está sendo navegada em Relatório
+  if(!S.creativityWeekly[wk])S.creativityWeekly[wk]={done:false,review:{}};
+  S.creativityWeekly[wk].done=!S.creativityWeekly[wk].done;
+  save();
+  renderCreatividade();
+}
+function saveCreativityReview(field,val){
+  const wk=getWeekKey(0);
+  if(!S.creativityWeekly[wk])S.creativityWeekly[wk]={done:false,review:{}};
+  if(!S.creativityWeekly[wk].review)S.creativityWeekly[wk].review={};
+  S.creativityWeekly[wk].review[field]=val;
+  save();
+}
+function toggleCreativityQuestions(){
+  const body=document.getElementById('creativity-questions-body');
+  const ic=document.getElementById('creativity-questions-ic');
+  if(!body)return;
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  if(ic)ic.textContent=open?'▸':'▾';
+}
+function renderCreatividade(){
+  const dailyEl=document.getElementById('creativity-daily');
+  const chEl=document.getElementById('creativity-challenge');
+  const qEl=document.getElementById('creativity-questions-body');
+  const reviewEl=document.getElementById('creativity-review');
+  const histEl=document.getElementById('creativity-history');
+  if(!dailyEl&&!chEl&&!qEl&&!reviewEl&&!histEl)return;
+
+  const dk=todayKey();
+  const wk=getWeekKey(0);
+  const dayLog=S.creativityLog[dk]||{};
+  const weekEntry=S.creativityWeekly[wk]||{done:false,review:{}};
+
+  if(dailyEl)dailyEl.innerHTML=CREATIVITY_HABITS.map(h=>{
+    const done=!!dayLog[h.id];
+    return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px;${done?'opacity:.65':''}">
+      <div style="display:flex;align-items:flex-start;gap:9px">
+        <button onclick="toggleCreativityHabit('${h.id}')" style="width:20px;height:20px;border-radius:5px;border:2px solid ${done?'var(--ok)':'var(--accent)'};background:${done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;margin-top:1px">${done?'<span style="color:#fff">✓</span>':''}</button>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10.5px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px">${h.icon} ${h.freq}</div>
+          <div style="font-size:13.5px;font-weight:600;${done?'text-decoration:line-through;color:var(--text3)':''};margin-bottom:4px">${h.habito}</div>
+          <div style="font-size:11.5px;color:var(--text3)">🎯 ${h.objetivo}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  if(chEl){
+    const chDone=!!weekEntry.done;
+    chEl.innerHTML=`<div style="border:2px solid ${chDone?'var(--ok)':'var(--accent)'};background:${chDone?'var(--ok-soft)':'var(--accent-soft)'};border-radius:9px;padding:11px 13px">
+      <div style="display:flex;align-items:flex-start;gap:9px">
+        <button onclick="toggleCreativityChallenge()" style="width:20px;height:20px;border-radius:5px;border:2px solid ${chDone?'var(--ok)':'var(--accent)'};background:${chDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;margin-top:1px">${chDone?'<span style="color:#fff">✓</span>':''}</button>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10.5px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px">${CREATIVITY_CHALLENGE.icon} Desafio da semana · ${CREATIVITY_CHALLENGE.freq}</div>
+          <div style="font-size:13.5px;font-weight:600;${chDone?'text-decoration:line-through;color:var(--text3)':''};margin-bottom:4px">${CREATIVITY_CHALLENGE.habito}</div>
+          <div style="font-size:11.5px;color:var(--text3)">🎯 ${CREATIVITY_CHALLENGE.objetivo}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if(qEl)qEl.innerHTML=CREATIVITY_QUESTIONS.map(g=>`
+    <div style="margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">${g.title}</div>
+      ${g.qs.map(q=>`<div style="font-size:12.5px;color:var(--text2);padding:3px 0 3px 8px;border-left:2px solid var(--line);margin-bottom:2px">${q}</div>`).join('')}
+    </div>`).join('');
+
+  if(reviewEl){
+    const review=weekEntry.review||{};
+    reviewEl.innerHTML=CREATIVITY_REVIEW_QUESTIONS.map(q=>`
+      <div class="field">
+        <label class="flabel">${q.label}</label>
+        <textarea class="ftext" style="min-height:44px" onblur="saveCreativityReview('${q.id}',this.value)">${review[q.id]||''}</textarea>
+      </div>`).join('');
+  }
+
+  if(histEl){
+    const weeks=Object.keys(S.creativityWeekly).filter(w=>w!==wk).sort((a,b)=>b.localeCompare(a));
+    const rows=weeks.map(w=>{
+      const entry=S.creativityWeekly[w]||{};
+      const r=entry.review||{};
+      const answered=CREATIVITY_REVIEW_QUESTIONS.filter(q=>r[q.id]);
+      if(!answered.length&&!entry.done)return'';
+      const wkLabel=w.split('-').reverse().join('/');
+      return`<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px">Semana de ${wkLabel}${entry.done?' · 🌍 desafio cumprido':''}</div>
+        ${answered.map(q=>`<div style="font-size:12px;margin-bottom:5px"><span style="color:var(--text3)">${q.label}</span><br>${r[q.id]}</div>`).join('')}
+      </div>`;
+    }).filter(Boolean);
+    histEl.innerHTML=rows.length?rows.join(''):'<div style="color:var(--text3);font-size:12px">Sem semanas anteriores registradas ainda.</div>';
+  }
+}
+
+/* ===========================================================
    ESTUDOS — O QUE MELHORAR
    =========================================================== */
 function renderMelhoras(){
@@ -9005,6 +9144,7 @@ function renderEstudosHistorico(){
 }
 
 function renderEstudos(){
+  renderCreatividade();
   renderMelhoras();
   renderStudyList();
   renderEstudosHistorico();

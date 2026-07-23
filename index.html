@@ -987,6 +987,40 @@ body{
   <div class="eyebrow">desenvolvimento pessoal</div>
   <div class="view-title">Estudos</div>
 
+  <!-- EXERCÍCIO DIÁRIO DE CRIATIVIDADE -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">🧠 Exercício diário de criatividade</div><div class="panel-note">Hábitos diários resetam à meia-noite · desafio semanal reseta toda semana</div></div>
+    </div>
+    <div id="creativity-daily"></div>
+    <div id="creativity-challenge"></div>
+  </div>
+
+  <!-- PERGUNTAS DE APOIO (colapsável) -->
+  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
+    <button onclick="toggleCreativityQuestions()" style="width:100%;padding:11px 14px;background:var(--bg-soft);border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text2)">
+      <span>❓ Perguntas para usar durante a semana</span>
+      <span id="creativity-questions-ic" style="font-size:11px;color:var(--text3)">▸</span>
+    </button>
+    <div id="creativity-questions-body" style="display:none;padding:14px"></div>
+  </div>
+
+  <!-- REVISÃO SEMANAL -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📝 Revisão semanal</div><div class="panel-note">15 minutos no final da semana</div></div>
+    </div>
+    <div id="creativity-review"></div>
+  </div>
+
+  <!-- HISTÓRICO DE REVISÕES DE CRIATIVIDADE -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">🗂️ Semanas anteriores — criatividade</div>
+    </div>
+    <div id="creativity-history"></div>
+  </div>
+
   <!-- O QUE MELHORAR -->
   <div class="panel">
     <div class="panel-head">
