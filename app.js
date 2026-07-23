@@ -83,6 +83,7 @@ function migrateState(s){
   if(!s.watchAlerts)s.watchAlerts={};
   if(!s.midnightTasks)s.midnightTasks={};
   if(!s.dailyTasks)s.dailyTasks={};
+  if(!s.retentionDone)s.retentionDone={};
   if(!s.weekGoals)s.weekGoals={};
   if(!s.revenues)s.revenues={};
   if(!s.models)s.models=[];
@@ -695,6 +696,7 @@ let S={
   weeklyTasks:{},  // weekKey -> [{id,text,time,urgent,done}]
   monthlyTasks:{}, // monthKey (YYYY-MM) -> [{id,text,time,urgent,done}]
   taskDoneLog:{},  // dateKey -> {taskId:true} — reset diário de tarefas semanais/mensais sem prazo fixo (t.date vazio)
+  retentionDone:{}, // 'YYYY-MM-DD' (data daquele dia do ciclo Seg-Sex) -> true/false — feito do quadro de Aquecimento Discord
   triagemCandidatos:[], // perfis de triagem ainda não vinculados a um tester — [{id,nome,...,date}]
   orientedThisWeek:{}, // weekKey -> [chatterId,...]
   weekPrize:{},          // weekKey -> {goal, winner, prize}
@@ -7044,22 +7046,87 @@ function updateTaskField(scope,key,id,field,value){
   if(t)t[field]=value;
   save();renderTaskBoards();
 }
+// Linha de exibição pros compromissos "automáticos" (orientações agendadas,
+// tarefas semanais/mensais com data marcada, quadro de Aquecimento Discord)
+// que aparecem em Tarefas Diárias só de olho no dia — não foram criados
+// direto nessa lista, então não têm swap/edição de texto: o feito e o dado
+// em si moram na fonte original (Agenda, Semana, etc), aqui é só espelho.
+function autoTaskRowHtml(t){
+  return`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
+    <button onclick="${t.toggle}" style="width:20px;height:20px;border-radius:5px;border:2px solid ${t.isDone?'var(--ok)':'var(--line-strong)'};background:${t.isDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${t.isDone?'<span style="color:#fff">✓</span>':''}</button>
+    <span style="font-size:10.5px;font-family:var(--font-mono);color:var(--text3);width:38px;flex-shrink:0">${t.time}</span>
+    <span style="flex:1;font-size:13px;${t.isDone?'text-decoration:line-through;opacity:.5':''}">${t.text}</span>
+    <span style="font-size:9.5px;color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:5px;flex-shrink:0;white-space:nowrap">${t.tag}</span>
+  </div>`;
+}
+// Junta, pra uma data específica, todo compromisso com HORA e DATA marcadas
+// que vive em outros quadros do app (Orientação agendada na Ficha, tarefas
+// semanais/mensais com data, Aquecimento Discord) — pra aparecer também em
+// Tarefas Diárias no dia certo, na hora certa, mesmo já existindo nos outros
+// lugares. Cada item aponta o "feito" pro dado original (não duplica estado).
+function getAutoDailyAgendaItems(dateKey){
+  const items=[];
+  S.orientations.filter(o=>o.date===dateKey&&o.time).forEach(o=>{
+    const c=S.chatters.find(ch=>ch.id===o.chatterId);
+    items.push({key:`orient|${o.id}`,time:o.time,date:'',
+      text:`🎯 Orientação — ${c?c.name:'?'}: ${o.text}`,
+      isDone:!!o.done,toggle:`toggleOrientationDone('${o.id}')`,tag:'Orientação'});
+  });
+  Object.keys(S.weeklyTasks).forEach(wk=>{
+    (S.weeklyTasks[wk]||[]).forEach(t=>{
+      if(t.date===dateKey&&t.time){
+        items.push({key:`weekly|${wk}|${t.id}`,time:t.time,date:'',
+          text:`📅 ${t.text}`,isDone:!!t.done,
+          toggle:`toggleTaskDone('weekly','${wk}','${t.id}')`,tag:'Semanal'});
+      }
+    });
+  });
+  Object.keys(S.monthlyTasks).forEach(mk=>{
+    (S.monthlyTasks[mk]||[]).forEach(t=>{
+      if(t.date===dateKey&&t.time){
+        items.push({key:`monthly|${mk}|${t.id}`,time:t.time,date:'',
+          text:`🗓️ ${t.text}`,isDone:!!t.done,
+          toggle:`toggleTaskDone('monthly','${mk}','${t.id}')`,tag:'Mensal'});
+      }
+    });
+  });
+  getRetentionAgendaItems().forEach(r=>{
+    if(r.date===dateKey){
+      items.push({key:`retention|${r.date}`,time:'13:00',date:'',
+        text:`🎓 ${r.titulo}`,isDone:!!S.retentionDone[r.date],
+        toggle:`toggleRetentionDay('${r.date}')`,tag:'Treinamento'});
+    }
+  });
+  return items;
+}
 function renderTaskBoard(containerId,scope,key){
   const el=document.getElementById(containerId);
   if(!el)return;
   const list=getTaskStore(scope,key);
   const late=scope==='daily';
-  const sorted=[...list].sort((a,b)=>taskSortKey(a,late).localeCompare(taskSortKey(b,late)));
+  const own=list.map(t=>({...t,_auto:false}));
+  const auto=(scope==='daily'&&key===getTodayDayKey())?getAutoDailyAgendaItems(todayKey()):[];
+  const combined=[...own,...auto.map(a=>({id:a.key,text:a.text,time:a.time,date:a.date,_auto:true,_item:a}))];
+  const sorted=combined.sort((a,b)=>taskSortKey(a,late).localeCompare(taskSortKey(b,late)));
   if(!sorted.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);padding:6px 0">Nenhuma tarefa</div>';return;}
-  el.innerHTML=sorted.map(t=>taskRowHtml(t,`${scope}|${key}|${t.id}`,isTaskDoneToday(scope,t),{
-    toggleDone:`toggleTaskDone('${scope}','${key}','${t.id}')`,
-    togglePriority:`toggleTaskUrgent('${scope}','${key}','${t.id}')`,
-    del:`deleteTask('${scope}','${key}','${t.id}')`,
-    swapUp:`swapTaskTime('${scope}','${key}','${t.id}',-1)`,
-    swapDown:`swapTaskTime('${scope}','${key}','${t.id}',1)`,
-    setTime:`updateTaskField('${scope}','${key}','${t.id}','time',this.value)`,
-    setText:`updateTaskField('${scope}','${key}','${t.id}','text',this.value)`,
-  })).join('');
+  el.innerHTML=sorted.map(t=>{
+    if(t._auto)return autoTaskRowHtml(t._item);
+    return taskRowHtml(t,`${scope}|${key}|${t.id}`,isTaskDoneToday(scope,t),{
+      toggleDone:`toggleTaskDone('${scope}','${key}','${t.id}')`,
+      togglePriority:`toggleTaskUrgent('${scope}','${key}','${t.id}')`,
+      del:`deleteTask('${scope}','${key}','${t.id}')`,
+      swapUp:`swapTaskTime('${scope}','${key}','${t.id}',-1)`,
+      swapDown:`swapTaskTime('${scope}','${key}','${t.id}',1)`,
+      setTime:`updateTaskField('${scope}','${key}','${t.id}','time',this.value)`,
+      setText:`updateTaskField('${scope}','${key}','${t.id}','text',this.value)`,
+    });
+  }).join('');
+}
+function toggleOrientationDone(id){
+  const o=S.orientations.find(x=>x.id===id);
+  if(!o)return;
+  o.done=!o.done;
+  save();renderTaskBoards();renderOrientList();
 }
 function renderTaskBoards(){
   const daySel=document.getElementById('daily-task-day-selector');
@@ -7070,6 +7137,69 @@ function renderTaskBoards(){
   renderTaskBoard('daily-tasks-list','daily',selectedTaskDay);
   renderTaskBoard('weekly-tasks-list','weekly',getWeekKey());
   renderTaskBoard('monthly-tasks-list','monthly',todayKey().slice(0,7));
+}
+
+/* ===========================================================
+   AQUECIMENTO DISCORD — agenda de retenção Segunda-Sexta pros
+   "Inscritos" antes do treinamento de sexta-feira. Conteúdo e
+   regras seguem exatamente a ESTRATÉGIA DE RETENÇÃO E FILTRO —
+   CATEGORIA INSCRITOS. Datas são sempre calculadas a partir de
+   hoje (nunca ficam "presas" numa semana antiga): de segunda a
+   sexta mostra o ciclo desta semana; sábado/domingo já mostra o
+   ciclo da PRÓXIMA semana, pronta pra nova turma de inscritos.
+   =========================================================== */
+const RETENTION_AGENDA_DAYS=[
+  {dk:'seg',dia:1,titulo:'Ativação de identidade — Pergunta do Dia',
+    texto:'No bate-papo-geral: "Por que você quer trabalhar com isso? Qual é o número que mudaria sua vida financeira hoje?" — força o candidato a verbalizar a motivação. Quem escreve o motivo tem muito mais dificuldade de desistir depois. É compromisso público.'},
+  {dk:'ter',dia:2,titulo:'Conteúdo de valor + lembrete',
+    texto:'Em avisos-oficiais: poste 1 único conteúdo curto de contexto de mercado (texto, print, dado sobre criadores de conteúdo no Brasil) — não ensine técnica ainda, o objetivo é ele pensar "esse mercado é maior do que eu imaginava". Poste também um lembrete curto reforçando data e horário do treinamento.'},
+  {dk:'qua',dia:3,titulo:'Pressão positiva + reconhecimento nominal',
+    texto:'Em avisos-oficiais: "Estamos observando quem está aqui, quem está interagindo e quem já demonstra o perfil que buscamos. O treinamento começa em X dias — mas nossa avaliação já começou." No bate-papo-geral, cite pelo nome 2 ou 3 candidatos que interagiram bem: "Fulano, Ciclano — boa postura aqui. É exatamente isso."'},
+  {dk:'qui',dia:4,titulo:'Antecipação e comprometimento final',
+    texto:'Em avisos-oficiais: "Amanhã começa. Confirme sua presença reagindo com ✅ nessa mensagem. Quem não confirmar até as 22h de hoje será removido da lista — a vaga vai para o próximo da fila." Pergunta do dia no bate-papo: "O que você vai fazer diferente amanhã para já entrar no treinamento no seu melhor nível?"'},
+  {dk:'sex',dia:5,titulo:'Treinamento — migração de cargo e filtro final',
+    texto:'No Discord: mova quem confirmou do cargo "Inscrito - Vaga de Chatter" pro cargo "Em treinamento". Quem não confirmou, sai. Você tem o controle de quem entra — adicione só quem quiser, poupando seu tempo treinando quem sabe que não vai trazer problema.'},
+];
+// Segunda-feira "ativa" do ciclo: de seg a sex mostra a semana atual; no fim
+// de semana (sáb/dom) já adianta pra próxima segunda, porque o treinamento
+// de sexta já aconteceu (ou vai acontecer hoje à noite) e a próxima turma de
+// inscritos precisa ver o ciclo novo pronto, sem precisar mexer em nada.
+function getRetentionWeekMonday(){
+  const now=new Date();
+  const mon=getMondayOfWeek(now);
+  const dow=now.getDay(); // 0=dom,6=sab
+  if(dow===0||dow===6)mon.setDate(mon.getDate()+7);
+  return mon;
+}
+function getRetentionAgendaItems(){
+  const mon=getRetentionWeekMonday();
+  return RETENTION_AGENDA_DAYS.map((d,i)=>{
+    const dt=new Date(mon);dt.setDate(mon.getDate()+i);
+    return{...d,date:fmt(dt)};
+  });
+}
+function toggleRetentionDay(date){
+  S.retentionDone[date]=!S.retentionDone[date];
+  save();renderRetentionAgenda();renderTaskBoards();
+}
+function renderRetentionAgenda(){
+  const el=document.getElementById('retention-agenda-board');
+  if(!el)return;
+  const items=getRetentionAgendaItems();
+  const today=todayKey();
+  el.innerHTML=items.map(it=>{
+    const done=!!S.retentionDone[it.date];
+    const isToday=it.date===today;
+    const dateBR=it.date.split('-').reverse().join('/');
+    return`<div style="display:flex;gap:10px;padding:10px 8px;border-bottom:1px solid var(--line);border-radius:8px;${isToday?'background:var(--accent-soft)':''}">
+      <button onclick="toggleRetentionDay('${it.date}')" style="width:22px;height:22px;border-radius:6px;border:2px solid ${done?'var(--ok)':'var(--line-strong)'};background:${done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;margin-top:2px">${done?'<span style="color:#fff">✓</span>':''}</button>
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">Dia ${it.dia} · ${dateBR}${isToday?' · HOJE · 13h':''}</div>
+        <div style="font-weight:700;font-size:13px;margin:2px 0 4px;${done?'text-decoration:line-through;opacity:.6':''}">${it.titulo}</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.4">${it.texto}</div>
+      </div>
+    </div>`;
+  }).join('')+`<div style="margin-top:10px;padding:0 8px;font-size:11px;color:var(--text3);line-height:1.5">📌 Regra: 1 interação por dia, nunca duas — excesso de estímulo vira ruído. Tom nunca ansioso, nunca suplicante: a agência não precisa dos candidatos, os candidatos precisam da agência.</div>`;
 }
 
 /* ===========================================================
@@ -8999,6 +9129,7 @@ function setTesterDecision(chatterId,decision){
   renderTesters();
 }
 function renderTesters(){
+  renderRetentionAgenda();
   renderTriagemPool();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
