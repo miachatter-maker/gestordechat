@@ -9716,8 +9716,15 @@ function mandamentosPanelHtml(cid){
       ${padrinhos.map(p=>`<option value="${p.id}" ${padrinhoId===p.id?'selected':''}>${p.name}</option>`).join('')}
     </select>`:`<div style="font-size:12px;color:var(--text3)">Nenhum chatter marcado como 👑 Padrinho ainda — defina o cargo na aba Equipe pra poder escolher aqui.</div>`}
   </div>`;
+  const obsGerais=S.chatterFichas?.[cid]?.padrinhoObservacoesGerais||'';
+  const obsGeraisHtml=`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-top:9px">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">✍️ Observações gerais do padrinho</div>
+    <textarea class="ftext" style="min-height:44px;font-size:12px" placeholder="Preenchido automaticamente ao importar o PDF do padrinho — ou escreva aqui direto..." onblur="savePadrinhoObsGerais('${cid}',this.value)">${obsGerais}</textarea>
+  </div>`;
   return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
-    <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div></div>
+    <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="baixarAvaliacaoPdf('${cid}')">📄 Baixar PDF</button>
+    </div>
     ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
       const e=ev[c.id]||{};
       return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
@@ -9734,7 +9741,177 @@ function mandamentosPanelHtml(cid){
       </div>`;
     }).join('')}
     ${padrinhoSelectHtml}
+    ${obsGeraisHtml}
   </div>`;
+}
+function savePadrinhoObsGerais(cid,val){
+  if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[cid].padrinhoObservacoesGerais=val;
+  save();
+}
+
+/* ===========================================================
+   AVALIAÇÃO DE CHATTER — PDF preenchível pro padrinho
+   Gera um PDF real com AcroForm (pdf-lib): campo Padrinho (texto),
+   campo Chatter (texto, travado e já preenchido) + um ID do chatter
+   embutido de forma invisível, um radio group Sim/Parcial/Não pra
+   cada um dos 11 critérios, e um campo de observações. Ao importar o
+   PDF de volta (já preenchido pelo padrinho), o Gestor lê os campos
+   do formulário direto — sem precisar de OCR ou digitar nada de novo
+   — e identifica sozinho de qual chatter é aquela avaliação pelo ID
+   embutido. Quando o bot do Discord entrar, ele fará esse preenchimento
+   automaticamente, sem precisar baixar/importar o arquivo manualmente.
+   =========================================================== */
+function pdfSafeText(str){
+  return(str||'')
+    .replace(/—/g,'-').replace(/–/g,'-').replace(/…/g,'...')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu,'')
+    .trim();
+}
+function pdfWrapText(font,text,size,maxWidth){
+  const words=text.split(' ');
+  const lines=[];
+  let line='';
+  words.forEach(w=>{
+    const test=line?line+' '+w:w;
+    if(font.widthOfTextAtSize(test,size)>maxWidth&&line){lines.push(line);line=w;}
+    else line=test;
+  });
+  if(line)lines.push(line);
+  return lines;
+}
+async function baixarAvaliacaoPdf(cid){
+  if(typeof PDFLib==='undefined'){toast('❌ Biblioteca de PDF não carregou ainda — espere a página carregar e tente de novo');return;}
+  const c=S.chatters.find(ch=>ch.id===cid);
+  if(!c)return;
+  try{
+    const{PDFDocument,StandardFonts,rgb}=PDFLib;
+    const pdfDoc=await PDFDocument.create();
+    const fontBold=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontReg=await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const form=pdfDoc.getForm();
+    const margin=50,pageW=595,pageH=842;
+    let page=pdfDoc.addPage([pageW,pageH]);
+    let y=780;
+    const newPageIfNeeded=needed=>{if(y-needed<70){page=pdfDoc.addPage([pageW,pageH]);y=780;}};
+
+    page.drawText('AVALIAÇÃO DE CHATTER',{x:margin,y,size:18,font:fontBold,color:rgb(0.12,0.16,0.32)});
+    y-=18;
+    page.drawText('Preenchido pelo padrinho durante o periodo de teste',{x:margin,y,size:9,font:fontReg,color:rgb(0.55,0.42,0.08)});
+    y-=28;
+
+    // ID do chatter — campo minúsculo e discreto no rodapé da 1ª página,
+    // usado só pra identificação automática ao importar de volta.
+    const hiddenId=form.createTextField('chatterId');
+    hiddenId.setText(cid);
+    hiddenId.addToPage(page,{x:pageW-40,y:12,width:30,height:8,borderWidth:0});
+
+    page.drawText('PADRINHO',{x:margin,y,size:9,font:fontBold,color:rgb(0.55,0.4,0.08)});
+    page.drawText('CHATTER',{x:margin+260,y,size:9,font:fontBold,color:rgb(0.55,0.4,0.08)});
+    y-=16;
+    const padrinhoField=form.createTextField('padrinho');
+    padrinhoField.addToPage(page,{x:margin,y:y-16,width:220,height:20,borderWidth:1,borderColor:rgb(0.7,0.7,0.7)});
+    const chatterField=form.createTextField('chatterNome');
+    chatterField.setText(pdfSafeText(c.name));
+    chatterField.enableReadOnly();
+    chatterField.addToPage(page,{x:margin+260,y:y-16,width:220,height:20,borderWidth:1,borderColor:rgb(0.7,0.7,0.7)});
+    y-=48;
+
+    MANDAMENTOS_CRITERIOS.forEach((crit,idx)=>{
+      const descLines=pdfWrapText(fontReg,pdfSafeText(crit.descricao),9,pageW-margin*2);
+      newPageIfNeeded(30+descLines.length*12);
+      page.drawText(`${String(idx+1).padStart(2,'0')}  ${pdfSafeText(crit.titulo)}`,{x:margin,y,size:11,font:fontBold,color:rgb(0.1,0.1,0.1)});
+      y-=14;
+      descLines.forEach(line=>{page.drawText(line,{x:margin,y,size:9,font:fontReg,color:rgb(0.4,0.4,0.4)});y-=12;});
+      y-=2;
+      page.drawText('Avaliação:',{x:margin,y,size:10,font:fontBold,color:rgb(0.1,0.1,0.1)});
+      const radio=form.createRadioGroup('crit_'+crit.id);
+      const opts=[['sim','Sim'],['parcial','Parcial'],['nao','Não']];
+      let ox=margin+68;
+      opts.forEach(([val,label])=>{
+        radio.addOptionToPage(val,page,{x:ox,y:y-2,width:11,height:11});
+        page.drawText(pdfSafeText(label),{x:ox+15,y,size:10,font:fontReg,color:rgb(0.15,0.15,0.15)});
+        ox+=70;
+      });
+      y-=22;
+      page.drawLine({start:{x:margin,y:y+6},end:{x:pageW-margin,y:y+6},thickness:0.5,color:rgb(0.85,0.85,0.85)});
+      y-=12;
+    });
+
+    newPageIfNeeded(120);
+    page.drawText('OBSERVAÇÕES DO PADRINHO',{x:margin,y,size:11,font:fontBold,color:rgb(0.55,0.4,0.08)});
+    y-=16;
+    const obsField=form.createTextField('observacoes');
+    obsField.enableMultiline();
+    obsField.addToPage(page,{x:margin,y:y-90,width:pageW-margin*2,height:90,borderWidth:1,borderColor:rgb(0.7,0.7,0.7)});
+
+    const bytes=await pdfDoc.save();
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=`Avaliacao_${c.name.replace(/\s+/g,'_')}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('📄 PDF gerado — envie pro padrinho preencher e depois importe de volta em Testers.');
+  }catch(err){
+    console.error('Erro ao gerar PDF de avaliação',err);
+    toast('❌ Erro ao gerar o PDF: '+err.message);
+  }
+}
+async function importarAvaliacaoPdf(inputEl){
+  const file=inputEl.files?.[0];
+  if(!file)return;
+  if(typeof PDFLib==='undefined'){toast('❌ Biblioteca de PDF não carregou ainda — espere a página carregar e tente de novo');inputEl.value='';return;}
+  try{
+    const bytes=await file.arrayBuffer();
+    const{PDFDocument}=PDFLib;
+    const pdfDoc=await PDFDocument.load(bytes,{ignoreEncryption:true});
+    const form=pdfDoc.getForm();
+    const getText=name=>{try{return(form.getTextField(name).getText()||'').trim();}catch(e){return'';}};
+    const getRadio=name=>{try{return form.getRadioGroup(name).getSelected()||'';}catch(e){return'';}};
+
+    const chatterId=getText('chatterId');
+    const chatterNomeField=getText('chatterNome');
+    const padrinhoNome=getText('padrinho');
+    const observacoes=getText('observacoes');
+    const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+
+    // Prioriza o ID embutido no PDF (o jeito confiável) — só cai pra casar
+    // pelo nome digitado se o arquivo não veio do botão "Baixar PDF" daqui.
+    let c=S.chatters.find(ch=>ch.id===chatterId);
+    if(!c&&chatterNomeField)c=S.chatters.find(ch=>norm(ch.name)===norm(chatterNomeField));
+    if(!c){
+      toast('⚠️ Não consegui identificar o chatter nesse PDF — confira se foi gerado pelo botão "📄 Baixar PDF" na página da pessoa.');
+      inputEl.value='';
+      return;
+    }
+
+    const ev=ensureMandamentosEval(c.id);
+    const statusMap={sim:'atende',parcial:'parcial',nao:'nao'};
+    let preenchidos=0;
+    MANDAMENTOS_CRITERIOS.forEach(crit=>{
+      const raw=getRadio('crit_'+crit.id);
+      const status=statusMap[raw];
+      if(!status)return;
+      if(!ev[crit.id])ev[crit.id]={status:'',nota:''};
+      ev[crit.id].status=status;
+      preenchidos++;
+    });
+    if(observacoes)S.chatterFichas[c.id].padrinhoObservacoesGerais=observacoes;
+    if(padrinhoNome){
+      const padrinhoMatch=S.chatters.find(ch=>ch.level==='padrinho'&&norm(ch.name)===norm(padrinhoNome));
+      if(padrinhoMatch)S.chatterFichas[c.id].padrinhoId=padrinhoMatch.id;
+    }
+    save();
+    toast(`✅ Avaliação de ${c.name} importada — ${preenchidos}/${MANDAMENTOS_CRITERIOS.length} critérios preenchidos.`);
+    const sel=document.getElementById('tester-select');
+    if(sel){sel.value=c.id;renderTesterDetail(c.id);}
+  }catch(err){
+    console.error('Erro ao importar avaliação em PDF',err);
+    toast('❌ Não consegui ler esse PDF como avaliação — confira se é o arquivo certo, gerado pelo botão "Baixar PDF".');
+  }finally{
+    inputEl.value='';
+  }
 }
 function renderTesterDetail(cid){
   const el=document.getElementById('tester-content');

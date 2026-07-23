@@ -14,6 +14,7 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js" defer></script>
 <title>GestorPro</title>
 <style>
 /* ============================================================
@@ -1099,6 +1100,16 @@ body{
       <button class="btn btn-primary btn-sm" onclick="openTriagemModal()">🎙️ Nova triagem</button>
     </div>
     <div id="triagem-pool-list"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;border:2px solid #B8860B">
+    <div class="panel-head">
+      <div><div class="panel-title">📥 Avaliação do Padrinho (PDF)</div><div class="panel-note">Importe o PDF preenchido — o Gestor identifica o chatter sozinho e preenche a Avaliação de Chatter dele</div></div>
+      <label class="btn btn-primary btn-sm" style="cursor:pointer">📤 Importar PDF
+        <input type="file" accept="application/pdf" style="display:none" onchange="importarAvaliacaoPdf(this)">
+      </label>
+    </div>
+    <div style="font-size:11.5px;color:var(--text3)">Baixe o modelo em branco na página de cada tester (📜 Avaliação de Chatter), envie pro padrinho preencher, e importe aqui de volta quando ele devolver. 🤖 Quando o bot do Discord estiver pronto, isso vai acontecer automaticamente, sem precisar importar manualmente.</div>
   </div>
 
   <div style="margin-bottom:12px">
