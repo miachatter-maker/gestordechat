@@ -9637,6 +9637,86 @@ function renderTesters(){
   attachSwipeToDelete(el,'.tester-decided-row',id=>deleteChatter(id),renderTesters);
 }
 
+/* ===========================================================
+   MANDAMENTOS DO CHATTER — critérios avaliativos usados durante o
+   período de teste, transformados a partir do documento oficial
+   (Mandamentos_do_Chatter). Cada tópico vira um critério com status
+   rápido (atende/parcial/não atende) + espaço de observação livre —
+   fica na página de detalhe do tester, ao lado da análise de
+   faturamento, pra embasar a decisão de aprovar/reprovar com o
+   comportamento observado, não só com o número.
+   =========================================================== */
+const MANDAMENTOS_CRITERIOS=[
+  {id:'nome',titulo:'Chama todos os leads novos pelo nome',
+    descricao:'Todo lead novo é chamado pelo nome e ninguém fica sem resposta — descobre o que ele quer, gera intenção de compra e sabe agir: comprou (continua o atendimento), não comprou (curte e segue), questionou demais (dá um ultimato).'},
+  {id:'organizacao',titulo:'Organização pra responder mensagens não lidas',
+    descricao:'Responde de forma organizada e sistemática (ex: 15 de cima pra baixo e 15 de baixo pra cima), sem deixar ninguém de fora.'},
+  {id:'constancia',titulo:'Constância do começo ao fim do turno',
+    descricao:'Mantém a mesma frequência de resposta o turno inteiro — mesmo quando o chat esfria, continua atenta pra responder quem chegar.'},
+  {id:'linguagem',titulo:'Linguagem adequada e posicionamento',
+    descricao:'Linguagem feminina, com autoridade e posicionamento — tom provocativo, engraçado e levemente tímido quando cabe, agregando valor à experiência.'},
+  {id:'clientePede',titulo:'Faz o cliente pedir o que quer',
+    descricao:'Quem define preço, mídia e tempo é ela. Se o lead quer escolher tudo, cobra mais caro — reduz desperdício de tempo com curiosos testando limites.'},
+  {id:'sexting',titulo:'Sexting e PPV com direção de venda',
+    descricao:'Conduz a conversa com roteiro, começa com valores menores e aumenta gradualmente, adapta o ambiente à realidade do lead e cria imersão emocional.'},
+  {id:'tempoVale',titulo:'Valoriza o tempo da modelo',
+    descricao:'Limita conversas com leads excessivamente curiosos e conduz quem só consome mídia sem comprar pra uma decisão.'},
+  {id:'valorMidia',titulo:'Cria valor pras mídias',
+    descricao:'Sabe exatamente o que está oferecendo, instiga a imaginação antes de apresentar a mídia e só faz a oferta quando o lead já está envolvido.'},
+  {id:'exclusividade',titulo:'Vende exclusividade',
+    descricao:'Adapta o valor de conteúdos premium ao perfil e histórico de consumo do cliente, reforçando a percepção de raridade.'},
+  {id:'personagem',titulo:'Conhece bem a personagem',
+    descricao:'Domina a linguagem, os trejeitos e a forma de agir da personagem, criando uma experiência consistente do início ao fim.'},
+  {id:'perfilProfissional',titulo:'Perfil profissional',
+    descricao:'Sabe lidar com pressão, mantém postura profissional, respeita e ajuda os colegas, trabalha com foco e constância.'}
+];
+function ensureMandamentosEval(cid){
+  if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  if(!S.chatterFichas[cid].mandamentosEval)S.chatterFichas[cid].mandamentosEval={};
+  return S.chatterFichas[cid].mandamentosEval;
+}
+function setMandamentoStatus(cid,critId,status){
+  const ev=ensureMandamentosEval(cid);
+  if(!ev[critId])ev[critId]={status:'',nota:''};
+  ev[critId].status=ev[critId].status===status?'':status; // clica de novo pra desmarcar
+  save();
+  renderTesterDetail(cid);
+}
+function saveMandamentoNota(cid,critId,val){
+  const ev=ensureMandamentosEval(cid);
+  if(!ev[critId])ev[critId]={status:'',nota:''};
+  ev[critId].nota=val;
+  save();
+}
+function mandamentosPanelHtml(cid){
+  const ev=S.chatterFichas?.[cid]?.mandamentosEval||{};
+  const statusMeta={
+    atende:{label:'✅ Atende',color:'var(--ok)',bg:'var(--ok-soft)'},
+    parcial:{label:'⚠️ Parcial',color:'var(--warn)',bg:'var(--warn-soft)'},
+    nao:{label:'❌ Não atende',color:'var(--bad)',bg:'var(--bad-soft)'}
+  };
+  const total=MANDAMENTOS_CRITERIOS.length;
+  const atendeCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='atende').length;
+  const naoCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='nao').length;
+  return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
+    <div class="panel-head"><div><div class="panel-title">📜 Mandamentos do Chatter — avaliação</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div></div>
+    ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
+      const e=ev[c.id]||{};
+      return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${idx+1}. ${c.titulo}</div>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">${c.descricao}</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          ${['atende','parcial','nao'].map(s=>{
+            const sel=e.status===s;
+            const m=statusMeta[s];
+            return`<button onclick="setMandamentoStatus('${cid}','${c.id}','${s}')" style="flex:1;padding:6px 4px;border-radius:7px;border:2px solid ${sel?m.color:'var(--line)'};background:${sel?m.bg:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:10.5px;color:${sel?m.color:'var(--text2)'}">${m.label}</button>`;
+          }).join('')}
+        </div>
+        <textarea class="ftext" style="min-height:38px;font-size:12px" placeholder="Observação (espaço de resposta)..." onblur="saveMandamentoNota('${cid}','${c.id}',this.value)">${e.nota||''}</textarea>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 function renderTesterDetail(cid){
   const el=document.getElementById('tester-content');
   if(!el)return;
@@ -9736,7 +9816,8 @@ function renderTesterDetail(cid){
     <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--bad);border-color:var(--bad)" onclick="excluirTriagemIA('${cid}')">🗑️ Excluir triagem</button>`
   ):'';
 
-  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+`
+  const mandamentosPanel=mandamentosPanelHtml(cid);
+  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+mandamentosPanel+`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-weight:800;font-size:16px">${c.name}</div>
