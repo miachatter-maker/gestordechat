@@ -8088,7 +8088,77 @@ function removeWeekOrient(id){
 
 /* ===========================================================
    CHATLAB — análise de conversas com IA (aba integrada)
+   Baseado nos manuais internos: escala de temperatura 1-10, os
+   10 arquétipos de lead (com tom e gatilho), as 9 técnicas de
+   negociação, as 8 técnicas avançadas de persuasão e os sinais
+   de whale — em vez de critérios genéricos de "vendas".
    =========================================================== */
+const PLAYBOOK_CATALOGO=`
+ESCALA DE TEMPERATURA (Manual de Aplicação — 1 a 10):
+1 GELADO (zero sinal) · 2 FRIO (respostas curtas, sem emoção) · 3 ESQUENTANDO (pergunta de você ou conta de si) · 4 MORNO (primeira insinuação leve) · 5 PEDIU PRA VER ("manda uma foto" — NÃO é sinal de compra) · 6 IMAGINANDO (ele descreve, se solta) · 7 NO LIMITE (pico de ansiedade, pergunta preço) · 8 DECISÃO (pergunta preço/insiste/pressa — sinal real de disposição a pagar) · 9 SATISFAÇÃO (comprou) · 10 VÍNCULO (pós-venda).
+Regra por faixa: 1-6 é tudo gratuito (gancho leve só no 5-6, nunca mídia paga); 7-8 é o ponto de oferta, sempre respeitando a escada do script (nunca pular 1→2→3); 9-10 é rapport antes de emendar a próxima venda.
+
+10 ARQUÉTIPOS DE LEAD (Manual de Tipos de Lead + Tom e Gatilhos):
+Carente (busca companhia; tom acolhedor; gatilhos Rótulo Emocional + Reciprocidade) · Submisso (quer ser conduzido; tom firme/assertivo; gatilhos Autoridade de Especialista + Compromisso e Coerência) · Namorado (quer fantasia de relacionamento; tom íntimo/caloroso; gatilhos Antecipação do Futuro + Rótulo Emocional) · Fetichista (o mais lucrativo, não o mais estranho; tom curioso sem julgamento; gatilhos Autoridade de Especialista + Escassez Real) · Salvador (quer cuidar de você; tom vulnerável com moderação; gatilhos Reciprocidade + Compromisso e Coerência) · Curioso (está testando; tom leve sem pressão; gatilhos Loop Aberto + Reciprocidade) · Punheteiro (quer entrega rápida, não vínculo; tom direto/eficiente; gatilhos Fechamento Alternativo + Escassez Real) · Dominador (quer sentir que manda; tom confiante nunca submisso; gatilhos Efeito Contraste + Fechamento Alternativo) · Fã que não compra (interage mas não converte; tom amigável sem esforço extra; gatilhos Retirada da Oferta + Escassez Real) · Narcisista (quer validação; tom admirador genuíno; gatilhos Reciprocidade + Autoridade de Especialista invertida).
+
+9 TÉCNICAS DE NEGOCIAÇÃO: Ancoragem (fale o preço primeiro) · Silêncio Depois do Preço (fale e espere) · Escada de Concessão (nunca ceda sem pedir algo em troca) · Enquadramento (como descreve o preço muda a resposta) · Espelhamento (repita o ritmo dele) · Rótulo Emocional (nomeie a objeção antes dele) · Perguntas Calibradas ("o que faria valer a pena pra você") · Aversão à Perda (mostre o que ele perde) · Escassez Real (nunca invente prazo).
+
+8 TÉCNICAS AVANÇADAS DE PERSUASÃO: Reciprocidade · Compromisso e Coerência · Efeito Contraste · Retirada da Oferta · Fechamento Alternativo · Loop Aberto (Curiosidade) · Antecipação do Futuro · Autoridade de Especialista. Nunca empilhar mais de uma técnica na mesma mensagem — isso soa artificial.
+
+SINAIS DE WHALE (Manual de Criação de Whale): 3+ compras espaçadas, intervalo curto e constante, pagou sem regatear, ticket subindo, compartilhou algo pessoal sem ser perguntado. Quando presentes: não vender rápido, investir em conexão.
+
+REGRA DE VENDA RÁPIDA (turno 15h-23h, maior volume): pedido espontâneo de personalizado/whats já é sinal de compra — vender na hora; quando a oferta parte do chatter, sempre validar com sexting antes; nunca ofertar preço alto pra quem não validou.
+
+ERROS CLÁSSICOS DO PLAYBOOK (usar como catálogo de erro, não inventar outros): pular etapa de script, oferecer mídia paga sem ter passado por sexting, ceder desconto sem pedir nada em troca, mandar mídia de graça quando só pediram "pra ver", sumir depois de mandar conteúdo, usar escassez falsa, empilhar mais de uma técnica de persuasão na mesma mensagem, tratar todo mundo com o mesmo tom independente do arquétipo, discutir preço em vez de reforçar valor, vender antes de aquecer.
+`;
+// Copiloto tático — resposta curta e rápida pro CHATTER, em tempo real,
+// enquanto ele ainda está na conversa. Formato enxuto de propósito: não é
+// o relatório completo do gestor (isso é rodarChatLab), é orientação
+// imediata de "o que fazer agora".
+const CHATLAB_COPILOTO_SYSTEM=`Você é o Copiloto Tático da equipe de chat — orienta o chatter EM TEMPO REAL, durante a conversa, com base no playbook interno da agência abaixo. Responda em português, curto e direto, SEMPRE em JSON válido (nada de texto fora do JSON), com exatamente estas chaves:
+{"temperatura":{"nivel":0,"label":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}
+
+${PLAYBOOK_CATALOGO}
+
+Se a conversa for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" nesse campo — nunca invente evidência que não está no texto colado. Campos sem achado relevante (alerta, sinalDeWhale) podem ficar como string vazia.`;
+async function clRunCopiloto(conv){
+  const res=await fetch(AI_PROXY_URL,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:700,system:CHATLAB_COPILOTO_SYSTEM,messages:[{role:'user',content:'CONVERSA:\n'+conv}]})
+  });
+  const data=await res.json();
+  const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+  if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
+  const s=text.indexOf('{'),e=text.lastIndexOf('}');
+  if(s<0||e<0)throw new Error('Resposta da IA sem JSON');
+  return JSON.parse(text.slice(s,e+1));
+}
+function renderClCopilotoResult(state,obj){
+  const el=document.getElementById('cl-copiloto');
+  if(!el)return;
+  if(state==='loading'){el.innerHTML='<div class="panel" style="border-left:3px solid var(--accent)"><div style="font-size:12.5px;color:var(--text2)">🎯 Copiloto tático calculando…</div></div>';return;}
+  if(state==='error'){el.innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:12.5px">❌ Copiloto tático: ${obj?.message||'erro'}</div></div>`;return;}
+  const t=obj.temperatura||{},a=obj.arquetipo||{},g=obj.gatilhoRecomendado||{};
+  const tCol=t.nivel>=9?'var(--ok)':t.nivel>=7?'var(--warn)':'var(--text3)';
+  el.innerHTML=`<div class="panel" style="border-left:3px solid var(--accent)">
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px">🎯 COPILOTO TÁTICO — o que fazer agora</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="background:var(--bg-soft);border-radius:8px;padding:8px 12px;text-align:center">
+        <div style="font-size:9.5px;color:var(--text3)">TEMPERATURA</div>
+        <div style="font-size:16px;font-weight:800;font-family:var(--font-mono);color:${tCol}">${t.nivel||'—'}<span style="font-size:10px"> · ${t.label||''}</span></div>
+      </div>
+      <div style="background:var(--bg-soft);border-radius:8px;padding:8px 12px;text-align:center">
+        <div style="font-size:9.5px;color:var(--text3)">ARQUÉTIPO</div>
+        <div style="font-size:13px;font-weight:800">${a.tipo||'—'}<span style="font-size:10px;color:var(--text3)"> (${a.confianca||'—'})</span></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;margin-bottom:6px"><strong>Tom recomendado:</strong> ${obj.tomRecomendado||'—'}</div>
+    <div style="font-size:12.5px;margin-bottom:6px"><strong>Gatilho agora:</strong> ${g.tecnica||'—'}${g.comoAplicar?' — '+g.comoAplicar:''}</div>
+    <div style="font-size:13px;font-weight:700;color:var(--ok);margin-bottom:6px">👉 ${obj.proximaAcao||'—'}</div>
+    ${obj.alerta?`<div style="font-size:12.5px;color:var(--bad);margin-top:6px">⚠️ ${obj.alerta}</div>`:''}
+    ${obj.sinalDeWhale?`<div style="font-size:12.5px;color:var(--accent);margin-top:6px">🐋 ${obj.sinalDeWhale}</div>`:''}
+  </div>`;
+}
 function renderChatLab(){
   const sel=document.getElementById('cl-chatter');
   if(sel){
@@ -8097,6 +8167,52 @@ function renderChatLab(){
     if(cur)sel.value=cur;
   }
   renderChatLabHistorico();
+  renderChatLabRanking();
+}
+// Responde as perguntas de gestão (quem converte melhor, qual arquétipo
+// compra mais, erro mais comum...) agregando o campo .tags que cada análise
+// já salva — consulta sobre dado estruturado, não uma pergunta nova pra IA.
+function renderChatLabRanking(){
+  const el=document.getElementById('cl-ranking');
+  if(!el)return;
+  const tagged=S.chatlabAnalyses.filter(a=>a.tags);
+  if(!tagged.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Analise algumas conversas pra ver os rankings aqui</div>';return;}
+
+  const porChatter={};
+  tagged.forEach(a=>{
+    if(!porChatter[a.chatterId])porChatter[a.chatterId]={total:0,conv:0,valor:0,whale:0,erros:{}};
+    const p=porChatter[a.chatterId];
+    p.total++;
+    if(a.tags.converteu==='sim'){p.conv++;p.valor+=parseFloat(a.tags.valor)||0;}
+    if(a.tags.sinalDeWhale)p.whale++;
+    if(a.tags.principalErro)p.erros[a.tags.principalErro]=(p.erros[a.tags.principalErro]||0)+1;
+  });
+  const ranked=Object.entries(porChatter).map(([cid,p])=>{
+    const c=S.chatters.find(ch=>ch.id===cid);
+    const topErro=Object.entries(p.erros).sort((x,y)=>y[1]-x[1])[0];
+    return{name:c?c.name:'?',total:p.total,taxa:p.total?Math.round(p.conv/p.total*100):0,
+      ticketMedio:p.conv?p.valor/p.conv:0,whale:p.whale,topErro:topErro?topErro[0]:'—'};
+  }).sort((a,b)=>b.taxa-a.taxa);
+
+  const arquetipoTally={};
+  tagged.filter(a=>a.tags.converteu==='sim'&&a.tags.arquetipo).forEach(a=>{
+    arquetipoTally[a.tags.arquetipo]=(arquetipoTally[a.tags.arquetipo]||0)+1;
+  });
+  const topArquetipo=Object.entries(arquetipoTally).sort((a,b)=>b[1]-a[1])[0];
+
+  el.innerHTML=`
+    ${topArquetipo?`<div style="background:var(--accent-soft);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12.5px"><strong>Arquétipo que mais converte:</strong> ${topArquetipo[0]} (${topArquetipo[1]} venda${topArquetipo[1]>1?'s':''})</div>`:''}
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="color:var(--text3);text-align:left"><th style="padding:4px 6px">Chatter</th><th style="padding:4px 6px">Conversas</th><th style="padding:4px 6px">Taxa conv.</th><th style="padding:4px 6px">Ticket médio</th><th style="padding:4px 6px">🐋</th><th style="padding:4px 6px">Erro mais comum</th></tr>
+      ${ranked.map(r=>`<tr style="border-top:1px solid var(--line)">
+        <td style="padding:5px 6px;font-weight:700">${r.name}</td>
+        <td style="padding:5px 6px">${r.total}</td>
+        <td style="padding:5px 6px;color:${r.taxa>=50?'var(--ok)':r.taxa>=25?'var(--warn)':'var(--bad)'};font-weight:700">${r.taxa}%</td>
+        <td style="padding:5px 6px;font-family:var(--font-mono)">${money(r.ticketMedio)}</td>
+        <td style="padding:5px 6px">${r.whale||''}</td>
+        <td style="padding:5px 6px;color:var(--text3)">${r.topErro}</td>
+      </tr>`).join('')}
+    </table>`;
 }
 function renderChatLabHistorico(){
   const el=document.getElementById('cl-historico');
@@ -8131,6 +8247,7 @@ function limparChatLab(){
   const c=document.getElementById('cl-conversa');if(c)c.value='';
   const x=document.getElementById('cl-ctx');if(x)x.value='';
   const r=document.getElementById('cl-resultado');if(r)r.innerHTML='';
+  const cp=document.getElementById('cl-copiloto');if(cp)cp.innerHTML='';
 }
 function clMd(md){
   return md
@@ -8161,9 +8278,14 @@ async function rodarChatLab(){
   btn.disabled=true;btn.textContent='Analisando…';
   document.getElementById('cl-resultado').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px">⏳ A IA está analisando a conversa…</div>';
 
+  // Copiloto tático roda em paralelo — é rápido, o chatter vê orientação
+  // imediata enquanto a auditoria completa (mais lenta) ainda processa.
+  renderClCopilotoResult('loading');
+  clRunCopiloto(conv).then(obj=>renderClCopilotoResult('ok',obj)).catch(err=>renderClCopilotoResult('error',err));
+
   const prev=S.chatlabAnalyses.filter(a=>a.chatterId===cid);
-  const system='Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de vendedores (chatters) e gera diagnósticos técnicos, precisos e acionáveis. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.';
-  const prompt=`Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prev.length?'\nAnálise nº '+(prev.length+1)+' — compare evolução quando relevante.':''}\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)`;
+  const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de chatters usando EXATAMENTE o playbook interno da agência abaixo — não critérios genéricos de vendas. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.\n\n${PLAYBOOK_CATALOGO}`;
+  const prompt=`Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prev.length?'\nAnálise nº '+(prev.length+1)+' — compare evolução quando relevante.':''}\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
 
   try{
     const res=await fetch(AI_PROXY_URL,{
@@ -8171,14 +8293,22 @@ async function rodarChatLab(){
       body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,system,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
-    const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+    let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
     if(!text)throw new Error(data.error?.message||'Resposta vazia da IA');
     const igpM=text.match(/IGP[^:]*:\s*\**\s*(\d+)/i);
     const igp=igpM?parseInt(igpM[1]):null;
     // Extract resumo executivo snippet for the Evolução diagnostic square
-    const resumoM=text.match(/## 🎯 Resumo Executivo([\s\S]*?)(?=\n## |$)/i);
+    const resumoM=text.match(/## 🎯 Resumo Executivo([\s\S]*?)(?=\n## |```json|$)/i);
     const resumo=resumoM?resumoM[1].trim().slice(0,600):'';
-    S.chatlabAnalyses.push({id:'cla'+Date.now(),chatterId:cid,date:new Date().toISOString(),igp,raw:text,resumo});
+    // Extrai o bloco json final (dado estruturado pro ranking) e tira do
+    // texto visível — o chatter/gestor só veem o relatório em markdown.
+    let tags=null;
+    const jsonM=text.match(/```json\s*([\s\S]*?)```/i);
+    if(jsonM){
+      try{tags=JSON.parse(jsonM[1]);}catch(e){tags=null;}
+      text=text.slice(0,jsonM.index).trim();
+    }
+    S.chatlabAnalyses.push({id:'cla'+Date.now(),chatterId:cid,date:new Date().toISOString(),igp,raw:text,resumo,tags});
     save();
     const col=igp>=70?'var(--ok)':igp>=50?'var(--warn)':'var(--bad)';
     document.getElementById('cl-resultado').innerHTML=`<div class="panel" style="border-left:3px solid ${col}">
@@ -8189,6 +8319,7 @@ async function rodarChatLab(){
       <div class="cl-md">${clMd(text)}</div>
     </div>`;
     renderChatLabHistorico();
+    renderChatLabRanking();
     toast('✅ Análise salva — aparece na Evolução');
   }catch(err){
     document.getElementById('cl-resultado').innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:13px">❌ ${err.message}</div><div style="font-size:12px;color:var(--text3);margin-top:5px">Verifique a conexão e tente novamente.</div></div>`;
