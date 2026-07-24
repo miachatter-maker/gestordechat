@@ -3022,25 +3022,29 @@ function renderOrientList(){
   // ou apagadas, pra nunca "sumir" de vez.
   const overdueO=S.orientations.filter(o=>o.date<yKey&&!o.done);
   let html='';
+  // Clicar no texto da orientação abre "como aplicar" (abordagem sugerida,
+  // roteiro, frase de abertura) quando ela veio do 🤖 Gerar orientação
+  // assertiva — os botões de ação usam stopPropagation pra não abrir o
+  // modal sem querer ao marcar feita ou apagar.
   if(overdueO.length){
     html+=`<div style="margin-bottom:12px"><div class="sectionlb" style="color:var(--bad)">⚠️ atrasadas</div>
     ${overdueO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);
-      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y;border-left:3px solid var(--bad)">
-      <div class="logdate">${c?c.name:'?'} · ${o.date.split('-').reverse().join('/')}${o.time?` ⏰ ${o.time}`:''}</div><div class="logtext">${o.text}</div>
-      <button class="btn btn-primary btn-xs" style="margin-top:8px" onclick="toggleOrientationDone('${o.id}')">✓ Marcar como feita</button>
-      <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="deleteOrientation('${o.id}')">✕</button></div>`;}).join('')}</div>`;
+      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y;border-left:3px solid var(--bad);cursor:pointer" onclick="openOrientView('${o.id}')">
+      <div class="logdate">${c?c.name:'?'} · ${o.date.split('-').reverse().join('/')}${o.time?` ⏰ ${o.time}`:''}</div><div class="logtext" style="text-decoration:underline;text-decoration-style:dotted">${o.text}</div>
+      <button class="btn btn-primary btn-xs" style="margin-top:8px" onclick="event.stopPropagation();toggleOrientationDone('${o.id}')">✓ Marcar como feita</button>
+      <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="event.stopPropagation();deleteOrientation('${o.id}')">✕</button></div>`;}).join('')}</div>`;
   }
   if(yO.length){
     html+=`<div style="margin-bottom:12px"><div class="sectionlb" style="color:var(--warn)">↻ follow-up de ontem</div>
-    ${yO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);return`<div class="logitem alt"><div class="logdate">${c?c.name:'?'} · ${o.shift}</div><div class="logtext">${o.text}</div></div>`;}).join('')}</div>`;
+    ${yO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);return`<div class="logitem alt" style="cursor:pointer" onclick="openOrientView('${o.id}')"><div class="logdate">${c?c.name:'?'} · ${o.shift}</div><div class="logtext" style="text-decoration:underline;text-decoration-style:dotted">${o.text}</div></div>`;}).join('')}</div>`;
   }
   if(!todayO.length){html+='<div class="empty"><div class="empty-ic">🎯</div><div class="empty-tx">Nenhuma orientação hoje</div></div>';}
   else{
     html+='<div class="sectionlb">hoje</div>';
     html+=todayO.map(o=>{const c=S.chatters.find(ch=>ch.id===o.chatterId);
-      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y"><div class="logdate">${c?c.name:'?'} · ${o.time?`⏰ ${o.time}`:`turno ${o.shift}`}</div><div class="logtext">${o.text}</div>
+      return`<div class="logitem orient-swipe-row" data-key="${o.id}" style="touch-action:pan-y;cursor:pointer" onclick="openOrientView('${o.id}')"><div class="logdate">${c?c.name:'?'} · ${o.time?`⏰ ${o.time}`:`turno ${o.shift}`}</div><div class="logtext" style="text-decoration:underline;text-decoration-style:dotted">${o.text}</div>
       ${o.goal?`<div style="margin-top:5px;font-family:var(--font-mono);font-size:12px;color:var(--ok)">meta: ${money(parseFloat(o.goal))}</div>`:''}
-      <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="deleteOrientation('${o.id}')">✕</button></div>`;
+      <button class="btn btn-icon btn-line" style="margin-top:8px" onclick="event.stopPropagation();deleteOrientation('${o.id}')">✕</button></div>`;
     }).join('');
   }
   el.innerHTML=html;
@@ -5961,6 +5965,48 @@ function agendarOrientacao(chatterId,orientId){
   toast('📅 Agendado! Já aparece na Agenda, no quadro da Semana e vai avisar no painel perto do horário.');
   renderFichaChatter(chatterId);
 }
+// Abre o "como aplicar" de uma orientação agendada (S.orientations) — clicado
+// em Tarefas Diárias ou na Agenda. Se ela foi agendada a partir do 🤖 Gerar
+// orientação assertiva (linkedOrientId aponta pra S.chatterFichas[].orientacoes),
+// mostra a abordagem sugerida, roteiro, frase de abertura e o que evitar que a
+// IA já gerou. Se foi criada como nota rápida (sem IA), mostra o texto simples
+// e avisa que não tem esse roteiro pronto.
+function openOrientView(orientId){
+  const o=S.orientations.find(x=>x.id===orientId);
+  if(!o){toast('⚠️ Essa orientação não existe mais — pode já ter sido concluída ou apagada.');return;}
+  const c=S.chatters.find(ch=>ch.id===o.chatterId);
+  const linked=o.linkedOrientId?(S.chatterFichas[o.chatterId]?.orientacoes||[]).find(x=>x.id===o.linkedOrientId):null;
+  const el=document.getElementById('orient-view-body');
+  if(!el)return;
+  const dateBR=o.date?o.date.split('-').reverse().join('/'):'';
+  const header=`<div style="margin-bottom:12px">
+    <div style="font-weight:800;font-size:15px">${c?c.name:'?'}</div>
+    <div style="font-size:12px;color:var(--text3)">${dateBR}${o.time?` · ⏰ ${o.time}`:''}</div>
+  </div>`;
+  let body;
+  if(linked){
+    const s=linked.sugestao||{};
+    const hasSugestao=s.abordagemSugerida||s.comoConectarComPerfil||s.fraseDeAbertura||(Array.isArray(s.roteiroSugerido)&&s.roteiroSugerido.length)||s.oQueEvitar;
+    body=`
+      <div style="font-size:12.5px;margin-bottom:8px"><strong>Material:</strong> ${linked.material||'—'}</div>
+      <div style="font-size:12.5px;margin-bottom:10px"><strong>Finalidade:</strong> ${linked.finalidade||'—'}</div>
+      ${s.abordagemSugerida?`<div style="margin-top:8px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">ABORDAGEM SUGERIDA</div><div style="font-size:13px;color:var(--text2);margin-top:2px;line-height:1.55">${s.abordagemSugerida}</div></div>`:''}
+      ${s.comoConectarComPerfil?`<div style="margin-top:10px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">COMO CONECTAR COM O PERFIL DELA</div><div style="font-size:13px;color:var(--text2);margin-top:2px;line-height:1.55">${s.comoConectarComPerfil}</div></div>`:''}
+      ${s.fraseDeAbertura?`<div style="margin-top:10px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">FRASE DE ABERTURA</div><div style="font-size:13px;color:var(--accent);margin-top:2px;font-style:italic">"${s.fraseDeAbertura}"</div></div>`:''}
+      ${Array.isArray(s.roteiroSugerido)&&s.roteiroSugerido.length?`<div style="margin-top:10px"><div style="font-size:10.5px;font-weight:700;color:var(--text3)">ROTEIRO</div><ol style="margin:4px 0 0 18px;padding:0;font-size:13px;color:var(--text2);line-height:1.6">${s.roteiroSugerido.map(step=>`<li style="margin-bottom:4px">${step}</li>`).join('')}</ol></div>`:''}
+      ${s.oQueEvitar?`<div style="margin-top:10px"><div style="font-size:10.5px;font-weight:700;color:var(--bad)">O QUE EVITAR</div><div style="font-size:13px;color:var(--text2);margin-top:2px;line-height:1.55">${s.oQueEvitar}</div></div>`:''}
+      ${!hasSugestao?'<div style="font-size:12.5px;color:var(--text3);margin-top:10px">Essa orientação ainda não tem a sugestão da IA de como aplicar — abra a Ficha dessa pessoa e gere pelo botão 🤖 Gerar orientação assertiva.</div>':''}
+    `;
+  } else {
+    body=`
+      <div style="font-size:12.5px;margin-bottom:8px">${o.text}</div>
+      ${o.goal?`<div style="font-size:12.5px;color:var(--ok);font-family:var(--font-mono)">meta: ${money(parseFloat(o.goal))}</div>`:''}
+      <div style="font-size:12px;color:var(--text3);margin-top:10px">Essa orientação foi criada direto na Agenda (sem IA) — não tem um roteiro de "como aplicar". Pra ter isso, crie a orientação pela Ficha da pessoa usando o 🤖 Gerar orientação assertiva.</div>
+    `;
+  }
+  el.innerHTML=header+body+`<button class="btn ${o.done?'btn-ghost':'btn-primary'} btn-block" style="margin-top:14px" onclick="toggleOrientationDone('${o.id}');closeModal('m-orient-view');">${o.done?'↺ Desmarcar como feita':'✓ Marcar como feita'}</button>`;
+  openModal('m-orient-view');
+}
 function renderOrientacaoPanel(chatterId){
   const f=S.chatterFichas[chatterId]||{};
   const list=(f.orientacoes||[]).slice().reverse();
@@ -7165,10 +7211,16 @@ function autoTaskRowHtml(t){
   // ficar claro que não é um item de hoje, mas continua acessível/clicável
   // até ser marcado como feito (não soma mais depois disso).
   const isOverdue=/^Atrasad/.test(t.tag);
+  // Orientações (t.view) abrem, ao clicar no texto, um modal com a abordagem
+  // sugerida/roteiro/frase de abertura — "a forma de aplicá-la" — em vez de
+  // só mostrar o texto curto. Semanal/Mensal/Treinamento não têm esse roteiro
+  // guardado, então continuam sem clique no texto (só o checkbox).
+  const textStyle=`flex:1;font-size:13px;${t.isDone?'text-decoration:line-through;opacity:.5;':''}${t.view?'cursor:pointer;text-decoration:underline;text-decoration-style:dotted;':''}`;
+  const textClick=t.view?` onclick="${t.view}"`:'';
   return`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
     <button onclick="${t.toggle}" style="width:20px;height:20px;border-radius:5px;border:2px solid ${t.isDone?'var(--ok)':isOverdue?'var(--bad)':'var(--line-strong)'};background:${t.isDone?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px">${t.isDone?'<span style="color:#fff">✓</span>':''}</button>
     <span style="font-size:10.5px;font-family:var(--font-mono);color:var(--text3);width:38px;flex-shrink:0">${t.time}</span>
-    <span style="flex:1;font-size:13px;${t.isDone?'text-decoration:line-through;opacity:.5':''}">${t.text}</span>
+    <span style="${textStyle}"${textClick}>${t.text}</span>
     <span style="font-size:9.5px;color:${isOverdue?'var(--bad)':'var(--accent)'};background:${isOverdue?'var(--bad-soft)':'var(--accent-soft)'};padding:2px 6px;border-radius:5px;flex-shrink:0;white-space:nowrap">${t.tag}</span>
   </div>`;
 }
@@ -7190,6 +7242,7 @@ function getAutoDailyAgendaItems(dateKey){
     items.push({key:`orient|${o.id}`,time:o.time,date:'',
       text:`🎯 Orientação — ${c?c.name:'?'}: ${o.text}`,
       isDone:!!o.done,toggle:`toggleOrientationDone('${o.id}')`,
+      view:`openOrientView('${o.id}')`,
       tag:overdue?`Atrasada · ${o.date.split('-').reverse().join('/')}`:'Orientação'});
   });
   Object.keys(S.weeklyTasks).forEach(wk=>{
