@@ -1096,6 +1096,29 @@ body{
 
   <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
     <div class="panel-head">
+      <div><div class="panel-title">🎙️ Mapeamento — Gravação Rápida</div><div class="panel-note">6 gravadores independentes, sem roteiro — grave uma pessoa, aperte "Terminar gravação" (já salva sozinho) e grave a próxima na sequência</div></div>
+    </div>
+    <div id="map-slots"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
+    <div class="panel-head">
+      <div><div class="panel-title">📁 Transcrições</div><div class="panel-note">Gravações organizadas por nome — clique pra ver o texto, renomeie se a IA não reconheceu certo</div></div>
+      <button class="btn btn-primary btn-sm" id="map-gerar-btn" onclick="gerarMapeamentoBatch()" disabled>🎯 Gerar Mapeamento</button>
+    </div>
+    <div id="map-transcricoes-list"></div>
+    <div id="map-gerar-status" style="font-size:11.5px;color:var(--text3);margin-top:6px"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
+    <div class="panel-head">
+      <div><div class="panel-title">🗺️ MAPEAMENTO DOS NOVOS</div><div class="panel-note">Lotes já mapeados pela IA, por data — quem deu risco aparece em vermelho, os melhores nomes pra vaga em destaque</div></div>
+    </div>
+    <div id="map-novos-list"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
+    <div class="panel-head">
       <div><div class="panel-title">🔍 Mapeamento de Triagem</div><div class="panel-note">Grava/cola a call em grupo com vários candidatos — a IA separa por nome e monta um perfil de cada um</div></div>
       <button class="btn btn-primary btn-sm" onclick="openTriagemModal()">🎙️ Nova triagem</button>
     </div>

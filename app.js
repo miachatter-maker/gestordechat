@@ -138,6 +138,9 @@ function migrateState(s){
   if(!s.retentionDone)s.retentionDone={};
   if(!s.creativityLog)s.creativityLog={}; // dateKey -> {habitId:true} — reset diário dos hábitos de criatividade
   if(!s.creativityWeekly)s.creativityWeekly={}; // weekKey(seg) -> {done, review:{...}} — desafio semanal + revisão
+  if(!s.mapRecordings)s.mapRecordings=[]; // [{id,name,transcript,date,mapped}] — gravações rápidas do novo Mapeamento (6 slots)
+  if(!s.mapSlotDrafts)s.mapSlotDrafts={}; // '1'..'6' -> texto em andamento (recuperação se travar no meio da gravação)
+  if(!s.mapeamentoBatches)s.mapeamentoBatches=[]; // [{id,date,results:[{id,name,recordingId,...campos da IA}]}] — MAPEAMENTO DOS NOVOS
   if(!s.weekGoals)s.weekGoals={};
   if(!s.revenues)s.revenues={};
   if(!s.models)s.models=[];
@@ -753,6 +756,9 @@ let S={
   retentionDone:{}, // 'YYYY-MM-DD' (data daquele dia do ciclo Seg-Sex) -> true/false — feito do quadro de Aquecimento Discord
   creativityLog:{}, // dateKey -> {habitId:true} — hábitos diários do quadro de Exercício de Criatividade (Estudos)
   creativityWeekly:{}, // weekKey(seg) -> {done, review:{...}} — desafio semanal de exploração + revisão semanal
+  mapRecordings:[], // [{id,name,transcript,date,mapped}] — gravações rápidas do novo Mapeamento (6 slots)
+  mapSlotDrafts:{}, // '1'..'6' -> texto em andamento (recuperação de crash)
+  mapeamentoBatches:[], // [{id,date,results:[...]}] — quadro MAPEAMENTO DOS NOVOS
   triagemCandidatos:[], // perfis de triagem ainda não vinculados a um tester — [{id,nome,...,date}]
   orientedThisWeek:{}, // weekKey -> [chatterId,...]
   weekPrize:{},          // weekKey -> {goal, winner, prize}
@@ -5659,7 +5665,18 @@ function startMapeamentoRecording(){
           const t=ev.results[i][0].transcript;
           if(ev.results[i].isFinal)finalTxt+=t+' ';else interimTxt+=t;
         }
-        if(finalTxt)baseText+=finalTxt;
+        if(finalTxt){
+          baseText+=finalTxt;
+          // Salva a cada frase finalizada (não a cada palavra parcial) —
+          // se a aba travar/recarregar no meio da gravação, o que já foi
+          // dito não se perde mais, só o pedacinho ainda em andamento.
+          const cid=window._mapeamentoChatterId;
+          if(cid){
+            if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+            S.chatterFichas[cid].mapeamentoDraftTranscript=baseText;
+            save();
+          }
+        }
         ta.value=baseText+interimTxt;
       };
       _mapRecognition.onerror=(ev)=>console.warn('Erro no reconhecimento de voz',ev.error);
@@ -6091,7 +6108,13 @@ function startTriagemRecording(){
           const t=ev.results[i][0].transcript;
           if(ev.results[i].isFinal)finalTxt+=t+' ';else interimTxt+=t;
         }
-        if(finalTxt)baseText+=finalTxt;
+        if(finalTxt){
+          baseText+=finalTxt;
+          // Mesma lógica do Mapeamento — salva a cada frase finalizada, não
+          // só quando clica em Parar, pra sobreviver a crash/reload no meio.
+          S.triagemDraftTranscript=baseText;
+          save();
+        }
         ta.value=baseText+interimTxt;
       };
       _triRecognition.onerror=(ev)=>console.warn('Erro no reconhecimento de voz',ev.error);
@@ -6214,6 +6237,316 @@ async function gerarTriagemIA(){
     }
     window._triLastErrMsg=null;window._triLastErrQuota=false;window._triLastErrWait=null;
   }
+}
+
+/* ===========================================================
+   MAPEAMENTO — gravações rápidas em 6 slots + Transcrições +
+   MAPEAMENTO DOS NOVOS.
+   Substitui o fluxo antigo de mapeamento por roteiro fixo pra NOVOS
+   candidatos: 6 gravadores independentes, sem roteiro, cada um
+   transcreve ao vivo e SALVA sozinho ao clicar em "Terminar gravação"
+   (o próprio botão já é o salvar). O nome da pessoa é reconhecido a
+   partir do que ela fala (ex: "aqui é o Felipe") — se não reconhecer,
+   entra como "Pessoa sem nome" e dá pra renomear na mão. Assim que
+   salva, o slot volta vazio pra gravar a próxima pessoa na sequência,
+   sem travar pedindo permissão de microfone de novo (o navegador já
+   lembra a permissão depois da primeira vez nesse site).
+   Depois, o botão "Gerar Mapeamento" em Transcrições manda TODOS os
+   nomes pendentes de uma vez só pra IA (1 request só, economiza cota),
+   e o resultado vira um novo lote em MAPEAMENTO DOS NOVOS — com quem
+   deu sinal de risco em vermelho e os melhores nomes pra vaga em
+   destaque (peso extra pra quem responde bem à autoridade e traços de
+   personalidade sutis captados na fala).
+   =========================================================== */
+let _mapSlotRecognition={}; // slotId -> SpeechRecognition ativo
+let _mapSlotStream={};      // slotId -> MediaStream ativo
+let _mapSlotRecording={};   // slotId -> bool
+
+// Tenta reconhecer o nome da pessoa a partir do início da fala dela —
+// funciona bem quando ela se apresenta ("aqui é o Felipe", "meu nome é
+// Ana", "pode me chamar de Bia"). Se não achar nenhum padrão, devolve
+// null e a gravação entra como "Pessoa sem nome" (dá pra renomear).
+function detectNameFromTranscript(text){
+  if(!text)return null;
+  const patterns=[
+    /\bme chamo\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+    /\bmeu nome é\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+    /\bpode me chamar de\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+    /\baqui é (?:o|a)\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+    /\baqui quem fala é (?:o|a)\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+    /\beu sou (?:o|a)\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+    /\bsou (?:o|a)\s+([A-ZÀ-Ú][a-zà-ú]+)/i,
+  ];
+  for(const re of patterns){
+    const m=text.match(re);
+    if(m&&m[1])return m[1].charAt(0).toUpperCase()+m[1].slice(1).toLowerCase();
+  }
+  return null;
+}
+function renderMapSlots(){
+  const el=document.getElementById('map-slots');
+  if(!el)return;
+  el.innerHTML=Array.from({length:6},(_,i)=>i+1).map(slotId=>{
+    const recording=!!_mapSlotRecording[slotId];
+    const draft=S.mapSlotDrafts[slotId]||'';
+    return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px;${recording?'border-color:var(--bad)':''}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3)">SLOT ${slotId}${draft&&!recording?' · rascunho recuperado':''}</div>
+        <button class="btn ${recording?'btn-danger':'btn-primary'} btn-xs" onclick="toggleMapSlotRecording(${slotId})">${recording?'⏹️ Terminar gravação':'🎙️ Gravar'}</button>
+      </div>
+      ${recording?`<div style="font-size:11.5px;color:var(--bad);margin-top:6px">🔴 Gravando… fale perto do microfone.</div>`:''}
+      ${draft&&!recording?`<div style="font-size:11.5px;color:var(--text3);margin-top:6px">Tem um rascunho aqui — clique em Gravar pra continuar ou vai se perder ao gravar outra pessoa nesse slot.</div>`:''}
+    </div>`;
+  }).join('');
+}
+function toggleMapSlotRecording(slotId){
+  if(_mapSlotRecording[slotId])stopMapSlotRecording(slotId);else startMapSlotRecording(slotId);
+}
+function startMapSlotRecording(slotId){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    toast('⚠️ Seu navegador não suporta gravação de áudio.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+    _mapSlotStream[slotId]=stream;
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){
+      toast('⚠️ Transcrição automática não é suportada nesse navegador (funciona melhor no Chrome/Android).');
+      try{stream.getTracks().forEach(t=>t.stop());}catch(e){}
+      return;
+    }
+    const rec=new SR();
+    rec.lang='pt-BR';rec.continuous=true;rec.interimResults=true;
+    let baseText=S.mapSlotDrafts[slotId]||'';
+    if(baseText&&!/\s$/.test(baseText))baseText+=' ';
+    rec.onresult=(ev)=>{
+      let finalTxt='';
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        if(ev.results[i].isFinal)finalTxt+=ev.results[i][0].transcript+' ';
+      }
+      if(finalTxt){
+        baseText+=finalTxt;
+        // Salva a cada frase finalizada — se travar no meio, o slot
+        // recupera o rascunho na próxima abertura em vez de sumir.
+        S.mapSlotDrafts[slotId]=baseText;
+        save();
+      }
+    };
+    rec.onerror=(ev)=>console.warn('Erro no reconhecimento de voz (slot '+slotId+')',ev.error);
+    rec.onend=()=>{ if(_mapSlotRecording[slotId]){ try{rec.start();}catch(e){} } };
+    try{rec.start();}catch(e){console.warn(e);}
+    _mapSlotRecognition[slotId]=rec;
+    _mapSlotRecording[slotId]=true;
+    renderMapSlots();
+  }).catch(err=>{
+    console.error(err);
+    toast('⚠️ Não foi possível acessar o microfone. Verifique a permissão do navegador.');
+  });
+}
+// "Terminar gravação" já É o salvar — para a gravação, reconhece o nome
+// pelo que foi dito, cria a entrada em Transcrições e esvazia o slot na
+// hora, pronta pra gravar a próxima pessoa sem pedir nada de novo.
+function stopMapSlotRecording(slotId){
+  _mapSlotRecording[slotId]=false;
+  const rec=_mapSlotRecognition[slotId];
+  if(rec){try{rec.onend=null;rec.stop();}catch(e){} delete _mapSlotRecognition[slotId];}
+  const stream=_mapSlotStream[slotId];
+  if(stream){try{stream.getTracks().forEach(t=>t.stop());}catch(e){} delete _mapSlotStream[slotId];}
+  const transcript=(S.mapSlotDrafts[slotId]||'').trim();
+  delete S.mapSlotDrafts[slotId];
+  if(!transcript){save();renderMapSlots();return;}
+  const name=detectNameFromTranscript(transcript)||('Pessoa sem nome '+(S.mapRecordings.filter(r=>/^Pessoa sem nome/.test(r.name)).length+1));
+  S.mapRecordings.push({id:'mr'+Date.now()+Math.random().toString(36).slice(2,5),name,transcript,date:todayKey(),mapped:false});
+  save();
+  toast(`✅ Gravação salva em Transcrições — reconhecido como "${name}"`);
+  renderMapSlots();
+  renderMapTranscricoes();
+}
+function renameMapRecording(id){
+  const r=S.mapRecordings.find(x=>x.id===id);
+  if(!r)return;
+  const novo=prompt('Nome dessa pessoa:',r.name);
+  if(!novo||!novo.trim())return;
+  r.name=novo.trim();
+  save();
+  renderMapTranscricoes();
+}
+function deleteMapRecording(id){
+  if(!confirm('Excluir essa gravação/transcrição? Essa ação não pode ser desfeita.'))return;
+  S.mapRecordings=S.mapRecordings.filter(r=>r.id!==id);
+  save();
+  renderMapTranscricoes();
+}
+function toggleMapTranscript(id){
+  const b=document.getElementById('map-tr-body-'+id),ic=document.getElementById('map-tr-ic-'+id);
+  if(!b)return;
+  const open=b.style.display!=='none';
+  b.style.display=open?'none':'block';
+  if(ic)ic.textContent=open?'▼':'▲';
+}
+function renderMapTranscricoes(){
+  const el=document.getElementById('map-transcricoes-list');
+  if(!el)return;
+  const pendentes=S.mapRecordings.filter(r=>!r.mapped);
+  if(!pendentes.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:6px 0">Nenhuma transcrição pendente — grave alguém acima pra aparecer aqui.</div>';
+    const gbtn=document.getElementById('map-gerar-btn');if(gbtn)gbtn.disabled=true;
+    return;
+  }
+  const gbtn=document.getElementById('map-gerar-btn');if(gbtn)gbtn.disabled=false;
+  el.innerHTML=pendentes.map(r=>`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden">
+    <div style="padding:10px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleMapTranscript('${r.id}')">
+      <div style="font-size:13px;font-weight:700">${r.name}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:9.5px;color:var(--text3)" id="map-tr-ic-${r.id}">▼</span>
+      </div>
+    </div>
+    <div id="map-tr-body-${r.id}" style="display:none;padding:12px">
+      <div style="font-size:12.5px;color:var(--text2);line-height:1.55;margin-bottom:10px">${r.transcript}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();renameMapRecording('${r.id}')">✏️ Renomear</button>
+        <button class="btn btn-ghost btn-xs" style="color:var(--bad);border-color:var(--bad)" onclick="event.stopPropagation();deleteMapRecording('${r.id}')">🗑️ Excluir</button>
+      </div>
+    </div>
+  </div>`).join('');
+}
+const MAPEAMENTO_NOVOS_SYSTEM=`Você é uma psicóloga organizacional e recrutadora sênior especialista em avaliar candidatos NOVOS pra vaga de chatter/atendimento em redes sociais (OnlyFans), a partir de uma breve auto-apresentação gravada (não é uma entrevista estruturada — pode ser curta e informal). Você recebe uma lista de pessoas diferentes, cada uma com nome e sua transcrição individual.
+
+Pra cada pessoa, analise o CONTEÚDO do que foi dito e também sinais de linguagem (segurança, clareza, hesitação, entusiasmo, tom) — preste atenção especial a: (1) como essa pessoa tende a responder à autoridade/liderança (se posiciona, é dócil, questiona, busca aprovação), e (2) traços SUTIS de personalidade que não estão explícitos no conteúdo, só no JEITO de falar.
+
+Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
+{
+  "candidatos": [
+    {
+      "nome": "nome exatamente como foi passado",
+      "personalidadeUmaFrase": "a personalidade dessa pessoa em UMA frase curta e específica, nada de clichê genérico",
+      "tracoSutil": "1-2 frases sobre um traço sutil percebido no JEITO de falar (hesitação, confiança, humor, ansiedade, formalidade etc), não no conteúdo",
+      "autoridade": "baixa" | "média" | "alta",
+      "autoridadeMotivo": "1-2 frases justificando como essa pessoa tende a responder a comandos/liderança",
+      "comunicacao": (0-100),
+      "inteligenciaEmocional": (0-100),
+      "motivadores": ["até 3, entre: dinheiro, reconhecimento, competição, estabilidade, aprendizado, propósito, liberdade, status, crescimento, impacto, pertencimento"],
+      "riscoDetectado": true|false,
+      "motivoRisco": "se riscoDetectado=true, explique objetivamente o sinal de risco (instabilidade, discurso contraditório, desonestidade percebida, falta de comprometimento etc); se false, deixe string vazia",
+      "pontuacaoGeral": (0-100, o quanto essa pessoa parece um bom encaixe pra vaga, considerando tudo acima),
+      "recomendacao": "forte candidato" | "candidato razoável" | "não recomendado",
+      "resumo": "2-4 frases de parecer geral sobre colocar essa pessoa pra testar"
+    }
+  ]
+}
+O array "candidatos" deve ter uma entrada pra cada pessoa da lista, na mesma ordem, usando o nome exatamente como foi passado. Nunca deixe um campo vazio ou fora do formato pedido — use seu melhor julgamento clínico com base no que foi dito e no tom.`;
+async function gerarMapeamentoBatch(){
+  const pendentes=S.mapRecordings.filter(r=>!r.mapped);
+  if(!pendentes.length){toast('⚠️ Nenhuma transcrição pendente pra mapear.');return;}
+  const btn=document.getElementById('map-gerar-btn');
+  const st=document.getElementById('map-gerar-status');
+  if(btn){btn.disabled=true;btn.textContent='🤖 Mapeando...';}
+  if(st)st.textContent='Enviando pra IA, isso pode levar alguns segundos...';
+  try{
+    const prompt=pendentes.map((r,i)=>`PESSOA ${i+1} — Nome: ${r.name}\nTranscrição:\n${r.transcript}`).join('\n\n---\n\n');
+    const res=await fetch(AI_PROXY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:MAPEAMENTO_NOVOS_SYSTEM,messages:[{role:'user',content:prompt}]})
+    });
+    const data=await res.json();
+    let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
+    if(!text)throw aiQuotaError(data)||new Error('Resposta vazia da IA');
+    text=text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    const jsonStart=text.indexOf('{');const jsonEnd=text.lastIndexOf('}');
+    if(jsonStart===-1||jsonEnd===-1)throw new Error('A IA não retornou um JSON válido — tente gerar de novo.');
+    let parsed;
+    try{
+      parsed=JSON.parse(text.slice(jsonStart,jsonEnd+1));
+    }catch(parseErr){
+      const looksTruncated=jsonEnd<text.length-3;
+      throw new Error(looksTruncated
+        ?'A resposta da IA veio incompleta (cortada no meio). Tente gerar novamente — as transcrições continuam salvas.'
+        :'Não consegui interpretar o JSON da IA ('+parseErr.message+'). Tente gerar novamente.');
+    }
+    const candidatos=Array.isArray(parsed.candidatos)?parsed.candidatos:[];
+    if(!candidatos.length)throw new Error('A IA não retornou nenhum candidato mapeado.');
+    const results=candidatos.map((cand,i)=>({id:'mb'+Date.now()+i,recordingId:pendentes[i]?.id,...cand}));
+    S.mapeamentoBatches.push({id:'batch'+Date.now(),date:todayKey(),results});
+    pendentes.forEach(r=>{r.mapped=true;});
+    save();
+    toast(`🎯 ${results.length} pessoa${results.length>1?'s':''} mapeada${results.length>1?'s':''} — disponível em MAPEAMENTO DOS NOVOS`);
+    renderMapTranscricoes();
+    renderMapeamentoNovosPool();
+  }catch(e){
+    console.error('Erro ao gerar mapeamento em lote',e);
+    if(e.quota){
+      toast('⏳ Limite de uso da IA no momento — suas transcrições continuam salvas.');
+    }else{
+      toast('⚠️ Erro ao gerar mapeamento: '+e.message+' — suas transcrições continuam salvas.');
+    }
+    window._mapBatchLastErrQuota=!!e.quota;
+    window._mapBatchLastErrWait=e.waitSeconds;
+    window._mapBatchLastErrMsg=e.quota?'':e.message;
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🎯 Gerar Mapeamento';}
+    if(window._mapBatchLastErrQuota&&st){
+      renderAIWaitCountdown('map-gerar-status',window._mapBatchLastErrWait,{prefix:'⏳ Limite de uso da IA',suffix:'transcrições já estão salvas'});
+    }else if(st){
+      st.textContent=window._mapBatchLastErrMsg?`⚠️ ${window._mapBatchLastErrMsg}`:'';
+    }
+    window._mapBatchLastErrMsg=null;window._mapBatchLastErrQuota=false;window._mapBatchLastErrWait=null;
+  }
+}
+function renderMapeamentoNovosPool(){
+  const el=document.getElementById('map-novos-list');
+  if(!el)return;
+  const batches=[...S.mapeamentoBatches].reverse();
+  if(!batches.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhum mapeamento gerado ainda — grave em Mapeamento e clique em Gerar Mapeamento em Transcrições.</div>';return;}
+  el.innerHTML=batches.map(b=>{
+    const dateBR=b.date.split('-').reverse().join('/');
+    const top=[...b.results].sort((a,b2)=>(b2.pontuacaoGeral||0)-(a.pontuacaoGeral||0))[0];
+    const riscoCount=b.results.filter(r=>r.riscoDetectado).length;
+    return`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:9px;overflow:hidden">
+      <div style="padding:11px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleMapeamentoNovosBatch('${b.id}')">
+        <div>
+          <div style="font-size:13px;font-weight:700">${dateBR} · ${b.results.length} pessoa${b.results.length>1?'s':''}</div>
+          <div style="font-size:11px;color:var(--text3)">${top?`🌟 destaque: ${top.nome}`:''}${riscoCount?` · ⚠️ ${riscoCount} com risco`:''}</div>
+        </div>
+        <span style="font-size:10px;color:var(--text3)" id="map-novos-ic-${b.id}">▼</span>
+      </div>
+      <div id="map-novos-body-${b.id}" style="display:none;padding:12px">
+        ${[...b.results].sort((a,c)=>(c.pontuacaoGeral||0)-(a.pontuacaoGeral||0)).map((r,idx)=>{
+          const isTopPick=idx<3&&!r.riscoDetectado&&(r.pontuacaoGeral||0)>=60;
+          const recColor=r.recomendacao==='forte candidato'?'var(--ok)':r.recomendacao==='candidato razoável'?'var(--warn)':'var(--bad)';
+          return`<div style="border:1px solid ${r.riscoDetectado?'var(--bad)':'var(--line)'};${r.riscoDetectado?'background:var(--bad-soft);':''}border-radius:9px;padding:12px;margin-bottom:9px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+              <div style="font-weight:700;font-size:14px">${r.nome} ${isTopPick?'<span class="pill pill-ok" style="font-size:9px">🌟 sugerido pra vaga</span>':''}</div>
+              <div style="font-size:16px;font-weight:800;font-family:var(--font-mono);color:${recColor}">${r.pontuacaoGeral ?? '—'}</div>
+            </div>
+            <div style="font-size:9.5px;font-weight:700;color:${recColor};text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">${r.recomendacao||'—'}</div>
+            <div style="font-size:12.5px;color:var(--text2);margin-bottom:6px"><strong>${r.personalidadeUmaFrase||''}</strong></div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:4px">🎭 <strong>Traço sutil:</strong> ${r.tracoSutil||'—'}</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:4px">👑 <strong>Autoridade:</strong> ${r.autoridade||'—'} — ${r.autoridadeMotivo||''}</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:4px">🗣️ Comunicação: ${r.comunicacao ?? '—'}/100 · 💛 Intel. emocional: ${r.inteligenciaEmocional ?? '—'}/100</div>
+            ${Array.isArray(r.motivadores)&&r.motivadores.length?`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">🎯 Motivadores: ${r.motivadores.join(', ')}</div>`:''}
+            ${r.riscoDetectado?`<div style="font-size:12.5px;color:var(--bad);font-weight:700;margin-top:6px">⚠️ RISCO: ${r.motivoRisco||''}</div>`:''}
+            <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">${r.resumo||''}</div>
+            <button class="btn btn-primary btn-xs" style="margin-top:9px" onclick="criarTesterDoMapeamentoNovo('${r.nome.replace(/'/g,"\\'")}')">➕ Criar tester com esse nome</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+function toggleMapeamentoNovosBatch(id){
+  const b=document.getElementById('map-novos-body-'+id),ic=document.getElementById('map-novos-ic-'+id);
+  if(!b)return;
+  const open=b.style.display!=='none';
+  b.style.display=open?'none':'block';
+  if(ic)ic.textContent=open?'▼':'▲';
+}
+function criarTesterDoMapeamentoNovo(nome){
+  const chatterId='c'+Date.now();
+  S.chatters.push({id:chatterId,name:nome||'Novo candidato',discord:'',level:'teste',time:'tester',notes:'',watchtime:'',createdAt:new Date().toISOString()});
+  save();
+  toast('✅ '+(nome||'Candidato')+' criado como tester!');
+  renderTesters();
 }
 
 function renderTriagemPool(){
@@ -6776,6 +7109,17 @@ function getTesterAnalysis(chatterId){
 document.querySelectorAll('.chip').forEach(chip=>chip.addEventListener('click',()=>chip.classList.toggle('sel')));
 
 // ---------- INIT ----------
+// Rede de segurança global: se algum erro não tratado acontecer durante o
+// uso (não durante o carregamento inicial), avisa em vez de deixar a tela
+// travada/apagada em silêncio — e reforça que o autosave contínuo já
+// protege o que foi digitado/gravado até aqui.
+window.addEventListener('error',e=>{
+  console.error('Erro não tratado:',e.error||e.message);
+  try{toast('⚠️ Ocorreu um erro inesperado. Seus dados já salvos continuam seguros — se a tela travar, recarregue a página.',6000);}catch(_){}
+});
+window.addEventListener('unhandledrejection',e=>{
+  console.error('Promise rejeitada sem tratamento:',e.reason);
+});
 load();
 // Limpa duplicatas/lixo acumulado e salva uma vez logo na abertura do app —
 // não espera nenhuma ação do usuário, pra nunca depender de "clicar em algo"
@@ -9625,6 +9969,9 @@ function setTesterDecision(chatterId,decision){
 }
 function renderTesters(){
   renderTriagemPool();
+  renderMapSlots();
+  renderMapTranscricoes();
+  renderMapeamentoNovosPool();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
   const testers=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
