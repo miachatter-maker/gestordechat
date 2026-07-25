@@ -115,6 +115,7 @@ function migrateState(s){
   }
   if(!s.justificativas)s.justificativas={};
   if(!s.chatlabAnalyses)s.chatlabAnalyses=[];
+  if(!s.chatlabWeeklyReports)s.chatlabWeeklyReports={};
   if(!s.chatterTraining)s.chatterTraining={};
   if(!s.weekOrients)s.weekOrients=[];
   else{const wk=getWeekKey();s.weekOrients=s.weekOrients.filter(o=>!o.done||o.doneWeek===wk);} // done items vanish on new week
@@ -331,6 +332,7 @@ function initFirebase(){
     listenToFirestore(t);
     listenToAvaliacoesPendentes();
     listenToChatlabPendentes();
+    listenToRelatoriosSemanaisPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -414,8 +416,8 @@ function deepMergeState(local,remote){
 // o espaço disponível (~1MB por documento) por vários — sem mudar nada na
 // tela: o app continua trabalhando com um único objeto de estado (S) na
 // memória, só a gravação/leitura no Firebase é que fica dividida.
-const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses'];
-const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab'};
+const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses','chatlabWeeklyReports'];
+const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab',chatlabWeeklyReports:'shard-chatlab-semanal'};
 const ALL_SYNC_DOC_IDS=[FIREBASE_DOC_ID,...SHARD_FIELDS.map(f=>SHARD_DOC_IDS[f])];
 let fbDocsSeen=new Set();
 let fbDocsStatus={}; // docId -> 'ok'|'not-exists'|'error: ...' — pra diagnóstico
@@ -773,6 +775,7 @@ let S={
   motivacionalHome:{},   // weekKey -> {idea, results}
   chatAnalyses:{},       // dateKey -> [{id, chatterId, ...scores, pontosFracos, pontosFortes}]
   chatlabAnalyses:[],    // ChatLab: [{id, chatterId, date, igp, raw, resumo}]
+  chatlabWeeklyReports:{}, // chatterId -> [{weekKey, date, raw, generatedBy, analisesCount}]
   chatterTraining:{},    // chatterId -> texto "como treinar melhor"
   weekOrients:[],        // orientações da semana [{id, chatterId, text, done, doneWeek}]
   geradorMeu:[],         // gerador: chatters do meu time [{name, model, intervals:[{s,e,extra}]}]
@@ -8731,6 +8734,7 @@ function renderChatLab(){
     sel.innerHTML='<option value="">— selecionar —</option>'+S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
     if(cur)sel.value=cur;
   }
+  renderRelatorioSemanalChatLab(sel?.value||'');
   renderChatLabHistorico();
   renderChatLabRanking();
 }
@@ -8910,6 +8914,87 @@ async function rodarChatLab(){
   }finally{
     btn.disabled=false;btn.textContent='⚡ Analisar';
   }
+}
+
+/* ===========================================================
+   CHATLAB — RELATÓRIO SEMANAL DO CHATTER
+   Junta todas as análises da semana (Segunda-Domingo) de um chatter —
+   rodadas por ela OU pelo próprio chatter via link de autoanálise — e
+   pede pra IA sintetizar um relatório de evolução: o que melhorou, o
+   que manter, os erros mais frequentes, o plano pra semana seguinte e
+   uma tarefa de autoteste. O objetivo (pedido explícito da gestora) é
+   que o time aprenda a se autocorrigir sem depender só dela apontando
+   erro por erro. Pode ser gerado tanto por ela (aba ChatLab) quanto
+   pelo próprio chatter (link público chatlab-chatter.html) — os dois
+   lados enxergam o mesmo relatório assim que qualquer um gera.
+   =========================================================== */
+function coletarAnalisesDaSemana(cid){
+  const wd=getWeekDates(0); // sempre a semana ATUAL (segunda a domingo), não a que estiver navegando na tela
+  const start=wd[0];
+  const end=new Date(wd[6]);end.setHours(23,59,59,999);
+  return(S.chatlabAnalyses||[])
+    .filter(a=>a.chatterId===cid&&a.date&&new Date(a.date)>=start&&new Date(a.date)<=end)
+    .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+}
+async function gerarRelatorioSemanalChatter(cid,generatedBy){
+  const c=S.chatters.find(ch=>ch.id===cid);
+  if(!c)return;
+  const analises=coletarAnalisesDaSemana(cid);
+  if(!analises.length){toast('⚠️ Nenhuma análise do ChatLab essa semana ainda pra gerar relatório');return;}
+  const wk=getWeekKey(0);
+  const contexto=analises.map((a,i)=>`Análise ${i+1} — ${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})} — IGP ${a.igp||'—'}${a.tags?.principalErro?` — erro principal: ${a.tags.principalErro}`:''}${a.tags?.converteu?` — converteu: ${a.tags.converteu}`:''}${a.tags?.arquetipo?` — arquétipo: ${a.tags.arquetipo}`:''}\n${a.resumo||''}`).join('\n\n---\n\n');
+  const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, escrevendo um relatório semanal de evolução PRA O PRÓPRIO CHATTER ler — tom direto, didático e encorajador, mas honesto sobre os problemas reais. Baseie-se só nas análises fornecidas abaixo, nunca invente dado que não está lá.`;
+  const prompt=`Chatter: ${c.name}. Semana: ${weekLabel(0)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''} essa semana, rodadas por ela mesma e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva um relatório semanal em Markdown, curto, direto e prático, com exatamente estas seções:\n## ✅ O Que Melhorou (compare as análises mais antigas da semana com as mais recentes, se der pra perceber evolução)\n## 🔁 Continue Assim (pontos fortes a manter)\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram nas análises acima — use só o que está nos dados, não invente outros)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema listado acima)\n## 📝 Tarefa de Autoteste (uma prática específica e mensurável pra essa pessoa treinar sozinha nos próximos dias e depois conferir rodando uma nova autoanálise)`;
+  try{
+    const text=await clFetchAI(system,prompt,3000);
+    if(!text)throw new Error('Resposta vazia da IA');
+    if(!S.chatlabWeeklyReports)S.chatlabWeeklyReports={};
+    if(!S.chatlabWeeklyReports[cid])S.chatlabWeeklyReports[cid]=[];
+    S.chatlabWeeklyReports[cid]=S.chatlabWeeklyReports[cid].filter(r=>r.weekKey!==wk); // regenerar substitui a da mesma semana
+    S.chatlabWeeklyReports[cid].push({weekKey:wk,date:new Date().toISOString(),raw:text,generatedBy:generatedBy||'gestora',analisesCount:analises.length});
+    save();
+    return text;
+  }catch(err){
+    if(err.quota)toast(`⏳ Limite de uso da IA — tente de novo em ${err.waitSeconds||60}s`);
+    else toast('❌ Erro ao gerar relatório: '+err.message);
+    throw err;
+  }
+}
+async function gerarRelatorioSemanalUI(){
+  const cid=document.getElementById('cl-chatter')?.value;
+  if(!cid){toast('⚠️ Selecione um chatter primeiro');return;}
+  const btn=document.getElementById('cl-relatorio-btn');
+  const el=document.getElementById('cl-relatorio-semanal');
+  if(btn){btn.disabled=true;btn.textContent='Gerando…';}
+  if(el)el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">⏳ Sintetizando o relatório da semana…</div>';
+  try{
+    await gerarRelatorioSemanalChatter(cid,'gestora');
+    toast('✅ Relatório semanal gerado');
+  }catch(e){/* toast já mostrado dentro de gerarRelatorioSemanalChatter */}
+  renderRelatorioSemanalChatLab(cid);
+  if(btn){btn.disabled=false;btn.textContent='📅 Gerar relatório desta semana';}
+}
+function renderRelatorioSemanalChatLab(cid){
+  const el=document.getElementById('cl-relatorio-semanal');
+  if(!el)return;
+  if(!cid){el.innerHTML='';return;}
+  const lista=(S.chatlabWeeklyReports?.[cid]||[]).slice().sort((a,b)=>b.weekKey.localeCompare(a.weekKey));
+  if(!lista.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhum relatório semanal gerado ainda pra esse chatter</div>';return;}
+  const atual=lista[0];
+  const origem=atual.generatedBy==='chatter'?'🤖 gerado pelo próprio chatter':'gerado por você';
+  el.innerHTML=`<div class="panel" style="border-left:3px solid var(--accent)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:11px;color:var(--text3)">${weekKeyToLabel(atual.weekKey)} · ${atual.analisesCount} análise${atual.analisesCount>1?'s':''} · ${origem}</div>
+    </div>
+    <div class="cl-md">${clMd(atual.raw)}</div>
+  </div>
+  ${lista.length>1?`<div style="margin-top:8px;font-size:11px;color:var(--text3)">${lista.length-1} relatório${lista.length-1>1?'s':''} de semana${lista.length-1>1?'s':''} anterior${lista.length-1>1?'es':''} também salvo${lista.length-1>1?'s':''}</div>`:''}`;
+}
+function weekKeyToLabel(wk){
+  const[y,m,d]=wk.split('-').map(Number);
+  const mon=new Date(y,m-1,d);
+  const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+  return`${mon.getDate()}/${mon.getMonth()+1} – ${sun.getDate()}/${sun.getMonth()+1}`;
 }
 
 /* ===========================================================
@@ -10356,6 +10441,45 @@ function aplicarChatlabPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar autoanálise como processada',e));
   }catch(e){
     console.error('Erro ao aplicar autoanálise pendente do ChatLab',e);
+  }
+}
+// Mesmo padrão de fila da autoanálise, só que pro relatório semanal —
+// permite que o PRÓPRIO chatter gere o relatório da semana dele direto no
+// link público (chatlab-chatter.html), sem precisar da gestora gerar antes.
+function listenToRelatoriosSemanaisPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','chatlabRelatorioPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarRelatorioSemanalPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir relatórios semanais pendentes',err);
+    });
+}
+function aplicarRelatorioSemanalPendente(docId,data){
+  try{
+    if(!data.chatterId||!data.raw||!data.weekKey){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'dados incompletos'});
+      return;
+    }
+    const c=S.chatters.find(ch=>ch.id===data.chatterId);
+    if(!S.chatlabWeeklyReports)S.chatlabWeeklyReports={};
+    if(!S.chatlabWeeklyReports[data.chatterId])S.chatlabWeeklyReports[data.chatterId]=[];
+    S.chatlabWeeklyReports[data.chatterId]=S.chatlabWeeklyReports[data.chatterId].filter(r=>r.weekKey!==data.weekKey);
+    S.chatlabWeeklyReports[data.chatterId].push({weekKey:data.weekKey,date:data.date||new Date().toISOString(),raw:data.raw,generatedBy:'chatter',analisesCount:data.analisesCount||0});
+    save();
+    if(currentViewName()==='chatlab'){
+      const sel=document.getElementById('cl-chatter');
+      if(sel&&sel.value===data.chatterId)renderRelatorioSemanalChatLab(data.chatterId);
+    }
+    toast(`📅 ${c?c.name:'Um chatter'} gerou o relatório semanal dele — já aplicado`);
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar relatório semanal como processado',e));
+  }catch(e){
+    console.error('Erro ao aplicar relatório semanal pendente',e);
   }
 }
 

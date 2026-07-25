@@ -166,6 +166,29 @@ function clMd(md){
 function ocultarPlanoTreinamento(md){
   return md.replace(/##\s*📋\s*Plano de Treinamento[\s\S]*?(?=\n##\s|$)/i,'').trim();
 }
+// Mesma semana Segunda-Domingo usada no app principal (getMondayOfWeek /
+// getWeekKey em app.js) — duplicada aqui pra essa página funcionar sozinha.
+function getMondayOfWeek(d){
+  const dow=d.getDay();
+  const diff=dow===0?6:dow-1;
+  const mon=new Date(d);
+  mon.setDate(d.getDate()-diff);
+  mon.setHours(0,0,0,0);
+  return mon;
+}
+function fmtYMD(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function currentWeekKey(){return fmtYMD(getMondayOfWeek(new Date()));}
+function weekBoundsNow(){
+  const mon=getMondayOfWeek(new Date());
+  const sun=new Date(mon);sun.setDate(mon.getDate()+6);sun.setHours(23,59,59,999);
+  return[mon,sun];
+}
+function weekKeyToLabel(wk){
+  const[y,m,d]=wk.split('-').map(Number);
+  const mon=new Date(y,m-1,d);
+  const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+  return`${mon.getDate()}/${mon.getMonth()+1} – ${sun.getDate()}/${sun.getMonth()+1}`;
+}
 function toast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg;
@@ -209,6 +232,7 @@ function init(){
     fbDb=firebase.firestore();
     renderForm();
     carregarHistorico();
+    carregarRelatorioSemanal();
   }catch(e){
     console.error(e);
     content.innerHTML='<div class="error-box">Erro ao conectar: '+e.message+'</div>';
@@ -231,12 +255,93 @@ function renderForm(){
     <div id="copiloto" style="margin-top:12px"></div>
     <div id="resultado" style="margin-top:12px"></div>
     <div class="card" style="margin-top:18px">
+      <div class="panel-title">📅 Meu relatório da semana</div>
+      <div class="panel-note">Junta todas as suas análises da semana (essa e a que a gestora rodou) e resume o que melhorou, os problemas mais frequentes e uma tarefa pra você treinar sozinho.</div>
+      <div id="relatorio-semanal"><div style="color:var(--text3);font-size:12.5px">Carregando...</div></div>
+    </div>
+    <div class="card" style="margin-top:18px">
       <div class="panel-title">📈 Minhas análises anteriores</div>
       <div class="panel-note">Suas autoanálises anteriores — pra você acompanhar sua evolução</div>
       <div id="historico"><div style="color:var(--text3);font-size:12.5px">Carregando...</div></div>
     </div>
   `;
 }
+async function carregarRelatorioSemanal(){
+  const el=document.getElementById('relatorio-semanal');
+  if(!el||!fbDb)return;
+  const wk=currentWeekKey();
+  try{
+    const doc=await fbDb.collection('gestorpro').doc('shard-chatlab-semanal').get();
+    let mine=[];
+    if(doc.exists&&doc.data().payload){
+      const parsed=JSON.parse(doc.data().payload);
+      mine=(parsed.chatlabWeeklyReports&&parsed.chatlabWeeklyReports[chatterId])||[];
+    }
+    const atual=mine.find(r=>r.weekKey===wk);
+    if(atual){
+      const origem=atual.generatedBy==='chatter'?'gerado por você':'gerado pela sua gestora';
+      el.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:8px">${weekKeyToLabel(wk)} · ${atual.analisesCount||0} análise${(atual.analisesCount||0)>1?'s':''} · ${origem}</div>
+        <div class="cl-md">${clMd(atual.raw)}</div>
+        <button class="btn btn-ghost" style="margin-top:10px" onclick="gerarMeuRelatorioSemanal()">🔄 Gerar de novo (atualiza com análises novas)</button>`;
+    }else{
+      el.innerHTML=`<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">Ainda não tem relatório dessa semana (${weekKeyToLabel(wk)}).</div>
+        <button class="btn btn-primary" id="btn-relatorio" onclick="gerarMeuRelatorioSemanal()">📅 Gerar meu relatório da semana</button>`;
+    }
+  }catch(e){
+    console.error(e);
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Não consegui carregar o relatório semanal agora.</div>';
+  }
+}
+window.gerarMeuRelatorioSemanal=async function(){
+  const el=document.getElementById('relatorio-semanal');
+  const btn=document.getElementById('btn-relatorio');
+  if(btn){btn.disabled=true;btn.textContent='Gerando…';}
+  el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">⏳ Sintetizando o relatório da semana…</div>';
+  try{
+    const[start,end]=weekBoundsNow();
+    const doc=await fbDb.collection('gestorpro').doc('shard-chatlab').get();
+    let all=[];
+    if(doc.exists&&doc.data().payload){
+      const parsed=JSON.parse(doc.data().payload);
+      all=parsed.chatlabAnalyses||[];
+    }
+    const analises=all.filter(a=>a.chatterId===chatterId&&a.date&&new Date(a.date)>=start&&new Date(a.date)<=end).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    if(!analises.length){
+      el.innerHTML='<div class="error-box">Ainda não tem nenhuma análise sua registrada essa semana — analise pelo menos uma conversa acima antes de gerar o relatório.</div>';
+      return;
+    }
+    const wk=currentWeekKey();
+    const contexto=analises.map((a,i)=>`Análise ${i+1} — ${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})} — IGP ${a.igp||'—'}${a.tags?.principalErro?` — erro principal: ${a.tags.principalErro}`:''}${a.tags?.converteu?` — converteu: ${a.tags.converteu}`:''}${a.tags?.arquetipo?` — arquétipo: ${a.tags.arquetipo}`:''}\n${a.resumo||''}`).join('\n\n---\n\n');
+    const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, escrevendo um relatório semanal de evolução PRA O PRÓPRIO CHATTER ler — tom direto, didático e encorajador, mas honesto sobre os problemas reais. Baseie-se só nas análises fornecidas abaixo, nunca invente dado que não está lá.`;
+    const prompt=`Chatter: ${chatterNome||'chatter'}. Semana: ${weekKeyToLabel(wk)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''} essa semana, rodadas por ele mesmo e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva um relatório semanal em Markdown, curto, direto e prático, com exatamente estas seções:\n## ✅ O Que Melhorou (compare as análises mais antigas da semana com as mais recentes, se der pra perceber evolução)\n## 🔁 Continue Assim (pontos fortes a manter)\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram nas análises acima — use só o que está nos dados, não invente outros)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema listado acima)\n## 📝 Tarefa de Autoteste (uma prática específica e mensurável pra treinar sozinho nos próximos dias e depois conferir rodando uma nova autoanálise)`;
+    const text=await clFetchAI(system,prompt,3000);
+    if(!text)throw new Error('Resposta vazia da IA');
+
+    // Mostra na hora pro chatter e manda a fila pro app principal aplicar
+    // sozinho (mesmo padrão da autoanálise por conversa).
+    el.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:8px">${weekKeyToLabel(wk)} · ${analises.length} análise${analises.length>1?'s':''} · gerado por você</div>
+      <div class="cl-md">${clMd(text)}</div>
+      <button class="btn btn-ghost" style="margin-top:10px" onclick="gerarMeuRelatorioSemanal()">🔄 Gerar de novo (atualiza com análises novas)</button>`;
+    toast('✅ Relatório gerado — sua gestora também recebe automaticamente.');
+
+    await fbDb.collection('gestorpro').add({
+      type:'chatlabRelatorioPendente',
+      processado:false,
+      chatterId,chatterNome,
+      weekKey:wk,
+      date:new Date().toISOString(),
+      raw:text,
+      analisesCount:analises.length,
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(err){
+    if(err.quota){
+      el.innerHTML=`<div class="error-box">⏳ Limite de uso da IA no momento — espere cerca de ${err.waitSeconds}s e tente de novo.</div>`;
+    }else{
+      el.innerHTML=`<div class="error-box">❌ ${err.message}</div>`;
+    }
+  }
+};
 
 function renderCopiloto(state,obj){
   const el=document.getElementById('copiloto');
