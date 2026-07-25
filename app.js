@@ -8676,7 +8676,10 @@ async function clRunCopiloto(conv){
   let lastErr=null;
   for(let attempt=0;attempt<2;attempt++){
     try{
-      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,600);
+      // 1800 (não 600) porque o modelo atual "pensa" antes de responder e
+      // esses tokens de raciocínio saem do mesmo orçamento — com pouca
+      // margem o JSON final vinha cortado no meio (erro de parse).
+      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,1800);
       if(!text)throw new Error('Resposta vazia da IA (provavelmente limite de uso da IA no momento)');
       const s=text.indexOf('{'),e=text.lastIndexOf('}');
       if(s<0||e<0)throw new Error('Resposta cortada, tentando de novo…');
