@@ -7,13 +7,15 @@
 // chamava a API da Anthropic antes — este arquivo traduz o pedido/resposta
 // para o formato do Gemini por dentro, então NADA no app.js precisa mudar.
 
-// gemini-2.0-flash tem cota gratuita maior que gemini-2.5-flash (mais
-// requisições por minuto e por dia, sem custo, sem cartão) — trocado porque
-// o app estava batendo no limite de 20 req/min do flash normal com uso leve
-// de teste (Mapeamento, ChatLab, Orientação dividem a mesma cota).
-// Obs: 'gemini-2.5-flash-lite' foi tentado primeiro mas essa chave/projeto
-// não tem acesso a ele ("no longer available to new users").
-const GEMINI_MODEL = 'gemini-2.0-flash';
+// IMPORTANTE (achado em 25/07/2026): 'gemini-2.0-flash' tinha data de
+// desligamento anunciada pro dia 1/jun/2026 — ou seja, já tinha sido
+// desligado/fortemente restringido pelo Google havia quase 2 meses, e essa
+// é a causa raiz real de "o ChatLab nunca funcionou": não era só cota
+// dividida entre as ferramentas, era o modelo em si já obsoleto batendo
+// limite quase sempre. Trocado pra 'gemini-3.5-flash' — modelo atual,
+// recomendado pelo próprio Google como substituto, com cota gratuita
+// confirmada (Free Tier: gratuito) e sem data de desligamento anunciada.
+const GEMINI_MODEL = 'gemini-3.5-flash';
 
 // MÚLTIPLAS CHAVES — todas as ferramentas de IA do app (Mapeamento,
 // Triagem, Orientação, ChatLab, Pergunte à IA, Análise da Equipe) dividem a
