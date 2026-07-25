@@ -97,6 +97,9 @@ const chatterNome=params.get('nome')||'';
 const headerSub=document.getElementById('header-sub');
 const content=document.getElementById('content');
 
+let fbDb=null;
+const respostas={}; // critId -> {status,nota}
+
 if(!chatterId){
   headerSub.textContent='Link inválido';
   content.innerHTML='<div class="error-box">Esse link está incompleto ou inválido — peça pro gestor gerar o link de novo na página do tester.</div>';
@@ -104,9 +107,6 @@ if(!chatterId){
   headerSub.textContent='Avaliando: '+(chatterNome||'chatter');
   init();
 }
-
-let fbDb=null;
-const respostas={}; // critId -> {status,nota}
 
 function init(){
   try{
