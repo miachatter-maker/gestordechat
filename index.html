@@ -14,7 +14,6 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js" defer></script>
 <title>GestorPro</title>
 <style>
 /* ============================================================
@@ -1096,43 +1095,31 @@ body{
 
   <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
     <div class="panel-head">
-      <div><div class="panel-title">🎙️ Mapeamento — Gravação Rápida</div><div class="panel-note">6 gravadores independentes, sem roteiro — grave uma pessoa, aperte "Terminar gravação" (já salva sozinho) e grave a próxima na sequência</div></div>
+      <div><div class="panel-title">🗺️ Mapeamento</div><div class="panel-note">Grave a auto-apresentação de cada candidato — a transcrição já salva sozinha, depois é só mapear tudo com a IA</div></div>
     </div>
     <div id="map-slots"></div>
-  </div>
 
-  <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
-    <div class="panel-head">
-      <div><div class="panel-title">📁 Transcrições</div><div class="panel-note">Gravações organizadas por nome — clique pra ver o texto, renomeie se a IA não reconheceu certo</div></div>
-      <button class="btn btn-primary btn-sm" id="map-gerar-btn" onclick="gerarMapeamentoBatch()" disabled>🎯 Gerar Mapeamento</button>
+    <div style="border:1px solid var(--line);border-radius:9px;margin-top:10px;overflow:hidden">
+      <div style="padding:11px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleMapSection('transcricoes')">
+        <div style="font-weight:700;font-size:13px">📁 Transcrições</div>
+        <span id="map-section-ic-transcricoes" style="font-size:10px;color:var(--text3)">▼</span>
+      </div>
+      <div id="map-section-body-transcricoes" style="display:none;padding:12px">
+        <div id="map-transcricoes-list"></div>
+        <button class="btn btn-primary btn-sm btn-block" id="map-gerar-btn" onclick="gerarMapeamentoBatch()" disabled style="margin-top:6px">🗺️ Mapear Transcrições</button>
+        <div id="map-gerar-status" style="font-size:11.5px;color:var(--text3);margin-top:6px"></div>
+      </div>
     </div>
-    <div id="map-transcricoes-list"></div>
-    <div id="map-gerar-status" style="font-size:11.5px;color:var(--text3);margin-top:6px"></div>
-  </div>
 
-  <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
-    <div class="panel-head">
-      <div><div class="panel-title">🗺️ MAPEAMENTO DOS NOVOS</div><div class="panel-note">Lotes já mapeados pela IA, por data — quem deu risco aparece em vermelho, os melhores nomes pra vaga em destaque</div></div>
+    <div style="border:1px solid var(--line);border-radius:9px;margin-top:9px;overflow:hidden">
+      <div style="padding:11px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleMapSection('novos')">
+        <div style="font-weight:700;font-size:13px">🗺️ MAPEAMENTO DOS NOVOS</div>
+        <span id="map-section-ic-novos" style="font-size:10px;color:var(--text3)">▼</span>
+      </div>
+      <div id="map-section-body-novos" style="display:none;padding:12px">
+        <div id="map-novos-list"></div>
+      </div>
     </div>
-    <div id="map-novos-list"></div>
-  </div>
-
-  <div class="panel" style="margin-bottom:14px;border:2px solid var(--accent)">
-    <div class="panel-head">
-      <div><div class="panel-title">🔍 Mapeamento de Triagem</div><div class="panel-note">Grava/cola a call em grupo com vários candidatos — a IA separa por nome e monta um perfil de cada um</div></div>
-      <button class="btn btn-primary btn-sm" onclick="openTriagemModal()">🎙️ Nova triagem</button>
-    </div>
-    <div id="triagem-pool-list"></div>
-  </div>
-
-  <div class="panel" style="margin-bottom:14px;border:2px solid #B8860B">
-    <div class="panel-head">
-      <div><div class="panel-title">📥 Avaliação do Padrinho (PDF)</div><div class="panel-note">Importe o PDF preenchido — o Gestor identifica o chatter sozinho e preenche a Avaliação de Chatter dele</div></div>
-      <label class="btn btn-primary btn-sm" style="cursor:pointer">📤 Importar PDF
-        <input type="file" accept="application/pdf" style="display:none" onchange="importarAvaliacaoPdf(this)">
-      </label>
-    </div>
-    <div style="font-size:11.5px;color:var(--text3)">Baixe o modelo em branco na página de cada tester (📜 Avaliação de Chatter), envie pro padrinho preencher, e importe aqui de volta quando ele devolver. 🤖 Quando o bot do Discord estiver pronto, isso vai acontecer automaticamente, sem precisar importar manualmente.</div>
   </div>
 
   <div style="margin-bottom:12px">
@@ -1689,6 +1676,19 @@ body{
   <div class="modal-title">🎯 Como aplicar essa orientação</div>
   <div id="orient-view-body"></div>
   <button class="btn btn-ghost btn-block" style="margin-top:14px" onclick="closeModal('m-orient-view')">Fechar</button>
+</div></div>
+
+<div class="modalbg" id="m-avaliacao-link"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🔗 Link de avaliação</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Envie esse link pro padrinho responsável — ele preenche online e a Avaliação de Chatter dessa pessoa já atualiza sozinha aqui no Gestor, sem precisar de PDF.</div>
+  <div class="field">
+    <input class="finput" id="avaliacao-link-input" readonly onclick="this.select()" style="font-size:12px">
+  </div>
+  <button class="btn btn-primary btn-block" onclick="copiarLinkAvaliacao()">📋 Copiar link</button>
+  <div class="modalbtns" style="margin-top:10px">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-avaliacao-link')">Fechar</button>
+  </div>
 </div></div>
 
 <div class="modalbg" id="m-pergunte-ia"><div class="modal" style="max-width:640px">

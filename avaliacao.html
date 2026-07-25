@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Avaliação de Chatter — GestorPro</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+:root{
+  --bg:#FFFFFF;--bg-soft:#FBF6F7;--line:#F0E2E5;--line-strong:#E5CFD5;
+  --text:#241A1D;--text2:#7A6A6E;--text3:#B5A1A6;
+  --accent:#E8779B;--accent-soft:#FCEAF0;--accent-strong:#D85C84;
+  --ok:#177350;--ok-soft:#E7F5EE;--warn:#9A5B00;--warn-soft:#FBF0DD;
+  --bad:#B42334;--bad-soft:#FBEAEA;
+  --r-sm:8px;--r-md:10px;--r-lg:14px;
+  --font:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{background:var(--bg-soft);}
+body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:18px 14px 60px;}
+.wrap{max-width:560px;margin:0 auto;}
+.header{text-align:center;margin-bottom:20px;padding-top:8px;}
+.header .eyebrow{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-strong);margin-bottom:4px;}
+.header h1{font-size:21px;font-weight:800;}
+.header .sub{font-size:12.5px;color:var(--text3);margin-top:4px;}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;}
+.field{margin-bottom:12px;}
+.flabel{display:block;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px;}
+.finput,.ftext{width:100%;border:1px solid var(--line-strong);border-radius:var(--r-md);padding:10px 12px;font-family:var(--font);font-size:14.5px;color:var(--text);background:#fff;}
+.ftext{min-height:60px;resize:vertical;}
+.finput:focus,.ftext:focus{outline:none;border-color:var(--accent);}
+.crit{border:1px solid var(--line);border-radius:9px;padding:12px 13px;margin-bottom:10px;}
+.crit-title{font-size:13.5px;font-weight:700;margin-bottom:4px;}
+.crit-desc{font-size:11.5px;color:var(--text3);margin-bottom:9px;line-height:1.5;}
+.crit-btns{display:flex;gap:6px;margin-bottom:8px;}
+.crit-btn{flex:1;padding:8px 4px;border-radius:7px;border:2px solid var(--line);background:#fff;cursor:pointer;font-family:var(--font);font-weight:700;font-size:11px;color:var(--text2);}
+.crit-btn.sel-atende{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);}
+.crit-btn.sel-parcial{border-color:var(--warn);background:var(--warn-soft);color:var(--warn);}
+.crit-btn.sel-nao{border-color:var(--bad);background:var(--bad-soft);color:var(--bad);}
+.btn{display:block;width:100%;text-align:center;padding:14px;border-radius:var(--r-md);border:none;font-family:var(--font);font-weight:700;font-size:15px;cursor:pointer;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-primary:disabled{opacity:.55;}
+.progress{font-size:11.5px;color:var(--text3);text-align:center;margin-bottom:10px;}
+.error-box{background:var(--bad-soft);color:var(--bad);border-radius:9px;padding:12px;font-size:13px;margin-bottom:14px;}
+.done-box{text-align:center;padding:50px 20px;}
+.done-box .emoji{font-size:44px;margin-bottom:14px;}
+.done-box h2{font-size:19px;font-weight:800;margin-bottom:8px;}
+.done-box p{font-size:13.5px;color:var(--text2);}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="header">
+    <div class="eyebrow">GestorPro</div>
+    <h1>📜 Avaliação de Chatter</h1>
+    <div class="sub" id="header-sub">Carregando...</div>
+  </div>
+  <div id="content"></div>
+</div>
+
+<script src="firebase-bundle.js"></script>
+<script>
+// Mesmos 11 critérios da Avaliação de Chatter do app principal (ver
+// MANDAMENTOS_CRITERIOS em app.js) — copiados aqui pra essa página
+// funcionar sozinha, sem precisar carregar o app inteiro nem logar.
+const CRITERIOS=[
+  {id:'nome',titulo:'Chama todos os leads novos pelo nome',
+    descricao:'Todo lead novo é chamado pelo nome e ninguém fica sem resposta — descobre o que ele quer, gera intenção de compra e sabe agir: comprou (continua o atendimento), não comprou (curte e segue), questionou demais (dá um ultimato).'},
+  {id:'organizacao',titulo:'Organização pra responder mensagens não lidas',
+    descricao:'Responde de forma organizada e sistemática (ex: 15 de cima pra baixo e 15 de baixo pra cima), sem deixar ninguém de fora.'},
+  {id:'constancia',titulo:'Constância do começo ao fim do turno',
+    descricao:'Mantém a mesma frequência de resposta o turno inteiro — mesmo quando o chat esfria, continua atenta pra responder quem chegar.'},
+  {id:'linguagem',titulo:'Linguagem adequada e posicionamento',
+    descricao:'Linguagem feminina, com autoridade e posicionamento — tom provocativo, engraçado e levemente tímido quando cabe, agregando valor à experiência.'},
+  {id:'clientePede',titulo:'Faz o cliente pedir o que quer',
+    descricao:'Quem define preço, mídia e tempo é ela. Se o lead quer escolher tudo, cobra mais caro — reduz desperdício de tempo com curiosos testando limites.'},
+  {id:'sexting',titulo:'Sexting e PPV com direção de venda',
+    descricao:'Conduz a conversa com roteiro, começa com valores menores e aumenta gradualmente, adapta o ambiente à realidade do lead e cria imersão emocional.'},
+  {id:'tempoVale',titulo:'Valoriza o tempo da modelo',
+    descricao:'Limita conversas com leads excessivamente curiosos e conduz quem só consome mídia sem comprar pra uma decisão.'},
+  {id:'valorMidia',titulo:'Cria valor pras mídias',
+    descricao:'Sabe exatamente o que está oferecendo, instiga a imaginação antes de apresentar a mídia e só faz a oferta quando o lead já está envolvido.'},
+  {id:'exclusividade',titulo:'Vende exclusividade',
+    descricao:'Adapta o valor de conteúdos premium ao perfil e histórico de consumo do cliente, reforçando a percepção de raridade.'},
+  {id:'personagem',titulo:'Conhece bem a personagem',
+    descricao:'Domina a linguagem, os trejeitos e a forma de agir da personagem, criando uma experiência consistente do início ao fim.'},
+  {id:'perfilProfissional',titulo:'Perfil profissional',
+    descricao:'Sabe lidar com pressão, mantém postura profissional, respeita e ajuda os colegas, trabalha com foco e constância.'}
+];
+
+const params=new URLSearchParams(location.search);
+const chatterId=params.get('id');
+const chatterNome=params.get('nome')||'';
+
+const headerSub=document.getElementById('header-sub');
+const content=document.getElementById('content');
+
+if(!chatterId){
+  headerSub.textContent='Link inválido';
+  content.innerHTML='<div class="error-box">Esse link está incompleto ou inválido — peça pro gestor gerar o link de novo na página do tester.</div>';
+} else {
+  headerSub.textContent='Avaliando: '+(chatterNome||'chatter');
+  init();
+}
+
+let fbDb=null;
+const respostas={}; // critId -> {status,nota}
+
+function init(){
+  try{
+    const firebaseConfig={
+      apiKey:"AIzaSyA5Q5MYehtJAU18ixZLvqS4-gQnNJJD3LI",
+      authDomain:"agenciaseduct-8fd34.firebaseapp.com",
+      projectId:"agenciaseduct-8fd34",
+      storageBucket:"agenciaseduct-8fd34.firebasestorage.app",
+      messagingSenderId:"232929088781",
+      appId:"1:232929088781:web:b278bd92bf9bdc857e4c44"
+    };
+    if(typeof firebase==='undefined'){
+      content.innerHTML='<div class="error-box">Não consegui carregar a conexão com o Gestor. Verifique sua internet e recarregue a página.</div>';
+      return;
+    }
+    const app=firebase.apps&&firebase.apps.length?firebase.app():firebase.initializeApp(firebaseConfig);
+    fbDb=firebase.firestore();
+    renderForm();
+  }catch(e){
+    console.error(e);
+    content.innerHTML='<div class="error-box">Erro ao conectar: '+e.message+'</div>';
+  }
+}
+
+function renderForm(){
+  content.innerHTML=`
+    <div class="card">
+      <div class="field">
+        <label class="flabel">👑 Seu nome (padrinho responsável)</label>
+        <input class="finput" id="padrinho-nome" placeholder="Seu nome completo">
+      </div>
+    </div>
+    <div class="progress" id="progress-txt">0 de ${CRITERIOS.length} critérios avaliados</div>
+    ${CRITERIOS.map((c,idx)=>`
+      <div class="crit">
+        <div class="crit-title">${idx+1}. ${c.titulo}</div>
+        <div class="crit-desc">${c.descricao}</div>
+        <div class="crit-btns" id="crit-btns-${c.id}">
+          ${btnHtml(c.id,'atende','✅ Atende')}
+          ${btnHtml(c.id,'parcial','⚠️ Parcial')}
+          ${btnHtml(c.id,'nao','❌ Não atende')}
+        </div>
+        <textarea class="ftext" placeholder="Observação (opcional)..." onblur="setNota('${c.id}',this.value)"></textarea>
+      </div>
+    `).join('')}
+    <div class="card">
+      <div class="field" style="margin-bottom:0">
+        <label class="flabel">✍️ Observações gerais</label>
+        <textarea class="ftext" id="obs-gerais" placeholder="Comentário geral sobre o desempenho da pessoa..."></textarea>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="btn-enviar" onclick="enviarAvaliacao()">📤 Enviar avaliação</button>
+  `;
+}
+function btnHtml(critId,status,label){
+  const sel=respostas[critId]?.status===status;
+  return `<button type="button" class="crit-btn ${sel?'sel-'+status:''}" onclick="setStatus('${critId}','${status}')">${label}</button>`;
+}
+window.setStatus=function(critId,status){
+  if(!respostas[critId])respostas[critId]={status:'',nota:''};
+  respostas[critId].status=respostas[critId].status===status?'':status;
+  const box=document.getElementById('crit-btns-'+critId);
+  if(box){
+    box.innerHTML=`${btnHtml(critId,'atende','✅ Atende')}${btnHtml(critId,'parcial','⚠️ Parcial')}${btnHtml(critId,'nao','❌ Não atende')}`;
+  }
+  const answered=CRITERIOS.filter(c=>respostas[c.id]?.status).length;
+  const pt=document.getElementById('progress-txt');
+  if(pt)pt.textContent=answered+' de '+CRITERIOS.length+' critérios avaliados';
+};
+window.setNota=function(critId,val){
+  if(!respostas[critId])respostas[critId]={status:'',nota:''};
+  respostas[critId].nota=val;
+};
+window.enviarAvaliacao=async function(){
+  const btn=document.getElementById('btn-enviar');
+  const padrinhoNome=(document.getElementById('padrinho-nome')?.value||'').trim();
+  const obsGerais=(document.getElementById('obs-gerais')?.value||'').trim();
+  if(!padrinhoNome){
+    alert('Escreva seu nome antes de enviar.');
+    return;
+  }
+  const algumaResposta=CRITERIOS.some(c=>respostas[c.id]?.status);
+  if(!algumaResposta){
+    alert('Avalie pelo menos um critério antes de enviar.');
+    return;
+  }
+  btn.disabled=true;btn.textContent='Enviando...';
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'avaliacaoPendente',
+      processado:false,
+      chatterId,
+      chatterNome,
+      padrinhoNome,
+      criterios:respostas,
+      observacoesGerais:obsGerais,
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    content.innerHTML=`<div class="done-box">
+      <div class="emoji">✅</div>
+      <h2>Avaliação enviada!</h2>
+      <p>Já foi aplicada automaticamente na página de ${chatterNome||'quem você avaliou'} no Gestor. Obrigado!</p>
+    </div>`;
+  }catch(e){
+    console.error(e);
+    btn.disabled=false;btn.textContent='📤 Enviar avaliação';
+    alert('Erro ao enviar: '+e.message+'. Tente de novo.');
+  }
+};
+</script>
+</body>
+</html>

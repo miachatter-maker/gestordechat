@@ -329,6 +329,7 @@ function initFirebase(){
       }
     },8000);
     listenToFirestore(t);
+    listenToAvaliacoesPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -6286,16 +6287,18 @@ function detectNameFromTranscript(text){
 function renderMapSlots(){
   const el=document.getElementById('map-slots');
   if(!el)return;
-  el.innerHTML=Array.from({length:6},(_,i)=>i+1).map(slotId=>{
+  // Um gravador só: grave uma pessoa, "Terminar gravação" já salva sozinho
+  // em Transcrições e libera aqui na mesma hora pra gravar a próxima.
+  el.innerHTML=[1].map(slotId=>{
     const recording=!!_mapSlotRecording[slotId];
     const draft=S.mapSlotDrafts[slotId]||'';
     return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px;${recording?'border-color:var(--bad)':''}">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--text3)">SLOT ${slotId}${draft&&!recording?' · rascunho recuperado':''}</div>
+        <div style="font-size:11px;font-weight:700;color:var(--text3)">🎙️ GRAVAR CANDIDATO${draft&&!recording?' · rascunho recuperado':''}</div>
         <button class="btn ${recording?'btn-danger':'btn-primary'} btn-xs" onclick="toggleMapSlotRecording(${slotId})">${recording?'⏹️ Terminar gravação':'🎙️ Gravar'}</button>
       </div>
-      ${recording?`<div style="font-size:11.5px;color:var(--bad);margin-top:6px">🔴 Gravando… fale perto do microfone.</div>`:''}
-      ${draft&&!recording?`<div style="font-size:11.5px;color:var(--text3);margin-top:6px">Tem um rascunho aqui — clique em Gravar pra continuar ou vai se perder ao gravar outra pessoa nesse slot.</div>`:''}
+      ${recording?`<div style="font-size:11.5px;color:var(--bad);margin-top:6px">🔴 Gravando… fale perto do microfone. Peça pra pessoa se apresentar pelo nome.</div>`:''}
+      ${draft&&!recording?`<div style="font-size:11.5px;color:var(--text3);margin-top:6px">Tem um rascunho aqui — clique em Gravar pra continuar ou vai se perder ao gravar a próxima pessoa.</div>`:''}
     </div>`;
   }).join('');
 }
@@ -6376,6 +6379,15 @@ function deleteMapRecording(id){
   S.mapRecordings=S.mapRecordings.filter(r=>r.id!==id);
   save();
   renderMapTranscricoes();
+}
+// Abre/fecha os quadros aninhados (Transcrições / MAPEAMENTO DOS NOVOS)
+// dentro do painel único de Mapeamento na aba Testers.
+function toggleMapSection(name){
+  const b=document.getElementById('map-section-body-'+name),ic=document.getElementById('map-section-ic-'+name);
+  if(!b)return;
+  const open=b.style.display!=='none';
+  b.style.display=open?'none':'block';
+  if(ic)ic.textContent=open?'▼':'▲';
 }
 function toggleMapTranscript(id){
   const b=document.getElementById('map-tr-body-'+id),ic=document.getElementById('map-tr-ic-'+id);
@@ -6484,7 +6496,7 @@ async function gerarMapeamentoBatch(){
     window._mapBatchLastErrWait=e.waitSeconds;
     window._mapBatchLastErrMsg=e.quota?'':e.message;
   }finally{
-    if(btn){btn.disabled=false;btn.textContent='🎯 Gerar Mapeamento';}
+    if(btn){btn.disabled=false;btn.textContent='🗺️ Mapear Transcrições';}
     if(window._mapBatchLastErrQuota&&st){
       renderAIWaitCountdown('map-gerar-status',window._mapBatchLastErrWait,{prefix:'⏳ Limite de uso da IA',suffix:'transcrições já estão salvas'});
     }else if(st){
@@ -9968,7 +9980,6 @@ function setTesterDecision(chatterId,decision){
   renderTesters();
 }
 function renderTesters(){
-  renderTriagemPool();
   renderMapSlots();
   renderMapTranscricoes();
   renderMapeamentoNovosPool();
@@ -10151,7 +10162,7 @@ function mandamentosPanelHtml(cid){
   </div>`;
   return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
     <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div>
-      <button class="btn btn-ghost btn-xs" onclick="baixarAvaliacaoPdf('${cid}')">📄 Baixar PDF</button>
+      <button class="btn btn-ghost btn-xs" onclick="gerarLinkAvaliacao('${cid}')">🔗 Link de avaliação</button>
     </div>
     ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
       const e=ev[c.id]||{};
@@ -10179,166 +10190,90 @@ function savePadrinhoObsGerais(cid,val){
 }
 
 /* ===========================================================
-   AVALIAÇÃO DE CHATTER — PDF preenchível pro padrinho
-   Gera um PDF real com AcroForm (pdf-lib): campo Padrinho (texto),
-   campo Chatter (texto, travado e já preenchido) + um ID do chatter
-   embutido de forma invisível, um radio group Sim/Parcial/Não pra
-   cada um dos 11 critérios, e um campo de observações. Ao importar o
-   PDF de volta (já preenchido pelo padrinho), o Gestor lê os campos
-   do formulário direto — sem precisar de OCR ou digitar nada de novo
-   — e identifica sozinho de qual chatter é aquela avaliação pelo ID
-   embutido. Quando o bot do Discord entrar, ele fará esse preenchimento
-   automaticamente, sem precisar baixar/importar o arquivo manualmente.
+   AVALIAÇÃO DE CHATTER — link online pro padrinho preencher
+   Nada de PDF: gera um link público (avaliacao.html?id=<chatterId>)
+   que o padrinho abre e preenche direto no navegador. Ao enviar, a
+   página escreve um documento novo na MESMA coleção 'gestorpro' do
+   Firestore (que já é liberada pro app gravar sem login), marcado
+   com type:'avaliacaoPendente' e processado:false. O app principal
+   fica ouvindo essa coleção (listenToAvaliacoesPendentes, chamado
+   junto do resto do Firestore em initFirebase) e, assim que um
+   registro novo chega, aplica sozinho os critérios na Avaliação de
+   Chatter certa e marca como processado — sem precisar abrir/importar
+   nada manualmente. Quando o bot do Discord entrar, ele pode escrever
+   nessa mesma coleção do mesmo jeito.
    =========================================================== */
-function pdfSafeText(str){
-  return(str||'')
-    .replace(/—/g,'-').replace(/–/g,'-').replace(/…/g,'...')
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu,'')
-    .trim();
-}
-function pdfWrapText(font,text,size,maxWidth){
-  const words=text.split(' ');
-  const lines=[];
-  let line='';
-  words.forEach(w=>{
-    const test=line?line+' '+w:w;
-    if(font.widthOfTextAtSize(test,size)>maxWidth&&line){lines.push(line);line=w;}
-    else line=test;
-  });
-  if(line)lines.push(line);
-  return lines;
-}
-async function baixarAvaliacaoPdf(cid){
-  if(typeof PDFLib==='undefined'){toast('❌ Biblioteca de PDF não carregou ainda — espere a página carregar e tente de novo');return;}
+function gerarLinkAvaliacao(cid){
   const c=S.chatters.find(ch=>ch.id===cid);
   if(!c)return;
-  try{
-    const{PDFDocument,StandardFonts,rgb}=PDFLib;
-    const pdfDoc=await PDFDocument.create();
-    const fontBold=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const fontReg=await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const form=pdfDoc.getForm();
-    const margin=50,pageW=595,pageH=842;
-    let page=pdfDoc.addPage([pageW,pageH]);
-    let y=780;
-    const newPageIfNeeded=needed=>{if(y-needed<70){page=pdfDoc.addPage([pageW,pageH]);y=780;}};
-
-    page.drawText('AVALIAÇÃO DE CHATTER',{x:margin,y,size:18,font:fontBold,color:rgb(0.12,0.16,0.32)});
-    y-=18;
-    page.drawText('Preenchido pelo padrinho durante o periodo de teste',{x:margin,y,size:9,font:fontReg,color:rgb(0.55,0.42,0.08)});
-    y-=28;
-
-    // ID do chatter — campo minúsculo e discreto no rodapé da 1ª página,
-    // usado só pra identificação automática ao importar de volta.
-    const hiddenId=form.createTextField('chatterId');
-    hiddenId.setText(cid);
-    hiddenId.addToPage(page,{x:pageW-40,y:12,width:30,height:8,borderWidth:0});
-
-    page.drawText('PADRINHO',{x:margin,y,size:9,font:fontBold,color:rgb(0.55,0.4,0.08)});
-    page.drawText('CHATTER',{x:margin+260,y,size:9,font:fontBold,color:rgb(0.55,0.4,0.08)});
-    y-=16;
-    const padrinhoField=form.createTextField('padrinho');
-    padrinhoField.addToPage(page,{x:margin,y:y-16,width:220,height:20,borderWidth:1,borderColor:rgb(0.7,0.7,0.7)});
-    const chatterField=form.createTextField('chatterNome');
-    chatterField.setText(pdfSafeText(c.name));
-    chatterField.enableReadOnly();
-    chatterField.addToPage(page,{x:margin+260,y:y-16,width:220,height:20,borderWidth:1,borderColor:rgb(0.7,0.7,0.7)});
-    y-=48;
-
-    MANDAMENTOS_CRITERIOS.forEach((crit,idx)=>{
-      const descLines=pdfWrapText(fontReg,pdfSafeText(crit.descricao),9,pageW-margin*2);
-      newPageIfNeeded(30+descLines.length*12);
-      page.drawText(`${String(idx+1).padStart(2,'0')}  ${pdfSafeText(crit.titulo)}`,{x:margin,y,size:11,font:fontBold,color:rgb(0.1,0.1,0.1)});
-      y-=14;
-      descLines.forEach(line=>{page.drawText(line,{x:margin,y,size:9,font:fontReg,color:rgb(0.4,0.4,0.4)});y-=12;});
-      y-=2;
-      page.drawText('Avaliação:',{x:margin,y,size:10,font:fontBold,color:rgb(0.1,0.1,0.1)});
-      const radio=form.createRadioGroup('crit_'+crit.id);
-      const opts=[['sim','Sim'],['parcial','Parcial'],['nao','Não']];
-      let ox=margin+68;
-      opts.forEach(([val,label])=>{
-        radio.addOptionToPage(val,page,{x:ox,y:y-2,width:11,height:11});
-        page.drawText(pdfSafeText(label),{x:ox+15,y,size:10,font:fontReg,color:rgb(0.15,0.15,0.15)});
-        ox+=70;
-      });
-      y-=22;
-      page.drawLine({start:{x:margin,y:y+6},end:{x:pageW-margin,y:y+6},thickness:0.5,color:rgb(0.85,0.85,0.85)});
-      y-=12;
-    });
-
-    newPageIfNeeded(120);
-    page.drawText('OBSERVAÇÕES DO PADRINHO',{x:margin,y,size:11,font:fontBold,color:rgb(0.55,0.4,0.08)});
-    y-=16;
-    const obsField=form.createTextField('observacoes');
-    obsField.enableMultiline();
-    obsField.addToPage(page,{x:margin,y:y-90,width:pageW-margin*2,height:90,borderWidth:1,borderColor:rgb(0.7,0.7,0.7)});
-
-    const bytes=await pdfDoc.save();
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;a.download=`Avaliacao_${c.name.replace(/\s+/g,'_')}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast('📄 PDF gerado — envie pro padrinho preencher e depois importe de volta em Testers.');
-  }catch(err){
-    console.error('Erro ao gerar PDF de avaliação',err);
-    toast('❌ Erro ao gerar o PDF: '+err.message);
-  }
+  const url=`${location.origin}/avaliacao.html?id=${encodeURIComponent(cid)}&nome=${encodeURIComponent(c.name)}`;
+  const input=document.getElementById('avaliacao-link-input');
+  if(input)input.value=url;
+  openModal('m-avaliacao-link');
 }
-async function importarAvaliacaoPdf(inputEl){
-  const file=inputEl.files?.[0];
-  if(!file)return;
-  if(typeof PDFLib==='undefined'){toast('❌ Biblioteca de PDF não carregou ainda — espere a página carregar e tente de novo');inputEl.value='';return;}
+function copiarLinkAvaliacao(){
+  const input=document.getElementById('avaliacao-link-input');
+  if(!input)return;
+  input.select();
+  navigator.clipboard?.writeText(input.value).then(()=>{
+    toast('📋 Link copiado — envie pro padrinho responsável.');
+  }).catch(()=>{
+    document.execCommand('copy');
+    toast('📋 Link copiado — envie pro padrinho responsável.');
+  });
+}
+// Escuta a coleção 'gestorpro' filtrando só os documentos que a página
+// pública avaliacao.html cria (type:'avaliacaoPendente', processado:false).
+// Cada um vira, sozinho, uma Avaliação de Chatter aplicada — sem PDF, sem
+// importar nada na mão. Chamado uma vez em initFirebase(), junto do resto
+// da sincronização.
+function listenToAvaliacoesPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','avaliacaoPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarAvaliacaoPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir avaliações pendentes',err);
+    });
+}
+function aplicarAvaliacaoPendente(docId,data){
   try{
-    const bytes=await file.arrayBuffer();
-    const{PDFDocument}=PDFLib;
-    const pdfDoc=await PDFDocument.load(bytes,{ignoreEncryption:true});
-    const form=pdfDoc.getForm();
-    const getText=name=>{try{return(form.getTextField(name).getText()||'').trim();}catch(e){return'';}};
-    const getRadio=name=>{try{return form.getRadioGroup(name).getSelected()||'';}catch(e){return'';}};
-
-    const chatterId=getText('chatterId');
-    const chatterNomeField=getText('chatterNome');
-    const padrinhoNome=getText('padrinho');
-    const observacoes=getText('observacoes');
-    const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
-
-    // Prioriza o ID embutido no PDF (o jeito confiável) — só cai pra casar
-    // pelo nome digitado se o arquivo não veio do botão "Baixar PDF" daqui.
-    let c=S.chatters.find(ch=>ch.id===chatterId);
-    if(!c&&chatterNomeField)c=S.chatters.find(ch=>norm(ch.name)===norm(chatterNomeField));
+    const c=S.chatters.find(ch=>ch.id===data.chatterId);
     if(!c){
-      toast('⚠️ Não consegui identificar o chatter nesse PDF — confira se foi gerado pelo botão "📄 Baixar PDF" na página da pessoa.');
-      inputEl.value='';
+      // Chatter pode ter sido removido nesse meio tempo — marca como
+      // processado mesmo assim, pra não ficar tentando de novo pra sempre.
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'chatter não encontrado'});
       return;
     }
-
     const ev=ensureMandamentosEval(c.id);
-    const statusMap={sim:'atende',parcial:'parcial',nao:'nao'};
+    const criterios=data.criterios||{};
     let preenchidos=0;
     MANDAMENTOS_CRITERIOS.forEach(crit=>{
-      const raw=getRadio('crit_'+crit.id);
-      const status=statusMap[raw];
-      if(!status)return;
-      if(!ev[crit.id])ev[crit.id]={status:'',nota:''};
-      ev[crit.id].status=status;
+      const recebido=criterios[crit.id];
+      if(!recebido||!recebido.status)return;
+      ev[crit.id]={status:recebido.status,nota:recebido.nota||''};
       preenchidos++;
     });
-    if(observacoes)S.chatterFichas[c.id].padrinhoObservacoesGerais=observacoes;
-    if(padrinhoNome){
-      const padrinhoMatch=S.chatters.find(ch=>ch.level==='padrinho'&&norm(ch.name)===norm(padrinhoNome));
+    if(data.observacoesGerais)S.chatterFichas[c.id].padrinhoObservacoesGerais=data.observacoesGerais;
+    if(data.padrinhoNome){
+      const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+      const padrinhoMatch=S.chatters.find(ch=>ch.level==='padrinho'&&norm(ch.name)===norm(data.padrinhoNome));
       if(padrinhoMatch)S.chatterFichas[c.id].padrinhoId=padrinhoMatch.id;
     }
     save();
-    toast(`✅ Avaliação de ${c.name} importada — ${preenchidos}/${MANDAMENTOS_CRITERIOS.length} critérios preenchidos.`);
-    const sel=document.getElementById('tester-select');
-    if(sel){sel.value=c.id;renderTesterDetail(c.id);}
-  }catch(err){
-    console.error('Erro ao importar avaliação em PDF',err);
-    toast('❌ Não consegui ler esse PDF como avaliação — confira se é o arquivo certo, gerado pelo botão "Baixar PDF".');
-  }finally{
-    inputEl.value='';
+    toast(`✅ Avaliação de ${c.name} recebida via link — ${preenchidos}/${MANDAMENTOS_CRITERIOS.length} critérios aplicados automaticamente.`);
+    if(currentViewName()==='testers'){
+      const sel=document.getElementById('tester-select');
+      if(sel&&sel.value===c.id)renderTesterDetail(c.id);
+    }
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar avaliação como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar avaliação pendente',e);
   }
 }
 function renderTesterDetail(cid){
