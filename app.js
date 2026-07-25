@@ -8847,7 +8847,7 @@ function renderChatLabHistorico(){
                 <span style="font-size:9px;color:var(--text3)" id="cl-ic-${a.id}">▼</span>
               </div>
             </div>
-            <div id="cl-body-${a.id}" style="display:none"><div class="cl-md" style="padding:14px">${clMd(a.raw||'')}</div></div>
+            <div id="cl-body-${a.id}" style="display:none"><div class="cl-md" style="padding:14px 14px 0">${clMd(a.raw||'')}</div><div style="padding:0 14px 14px">${redoBtnHtml(a.id)}</div></div>
           </div>`;
         }).join('')}
       </div>
@@ -8892,6 +8892,14 @@ function clMd(md){
     .replace(/(<li[\s\S]*?<\/li>\n?)+/g,'<ul style="padding-left:18px;margin:6px 0">$&</ul>')
     .replace(/\n{2,}/g,'<br>');
 }
+// Prompt compartilhado entre a análise normal e o "Refazer" (quando a IA
+// inverteu quem é o chatter e quem é o lead — problema real reportado pela
+// gestora). correcaoPapeis=true adiciona um aviso reforçado no topo pedindo
+// pra reler a conversa com atenção redobrada antes de reanalisar.
+function montarPromptAnaliseChatLab(c,conv,ctx,prevCount,correcaoPapeis){
+  const aviso=correcaoPapeis?`⚠️ CORREÇÃO IMPORTANTE: a análise anterior dessa mesma conversa inverteu os papéis (tratou o cliente como se fosse o chatter, ou vice-versa). Releia a conversa com atenção redobrada, do zero, antes de continuar.\n\n`:'';
+  return`${aviso}Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prevCount?'\nAnálise nº '+(prevCount+1)+' — compare evolução quando relevante.':''}\n\nANTES DE ANALISAR: identifique com cuidado qual lado da conversa é o CHATTER (${c.name}) e qual é o LEAD/CLIENTE — nunca inverta os dois. O CHATTER é quem está atendendo/vendendo: geralmente conduz a conversa, oferece mídia, aplica técnica de venda, cobra preço, mantém o tom de uma persona. O LEAD é quem está comprando/consumindo: geralmente pede coisas, reage, pergunta preço, decide comprar.\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
+}
 async function rodarChatLab(){
   const cid=document.getElementById('cl-chatter')?.value;
   const conv=document.getElementById('cl-conversa')?.value.trim();
@@ -8910,7 +8918,7 @@ async function rodarChatLab(){
 
   const prev=S.chatlabAnalyses.filter(a=>a.chatterId===cid);
   const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de chatters usando EXATAMENTE o playbook interno da agência abaixo — não critérios genéricos de vendas. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.\n\n${PLAYBOOK_CATALOGO}`;
-  const prompt=`Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prev.length?'\nAnálise nº '+(prev.length+1)+' — compare evolução quando relevante.':''}\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
+  const prompt=montarPromptAnaliseChatLab(c,conv,ctx,prev.length,false);
 
   try{
     // A infra de IA às vezes corta a resposta no meio (flaky, não é sempre
@@ -8948,15 +8956,19 @@ async function rodarChatLab(){
       try{tags=JSON.parse(jsonM[1]);}catch(e){tags=null;}
       text=text.slice(0,jsonM.index).trim();
     }
-    S.chatlabAnalyses.push({id:'cla'+Date.now(),chatterId:cid,date:new Date().toISOString(),igp,raw:text,resumo,tags,conv});
+    const newId='cla'+Date.now();
+    S.chatlabAnalyses.push({id:newId,chatterId:cid,date:new Date().toISOString(),igp,raw:text,resumo,tags,conv});
     save();
     const col=igp>=70?'var(--ok)':igp>=50?'var(--warn)':'var(--bad)';
-    document.getElementById('cl-resultado').innerHTML=`<div class="panel" style="border-left:3px solid ${col}">
+    const resEl=document.getElementById('cl-resultado');
+    resEl.dataset.analysisId=newId;
+    resEl.innerHTML=`<div class="panel" style="border-left:3px solid ${col}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="font-weight:700">${c.name} — análise concluída</div>
         ${igp?`<div style="font-size:24px;font-weight:800;font-family:var(--font-mono);color:${col}">${igp}<span style="font-size:11px;color:var(--text3)">/100</span></div>`:''}
       </div>
       <div class="cl-md">${clMd(text)}</div>
+      ${redoBtnHtml(newId)}
     </div>`;
     renderChatLabHistorico();
     renderChatLabRanking();
@@ -8969,6 +8981,84 @@ async function rodarChatLab(){
     }
   }finally{
     btn.disabled=false;btn.textContent='⚡ Analisar';
+  }
+}
+// Botão de canto pra quando a IA confunde quem é o chatter e quem é o lead
+// (problema real reportado pela gestora — de vez em quando a análise sai
+// com os papéis invertidos). Só aparece funcional se a conversa original
+// ainda estiver salva (.conv só existe durante a semana da análise).
+function redoBtnHtml(id){
+  return`<button data-noaccordion onclick="refazerAnaliseInvertida('${id}',this)" style="margin-top:10px;background:none;border:1px solid var(--line);border-radius:7px;padding:6px 10px;font-size:11px;color:var(--text3);cursor:pointer">🔄 Refazer (inverteu quem é quem)</button>`;
+}
+async function refazerAnaliseInvertida(analysisId,btnEl){
+  const idx=S.chatlabAnalyses.findIndex(a=>a.id===analysisId);
+  if(idx<0){toast('⚠️ Análise não encontrada');return;}
+  const a=S.chatlabAnalyses[idx];
+  if(!a.conv){
+    toast('⚠️ A conversa original dessa análise já não está mais salva (virada de semana) — cole a conversa de novo e rode uma análise nova.');
+    return;
+  }
+  const c=S.chatters.find(ch=>ch.id===a.chatterId);
+  if(!c){toast('⚠️ Chatter não encontrado');return;}
+  if(btnEl){btnEl.disabled=true;btnEl.textContent='Refazendo…';}
+  toast('🔄 Refazendo análise com atenção redobrada aos papéis…');
+  const prevCount=S.chatlabAnalyses.filter(x=>x.chatterId===a.chatterId&&x.id!==analysisId).length;
+  const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de chatters usando EXATAMENTE o playbook interno da agência abaixo — não critérios genéricos de vendas. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.\n\n${PLAYBOOK_CATALOGO}`;
+  const prompt=montarPromptAnaliseChatLab(c,a.conv,'',prevCount,true);
+  try{
+    let text='',lastErr=null;
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        text=await clFetchAI(system,prompt,6000);
+      }catch(err){
+        lastErr=err;text='';
+        if(err.quota)break;
+        if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+        continue;
+      }
+      if(text&&/## 🎯 Resumo Executivo/i.test(text))break;
+      lastErr=new Error('Resposta incompleta da IA (provavelmente limite de uso da IA no momento — espere um minuto e tente de novo)');
+      text='';
+      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+    }
+    if(!text)throw lastErr||new Error('Resposta vazia da IA');
+    const igpM=text.match(/IGP[^:]*:\s*\**\s*(\d+)/i);
+    const igp=igpM?parseInt(igpM[1]):null;
+    const resumoM=text.match(/## 🎯 Resumo Executivo([\s\S]*?)(?=\n## |```json|$)/i);
+    const resumo=resumoM?resumoM[1].trim().slice(0,600):'';
+    let tags=null;
+    const jsonM=text.match(/```json\s*([\s\S]*?)```/i);
+    if(jsonM){
+      try{tags=JSON.parse(jsonM[1]);}catch(e){tags=null;}
+      text=text.slice(0,jsonM.index).trim();
+    }
+    // Substitui no lugar — mesmo id/chatterId/date/conv, só troca o
+    // conteúdo da análise em si.
+    S.chatlabAnalyses[idx]={...a,igp,raw:text,resumo,tags};
+    save();
+    toast('✅ Análise refeita');
+    renderChatLabHistorico();
+    renderChatLabRanking();
+    if(currentViewName()==='testers'){
+      const sel=document.getElementById('tester-select');
+      if(sel&&sel.value===a.chatterId)renderTesterDetail(a.chatterId);
+    }
+    const resEl=document.getElementById('cl-resultado');
+    if(resEl&&resEl.dataset.analysisId===analysisId){
+      const col=igp>=70?'var(--ok)':igp>=50?'var(--warn)':'var(--bad)';
+      resEl.innerHTML=`<div class="panel" style="border-left:3px solid ${col}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-weight:700">${c.name} — análise refeita</div>
+          ${igp?`<div style="font-size:24px;font-weight:800;font-family:var(--font-mono);color:${col}">${igp}<span style="font-size:11px;color:var(--text3)">/100</span></div>`:''}
+        </div>
+        <div class="cl-md">${clMd(text)}</div>
+        ${redoBtnHtml(analysisId)}
+      </div>`;
+    }
+  }catch(err){
+    if(err.quota)toast(`⏳ Limite de uso da IA — tente de novo em ${err.waitSeconds||60}s`);
+    else toast('❌ Erro ao refazer: '+err.message);
+    if(btnEl){btnEl.disabled=false;btnEl.textContent='🔄 Refazer (inverteu quem é quem)';}
   }
 }
 
@@ -9144,7 +9234,8 @@ function conversasAnalisadasFichaHtml(cid){
           <div style="font-size:10px;font-weight:700;color:var(--text3);margin-bottom:5px">💬 CONVERSA (some na virada da semana — só o relatório abaixo fica salvo pra sempre)</div>
           <div style="font-size:12px;color:var(--text2);white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.5">${a.conv.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
         </div>`:''}
-        <div class="cl-md" style="padding:14px">${clMd(a.raw||'')}</div>
+        <div class="cl-md" style="padding:14px 14px 0">${clMd(a.raw||'')}</div>
+        <div style="padding:0 14px 14px">${redoBtnHtml(a.id)}</div>
       </div>
     </div>`;
   }).join('');
