@@ -90,9 +90,19 @@ export default async function handler(req, res) {
       parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
     }));
 
+    // gemini-3.5-flash "pensa" por padrão antes de responder (thinking
+    // tokens), e esses tokens saem do MESMO orçamento de max_tokens que a
+    // resposta final — em prompts grandes (ex: análise completa do ChatLab)
+    // isso consumia o orçamento todo só pensando, cortando a resposta visível
+    // no meio (JSON quebrado, markdown incompleto sem a seção final). Baixar
+    // pra thinkingLevel 'low' resolve isso sem precisar aumentar max_tokens
+    // em cada chamada do app.js.
     const geminiBody = {
       contents,
-      generationConfig: { maxOutputTokens: max_tokens || 2000 }
+      generationConfig: {
+        maxOutputTokens: max_tokens || 2000,
+        thinkingConfig: { thinkingLevel: 'low' }
+      }
     };
     if (system) geminiBody.systemInstruction = { parts: [{ text: system }] };
 
