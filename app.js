@@ -5763,7 +5763,7 @@ async function gerarMapeamentoIA(){
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:MAPEAMENTO_SYSTEM,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:6000,system:MAPEAMENTO_SYSTEM,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
@@ -5885,7 +5885,7 @@ async function gerarOrientacaoIA(chatterId){
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2048,system:ORIENTACAO_SYSTEM,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:3500,system:ORIENTACAO_SYSTEM,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
@@ -6190,7 +6190,7 @@ async function gerarTriagemIA(){
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:TRIAGEM_SYSTEM,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:6000,system:TRIAGEM_SYSTEM,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
@@ -6459,7 +6459,7 @@ async function gerarMapeamentoBatch(){
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4096,system:MAPEAMENTO_NOVOS_SYSTEM,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:6000,system:MAPEAMENTO_NOVOS_SYSTEM,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     let text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
@@ -8050,7 +8050,7 @@ async function rodarAnaliseComparativaEquipe(){
   try{
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2500,system,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,system,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
@@ -8679,7 +8679,7 @@ async function clRunCopiloto(conv){
       // 1800 (não 600) porque o modelo atual "pensa" antes de responder e
       // esses tokens de raciocínio saem do mesmo orçamento — com pouca
       // margem o JSON final vinha cortado no meio (erro de parse).
-      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,1800);
+      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,3000);
       if(!text)throw new Error('Resposta vazia da IA (provavelmente limite de uso da IA no momento)');
       const s=text.indexOf('{'),e=text.lastIndexOf('}');
       if(s<0||e<0)throw new Error('Resposta cortada, tentando de novo…');
@@ -8858,7 +8858,7 @@ async function rodarChatLab(){
     let text='',lastErr=null;
     for(let attempt=0;attempt<2;attempt++){
       try{
-        text=await clFetchAI(system,prompt,4000);
+        text=await clFetchAI(system,prompt,6000);
       }catch(err){
         lastErr=err;
         text='';
@@ -9636,7 +9636,7 @@ async function rodarConselheiro(){
   try{
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:3000,
         system:CONSELHEIRO_SYSTEM,
         messages:[{role:'user',content:text}]
       })
@@ -9787,7 +9787,7 @@ async function perguntarIA(){
     const prompt=`DADOS DA OPERAÇÃO (gerados automaticamente pelo sistema):\n\n${contexto}\n\nPERGUNTA DO GESTOR:\n${question}`;
     const res=await fetch(AI_PROXY_URL,{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,system:IA_PERGUNTA_SYSTEM,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:3000,system:IA_PERGUNTA_SYSTEM,messages:[{role:'user',content:prompt}]})
     });
     const data=await res.json();
     const text=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
