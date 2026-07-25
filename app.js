@@ -257,6 +257,19 @@ function pruneHeavyData(s){
         kept=kept.concat(list.slice(-5));
       });
       s.chatlabAnalyses=kept;
+      // A conversa colada (campo .conv) fica guardada só durante a semana em
+      // que foi analisada — na virada da semana (Segunda), some sozinha daqui
+      // pra frente (essa função roda a cada save()). O relatório da IA (.raw),
+      // IGP, resumo e tags NUNCA são apagados — servem pra comparar evolução
+      // pra sempre. Pedido explícito da gestora: só o texto bruto da conversa
+      // é temporário, a análise em si é permanente.
+      const currentMonKey=fmt(getMondayOfWeek(new Date()));
+      s.chatlabAnalyses.forEach(a=>{
+        if(a.conv&&a.date){
+          const analiseMonKey=fmt(getMondayOfWeek(new Date(a.date)));
+          if(analiseMonKey!==currentMonKey)delete a.conv;
+        }
+      });
     }
   }catch(e){console.error('Erro ao limpar dados pesados',e);}
   return s;
@@ -8788,27 +8801,65 @@ function renderChatLabRanking(){
       </tr>`).join('')}
     </table>`;
 }
+// Agrupado por chatter: a "nota" que aparece ao lado do nome é a MÉDIA
+// geral do IGP (não a de uma análise isolada). Clicar no nome expande e
+// mostra TODAS as conversas dele, minimizadas por data — cada uma clicável
+// pra ver a análise completa.
 function renderChatLabHistorico(){
   const el=document.getElementById('cl-historico');
   if(!el)return;
   if(!S.chatlabAnalyses.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhuma análise ainda</div>';return;}
-  el.innerHTML=[...S.chatlabAnalyses].reverse().slice(0,15).map(a=>{
-    const c=S.chatters.find(ch=>ch.id===a.chatterId);
-    const col=a.igp>=70?'var(--ok)':a.igp>=50?'var(--warn)':a.igp?'var(--bad)':'var(--text3)';
+  const byChatter={};
+  S.chatlabAnalyses.forEach(a=>{
+    const cid=a.chatterId||'_sem';
+    if(!byChatter[cid])byChatter[cid]=[];
+    byChatter[cid].push(a);
+  });
+  const grupos=Object.entries(byChatter).map(([cid,list])=>{
+    const c=S.chatters.find(ch=>ch.id===cid);
+    const comIgp=list.filter(a=>a.igp!=null);
+    const avgIGP=comIgp.length?Math.round(comIgp.reduce((s,a)=>s+(a.igp||0),0)/comIgp.length):null;
+    const sorted=list.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    return{cid,name:c?c.name:'?',avgIGP,count:list.length,list:sorted,lastDate:sorted[0]?.date||''};
+  }).sort((a,b)=>(b.lastDate||'').localeCompare(a.lastDate||''));
+
+  el.innerHTML=grupos.map(g=>{
+    const col=g.avgIGP>=70?'var(--ok)':g.avgIGP>=50?'var(--warn)':g.avgIGP?'var(--bad)':'var(--text3)';
     return`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden">
-      <div style="padding:10px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleClAn('${a.id}')">
+      <div style="padding:10px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleClGroup('${g.cid}')">
         <div>
-          <div style="font-size:13px;font-weight:700">${c?c.name:'?'}${a.autoAnalise?' <span style="font-size:9.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:5px;margin-left:4px;vertical-align:middle">🤖 autoanálise</span>':''}</div>
-          <div style="font-size:11px;color:var(--text3)">${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+          <div style="font-size:13px;font-weight:700">${g.name}</div>
+          <div style="font-size:11px;color:var(--text3)">${g.count} conversa${g.count>1?'s':''} · IGP médio</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:18px;font-weight:800;font-family:var(--font-mono);color:${col}">${a.igp||'—'}</span>
-          <span style="font-size:10px;color:var(--text3)" id="cl-ic-${a.id}">▼</span>
+          <span style="font-size:18px;font-weight:800;font-family:var(--font-mono);color:${col}">${g.avgIGP??'—'}</span>
+          <span style="font-size:10px;color:var(--text3)" id="cl-gic-${g.cid}">▼</span>
         </div>
       </div>
-      <div id="cl-body-${a.id}" style="display:none"><div class="cl-md" style="padding:16px">${clMd(a.raw||'')}</div></div>
+      <div id="cl-gbody-${g.cid}" style="display:none;padding:10px 13px">
+        ${g.list.map(a=>{
+          const acol=a.igp>=70?'var(--ok)':a.igp>=50?'var(--warn)':a.igp?'var(--bad)':'var(--text3)';
+          return`<div style="border:1px solid var(--line);border-radius:8px;margin-bottom:7px;overflow:hidden">
+            <div style="padding:8px 11px;background:var(--bg);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleClAn('${a.id}')">
+              <div style="font-size:11.5px;color:var(--text3)">${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}${a.autoAnalise?' <span style="font-size:9px;font-weight:700;color:var(--accent)">🤖 autoanálise</span>':''}</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:14px;font-weight:800;font-family:var(--font-mono);color:${acol}">${a.igp||'—'}</span>
+                <span style="font-size:9px;color:var(--text3)" id="cl-ic-${a.id}">▼</span>
+              </div>
+            </div>
+            <div id="cl-body-${a.id}" style="display:none"><div class="cl-md" style="padding:14px">${clMd(a.raw||'')}</div></div>
+          </div>`;
+        }).join('')}
+      </div>
     </div>`;
   }).join('');
+}
+function toggleClGroup(cid){
+  const b=document.getElementById('cl-gbody-'+cid),ic=document.getElementById('cl-gic-'+cid);
+  if(!b)return;
+  const open=b.style.display!=='none';
+  b.style.display=open?'none':'block';
+  if(ic)ic.textContent=open?'▼':'▲';
 }
 function toggleClAn(id){
   const b=document.getElementById('cl-body-'+id),ic=document.getElementById('cl-ic-'+id);
@@ -8897,7 +8948,7 @@ async function rodarChatLab(){
       try{tags=JSON.parse(jsonM[1]);}catch(e){tags=null;}
       text=text.slice(0,jsonM.index).trim();
     }
-    S.chatlabAnalyses.push({id:'cla'+Date.now(),chatterId:cid,date:new Date().toISOString(),igp,raw:text,resumo,tags});
+    S.chatlabAnalyses.push({id:'cla'+Date.now(),chatterId:cid,date:new Date().toISOString(),igp,raw:text,resumo,tags,conv});
     save();
     const col=igp>=70?'var(--ok)':igp>=50?'var(--warn)':'var(--bad)';
     document.getElementById('cl-resultado').innerHTML=`<div class="panel" style="border-left:3px solid ${col}">
@@ -9002,6 +9053,21 @@ async function gerarRelatorioSemanalUI(){
     if(sel&&sel.value===cid)renderTesterDetail(cid);
   }
 }
+// Mesma geração, só que disparada direto do quadro clicável dentro da
+// própria Ficha (não depende do seletor da aba ChatLab).
+async function gerarRelatorioSemanalFicha(cid){
+  const c=S.chatters.find(ch=>ch.id===cid);
+  const btn=document.getElementById('relsemanal-btn-'+cid);
+  if(btn){btn.disabled=true;btn.textContent='Gerando…';}
+  try{
+    await gerarRelatorioSemanalChatter(cid,'gestora');
+    toast(`✅ Relatório semanal de ${c?c.name:'chatter'} gerado`);
+  }catch(e){/* toast já mostrado dentro de gerarRelatorioSemanalChatter */}
+  if(currentViewName()==='testers'){
+    const sel=document.getElementById('tester-select');
+    if(sel&&sel.value===cid)renderTesterDetail(cid);
+  }
+}
 function weekKeyToLabel(wk){
   const[y,m,d]=wk.split('-').map(Number);
   const mon=new Date(y,m-1,d);
@@ -9013,7 +9079,15 @@ function weekKeyToLabel(wk){
 // ele vê no link dele.
 function relatorioSemanalFichaHtml(cid){
   const lista=(S.chatlabWeeklyReports?.[cid]||[]).slice().sort((a,b)=>b.weekKey.localeCompare(a.weekKey));
-  if(!lista.length)return'';
+  // Sempre aparece como um quadro clicável na Ficha, mesmo sem relatório
+  // ainda — assim dá pra gerar direto daqui, sem precisar ir na aba ChatLab.
+  if(!lista.length){
+    return fichaAccordion('relsemanal-'+cid,'border:2px solid var(--accent)',
+      `<div><div class="panel-title">📊 Relatório Semanal do Chatter</div><div class="panel-note">Nenhum ainda essa semana</div></div>`,
+      `<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">Junta as análises da semana e resume pontos fortes, fraquezas, o que melhorou e o perfil desse chatter.</div>
+       <button data-noaccordion class="btn btn-primary btn-block" id="relsemanal-btn-${cid}" onclick="gerarRelatorioSemanalFicha('${cid}')">📅 Gerar relatório desta semana</button>`
+    );
+  }
   const atual=lista[0];
   const m=atual.metrics||{};
   const origem=atual.generatedBy==='chatter'?'🤖 gerado pelo próprio chatter':'gerado por você';
@@ -9065,7 +9139,13 @@ function conversasAnalisadasFichaHtml(cid){
           <span style="font-size:9px;color:var(--text3)" id="cl-ic-ficha-${a.id}">▼</span>
         </div>
       </div>
-      <div id="cl-body-ficha-${a.id}" style="display:none"><div class="cl-md" style="padding:14px">${clMd(a.raw||'')}</div></div>
+      <div id="cl-body-ficha-${a.id}" style="display:none">
+        ${a.conv?`<div style="margin:14px 14px 0;background:var(--bg-soft);border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);margin-bottom:5px">💬 CONVERSA (some na virada da semana — só o relatório abaixo fica salvo pra sempre)</div>
+          <div style="font-size:12px;color:var(--text2);white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.5">${a.conv.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        </div>`:''}
+        <div class="cl-md" style="padding:14px">${clMd(a.raw||'')}</div>
+      </div>
     </div>`;
   }).join('');
   return fichaAccordion('convanalisadas-'+cid,'',
@@ -10509,6 +10589,7 @@ function aplicarChatlabPendente(docId,data){
       raw:data.raw,
       resumo:data.resumo||'',
       tags:data.tags||null,
+      conv:data.conv||'',
       autoAnalise:true,
       sourceDocId:docId
     });
