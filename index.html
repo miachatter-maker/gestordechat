@@ -1227,7 +1227,7 @@ body{
   <div class="panel">
     <div class="field">
       <label class="flabel">Chatter</label>
-      <select class="fselect" id="cl-chatter" onchange="renderRelatorioSemanalChatLab(this.value)"><option value="">— selecionar —</option></select>
+      <select class="fselect" id="cl-chatter"><option value="">— selecionar —</option></select>
     </div>
     <div class="field">
       <label class="flabel">Conversa completa</label>
@@ -1240,6 +1240,7 @@ body{
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" id="cl-btn" onclick="rodarChatLab()">⚡ Analisar</button>
       <button class="btn btn-ghost" onclick="limparChatLab()">Limpar</button>
+      <button class="btn btn-ghost" id="cl-relatorio-btn" onclick="gerarRelatorioSemanalUI()">📅 Relatório da semana</button>
       <button class="btn btn-ghost" onclick="gerarLinkChatlabChatter()">🔗 Link de autoanálise</button>
     </div>
   </div>
@@ -1247,12 +1248,6 @@ body{
   <div id="cl-copiloto"></div>
 
   <div id="cl-resultado"></div>
-
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">📅 Relatório Semanal do Chatter</div><div class="panel-note">Junta todas as análises da semana (dela ou do próprio chatter) e resume: o que melhorou, problemas mais frequentes, plano pra próxima semana e uma tarefa de autoteste. Mesmo relatório que ele vê no link dele.</div></div>
-    <button class="btn btn-primary" id="cl-relatorio-btn" onclick="gerarRelatorioSemanalUI()">📅 Gerar relatório desta semana</button>
-    <div id="cl-relatorio-semanal" style="margin-top:10px"></div>
-  </div>
 
   <div class="panel">
     <div class="panel-head"><div class="panel-title">🏆 Ranking da equipe</div><div class="panel-note">Quem converte melhor, ticket médio, arquétipo que mais compra, erro mais comum — calculado sobre as análises já salvas</div></div>

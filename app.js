@@ -8645,7 +8645,13 @@ SINAIS DE WHALE (Manual de Criação de Whale): 3+ compras espaçadas, intervalo
 
 REGRA DE VENDA RÁPIDA (turno 15h-23h, maior volume): pedido espontâneo de personalizado/whats já é sinal de compra — vender na hora; quando a oferta parte do chatter, sempre validar com sexting antes; nunca ofertar preço alto pra quem não validou.
 
-ERROS CLÁSSICOS DO PLAYBOOK (usar como catálogo de erro, não inventar outros): pular etapa de script, oferecer mídia paga sem ter passado por sexting, ceder desconto sem pedir nada em troca, mandar mídia de graça quando só pediram "pra ver", sumir depois de mandar conteúdo, usar escassez falsa, empilhar mais de uma técnica de persuasão na mesma mensagem, tratar todo mundo com o mesmo tom independente do arquétipo, discutir preço em vez de reforçar valor, vender antes de aquecer.
+ERROS CLÁSSICOS DO PLAYBOOK (usar como catálogo de erro, não inventar outros): pular etapa de script, oferecer mídia paga sem ter passado por sexting, ceder desconto sem pedir nada em troca, mandar mídia de graça quando só pediram "pra ver", sumir depois de mandar conteúdo, usar escassez falsa, empilhar mais de uma técnica de persuasão na mesma mensagem, tratar todo mundo com o mesmo tom independente do arquétipo, discutir preço em vez de reforçar valor, vender antes de aquecer, fala mecânica/robótica (mensagem genérica que ignora o que o assinante acabou de dizer).
+
+COMO PUXAR ASSUNTO (Manual "Como Puxar Assunto com Assinantes" — usar pra diagnosticar e corrigir fala mecânica, tipo o problema do Renan):
+"Não tenho assunto" é mito — todo assinante entrega deixa, o trabalho é achar e puxar o fio, não inventar do zero. Fluxo em 3 passos: 1) PERGUNTA ABERTA (nunca fechada tipo "tudo bem?"/"curtiu?" — pergunta que puxa opinião, gosto, o que faria, ex: "como tá sendo seu dia?" em vez de "tudo bem?") pra coletar informação real sobre a pessoa; 2) FALAR DO QUE ELE GOSTA (uma vez descoberto o assunto, ir fundo nele em vez de tentar inventar outro — a pessoa se sente ouvida e valorizada, isso sozinho já gera vínculo); 3) CONTAR UMA HISTÓRIA PARECIDA DA PERSONA depois que ele se abriu (reciprocidade — conversa não pode ser só interrogatório, ela também precisa "soltar" informação, sempre coerente com o que já contou antes pra essa pessoa).
+Erros de fala mecânica a apontar: rajada de perguntas fechadas em sequência, resposta genérica que não usa nada do que o assinante acabou de escrever (soa robótico/copiado e colado), não ler o histórico da conversa antes de responder (a deixa muitas vezes já está lá em cima), só perguntar sem nunca contribuir com algo próprio (interrogatório), forçar assunto quando a pessoa claramente não está afim (nem toda conversa depende do chatter — às vezes é só o momento errado da pessoa, não é falha dele).
+
+CUIDADO COM TAREFAS/METAS DE TEMPO: nunca sugira desafio ou tarefa de treino do tipo "feche uma venda em X minutos" ou qualquer meta que force o chatter a apressar o lead pulando a escada de temperatura — isso pressiona o assinante, quebra a régua 1→2→...→8 do script e tende a atrapalhar mais do que ajudar. Toda tarefa de treino/autoteste sugerida deve ser sobre PRATICAR uma técnica específica (ex: "aplique pergunta aberta em pelo menos 3 conversas essa semana"), nunca sobre bater um prazo ou meta de tempo de fechamento.
 `;
 // Copiloto tático — resposta curta e rápida pro CHATTER, em tempo real,
 // enquanto ele ainda está na conversa. Formato enxuto de propósito: não é
@@ -8734,7 +8740,6 @@ function renderChatLab(){
     sel.innerHTML='<option value="">— selecionar —</option>'+S.chatters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
     if(cur)sel.value=cur;
   }
-  renderRelatorioSemanalChatLab(sel?.value||'');
   renderChatLabHistorico();
   renderChatLabRanking();
 }
@@ -8936,24 +8941,45 @@ function coletarAnalisesDaSemana(cid){
     .filter(a=>a.chatterId===cid&&a.date&&new Date(a.date)>=start&&new Date(a.date)<=end)
     .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
 }
+// Calcula métricas objetivas da semana (não depende da IA acertar conta) —
+// usa só o campo .tags que cada análise já salva.
+function calcMetricasSemana(analises){
+  const comIgp=analises.filter(a=>a.igp!=null);
+  const avgIGP=comIgp.length?Math.round(comIgp.reduce((s,a)=>s+(a.igp||0),0)/comIgp.length):null;
+  const tagged=analises.filter(a=>a.tags);
+  const taxaConversao=tagged.length?Math.round(tagged.filter(a=>a.tags.converteu==='sim').length/tagged.length*100):null;
+  const arqTally={};
+  tagged.forEach(a=>{if(a.tags.arquetipo)arqTally[a.tags.arquetipo]=(arqTally[a.tags.arquetipo]||0)+1;});
+  const topArquetipo=Object.entries(arqTally).sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
+  return{avgIGP,taxaConversao,topArquetipo};
+}
 async function gerarRelatorioSemanalChatter(cid,generatedBy){
   const c=S.chatters.find(ch=>ch.id===cid);
   if(!c)return;
   const analises=coletarAnalisesDaSemana(cid);
   if(!analises.length){toast('⚠️ Nenhuma análise do ChatLab essa semana ainda pra gerar relatório');return;}
   const wk=getWeekKey(0);
+  const metrics=calcMetricasSemana(analises);
   const contexto=analises.map((a,i)=>`Análise ${i+1} — ${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})} — IGP ${a.igp||'—'}${a.tags?.principalErro?` — erro principal: ${a.tags.principalErro}`:''}${a.tags?.converteu?` — converteu: ${a.tags.converteu}`:''}${a.tags?.arquetipo?` — arquétipo: ${a.tags.arquetipo}`:''}\n${a.resumo||''}`).join('\n\n---\n\n');
-  const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, escrevendo um relatório semanal de evolução PRA O PRÓPRIO CHATTER ler — tom direto, didático e encorajador, mas honesto sobre os problemas reais. Baseie-se só nas análises fornecidas abaixo, nunca invente dado que não está lá.`;
-  const prompt=`Chatter: ${c.name}. Semana: ${weekLabel(0)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''} essa semana, rodadas por ela mesma e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva um relatório semanal em Markdown, curto, direto e prático, com exatamente estas seções:\n## ✅ O Que Melhorou (compare as análises mais antigas da semana com as mais recentes, se der pra perceber evolução)\n## 🔁 Continue Assim (pontos fortes a manter)\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram nas análises acima — use só o que está nos dados, não invente outros)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema listado acima)\n## 📝 Tarefa de Autoteste (uma prática específica e mensurável pra essa pessoa treinar sozinha nos próximos dias e depois conferir rodando uma nova autoanálise)`;
+  const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, usando EXATAMENTE o playbook interno abaixo (não critérios genéricos). Baseie-se só nas análises fornecidas, nunca invente dado que não está lá.\n\n${PLAYBOOK_CATALOGO}`;
+  const prompt=`Chatter: ${c.name}. Semana: ${weekLabel(0)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''}, rodadas por ele mesmo e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva DUAS versões do relatório semanal, nessa ordem exata:\n\n1) VERSÃO PRA GESTORA (Markdown, direto, analítico, com evidência de cada análise) com exatamente estas seções:\n## 💪 Pontos Fortes\n## ⚠️ Fraquezas\n## 📈 O Que Melhorou\n## 🎯 Perfil Deste Chatter (diga se ele tende bem pra venda rápida, prioriza conexão/vínculo, ou prioriza qualificar o lead antes de tudo — com evidência das análises, pra gestora saber onde ele funciona mais)\n## 🧭 Tipo de Lead Que Ele Atende Melhor (qual arquétipo de lead ele converte/conduz melhor)\n## 🗣️ Como É a Condução da Conversa\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram — só o que está nos dados)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema)\n\n2) Logo em seguida, um bloco \`\`\`chatter contendo a versão PRO PRÓPRIO CHATTER ler — tom completamente diferente: informal, simples, como se fosse um chatter mais experiente dando dica de colega pra colega, NUNCA se apresentando como gerente/gestora ou usando linguagem formal. Cubra: o que ele mandou bem essa semana, os erros mais comuns em linguagem simples e como corrigir, e uma tarefa de autoteste pra ele praticar sozinho nos próximos dias (nunca uma meta de tempo/prazo de venda — só prática de técnica específica).`;
   try{
-    const text=await clFetchAI(system,prompt,3000);
+    const text=await clFetchAI(system,prompt,3500);
     if(!text)throw new Error('Resposta vazia da IA');
+    const fenceM=text.match(/```chatter\s*([\s\S]*?)```/i);
+    let rawGestora=text.trim(),rawChatter='';
+    if(fenceM){
+      rawChatter=fenceM[1].trim();
+      rawGestora=text.slice(0,fenceM.index).trim();
+    }else{
+      rawChatter=rawGestora; // fallback: IA não formatou a cerca — melhor mostrar algo do que nada
+    }
     if(!S.chatlabWeeklyReports)S.chatlabWeeklyReports={};
     if(!S.chatlabWeeklyReports[cid])S.chatlabWeeklyReports[cid]=[];
     S.chatlabWeeklyReports[cid]=S.chatlabWeeklyReports[cid].filter(r=>r.weekKey!==wk); // regenerar substitui a da mesma semana
-    S.chatlabWeeklyReports[cid].push({weekKey:wk,date:new Date().toISOString(),raw:text,generatedBy:generatedBy||'gestora',analisesCount:analises.length});
+    S.chatlabWeeklyReports[cid].push({weekKey:wk,date:new Date().toISOString(),rawGestora,rawChatter,generatedBy:generatedBy||'gestora',analisesCount:analises.length,metrics});
     save();
-    return text;
+    return{rawGestora,rawChatter};
   }catch(err){
     if(err.quota)toast(`⏳ Limite de uso da IA — tente de novo em ${err.waitSeconds||60}s`);
     else toast('❌ Erro ao gerar relatório: '+err.message);
@@ -8963,38 +8989,89 @@ async function gerarRelatorioSemanalChatter(cid,generatedBy){
 async function gerarRelatorioSemanalUI(){
   const cid=document.getElementById('cl-chatter')?.value;
   if(!cid){toast('⚠️ Selecione um chatter primeiro');return;}
+  const c=S.chatters.find(ch=>ch.id===cid);
   const btn=document.getElementById('cl-relatorio-btn');
-  const el=document.getElementById('cl-relatorio-semanal');
   if(btn){btn.disabled=true;btn.textContent='Gerando…';}
-  if(el)el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">⏳ Sintetizando o relatório da semana…</div>';
   try{
     await gerarRelatorioSemanalChatter(cid,'gestora');
-    toast('✅ Relatório semanal gerado');
+    toast(`✅ Relatório semanal salvo — veja na Ficha de ${c?c.name:'chatter'}`);
   }catch(e){/* toast já mostrado dentro de gerarRelatorioSemanalChatter */}
-  renderRelatorioSemanalChatLab(cid);
-  if(btn){btn.disabled=false;btn.textContent='📅 Gerar relatório desta semana';}
-}
-function renderRelatorioSemanalChatLab(cid){
-  const el=document.getElementById('cl-relatorio-semanal');
-  if(!el)return;
-  if(!cid){el.innerHTML='';return;}
-  const lista=(S.chatlabWeeklyReports?.[cid]||[]).slice().sort((a,b)=>b.weekKey.localeCompare(a.weekKey));
-  if(!lista.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhum relatório semanal gerado ainda pra esse chatter</div>';return;}
-  const atual=lista[0];
-  const origem=atual.generatedBy==='chatter'?'🤖 gerado pelo próprio chatter':'gerado por você';
-  el.innerHTML=`<div class="panel" style="border-left:3px solid var(--accent)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <div style="font-size:11px;color:var(--text3)">${weekKeyToLabel(atual.weekKey)} · ${atual.analisesCount} análise${atual.analisesCount>1?'s':''} · ${origem}</div>
-    </div>
-    <div class="cl-md">${clMd(atual.raw)}</div>
-  </div>
-  ${lista.length>1?`<div style="margin-top:8px;font-size:11px;color:var(--text3)">${lista.length-1} relatório${lista.length-1>1?'s':''} de semana${lista.length-1>1?'s':''} anterior${lista.length-1>1?'es':''} também salvo${lista.length-1>1?'s':''}</div>`:''}`;
+  if(btn){btn.disabled=false;btn.textContent='📅 Relatório da semana';}
+  if(currentViewName()==='testers'){
+    const sel=document.getElementById('tester-select');
+    if(sel&&sel.value===cid)renderTesterDetail(cid);
+  }
 }
 function weekKeyToLabel(wk){
   const[y,m,d]=wk.split('-').map(Number);
   const mon=new Date(y,m-1,d);
   const sun=new Date(mon);sun.setDate(mon.getDate()+6);
   return`${mon.getDate()}/${mon.getMonth()+1} – ${sun.getDate()}/${sun.getMonth()+1}`;
+}
+// Painel da Ficha do chatter — versão analítica (dashboard) pra gestora, com
+// o quadro clicável "Relatório Chatter" que mostra exatamente a versão que
+// ele vê no link dele.
+function relatorioSemanalFichaHtml(cid){
+  const lista=(S.chatlabWeeklyReports?.[cid]||[]).slice().sort((a,b)=>b.weekKey.localeCompare(a.weekKey));
+  if(!lista.length)return'';
+  const atual=lista[0];
+  const m=atual.metrics||{};
+  const origem=atual.generatedBy==='chatter'?'🤖 gerado pelo próprio chatter':'gerado por você';
+  const body=`<div style="font-size:11px;color:var(--text3);margin-bottom:10px">${weekKeyToLabel(atual.weekKey)} · ${atual.analisesCount} análise${atual.analisesCount>1?'s':''} · ${origem}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${m.avgIGP!=null?`<div style="flex:1;min-width:90px;background:var(--bg-soft);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text3)">IGP MÉDIO</div>
+        <div style="font-size:16px;font-weight:800;font-family:var(--font-mono);color:${m.avgIGP>=70?'var(--ok)':m.avgIGP>=50?'var(--warn)':'var(--bad)'}">${m.avgIGP}</div>
+      </div>`:''}
+      ${m.taxaConversao!=null?`<div style="flex:1;min-width:90px;background:var(--bg-soft);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text3)">TAXA CONVERSÃO</div>
+        <div style="font-size:16px;font-weight:800;font-family:var(--font-mono)">${m.taxaConversao}%</div>
+      </div>`:''}
+      ${m.topArquetipo?`<div style="flex:1;min-width:90px;background:var(--bg-soft);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text3)">ARQUÉTIPO+</div>
+        <div style="font-size:13px;font-weight:800">${m.topArquetipo}</div>
+      </div>`:''}
+    </div>
+    <div class="cl-md">${clMd(atual.rawGestora)}</div>
+    <div data-noaccordion onclick="toggleRelatorioChatterPreview('${cid}')" style="margin-top:14px;border:2px dashed var(--accent);border-radius:10px;padding:12px;text-align:center;cursor:pointer;font-weight:700;color:var(--accent);font-size:12.5px">👁️ Relatório Chatter — ver o que ${S.chatters.find(ch=>ch.id===cid)?.name||'ele'} vai ver</div>
+    <div id="relatorio-chatter-preview-${cid}" style="display:none;margin-top:10px;background:var(--accent-soft);border-radius:10px;padding:14px">
+      <div class="cl-md">${clMd(atual.rawChatter)}</div>
+    </div>
+    ${lista.length>1?`<div style="margin-top:10px;font-size:11px;color:var(--text3)">${lista.length-1} relatório${lista.length-1>1?'s':''} de semana${lista.length-1>1?'s':''} anterior${lista.length-1>1?'es':''} também salvo${lista.length-1>1?'s':''}</div>`:''}`;
+  return fichaAccordion('relsemanal-'+cid,'border:2px solid var(--accent)',
+    `<div><div class="panel-title">📊 Relatório Semanal do Chatter</div><div class="panel-note">${weekKeyToLabel(atual.weekKey)}${m.avgIGP!=null?` · IGP médio ${m.avgIGP}`:''}</div></div>`,
+    body
+  );
+}
+function toggleRelatorioChatterPreview(cid){
+  const el=document.getElementById('relatorio-chatter-preview-'+cid);
+  if(!el)return;
+  el.style.display=el.style.display==='none'?'block':'none';
+}
+// Painel da Ficha do chatter — todas as conversas que ele (ou a gestora)
+// já mandou pro ChatLab analisar, minimizadas por padrão, com data — pedido
+// explícito da gestora pra acompanhar tudo sem procurar no histórico global.
+function conversasAnalisadasFichaHtml(cid){
+  const lista=(S.chatlabAnalyses||[]).filter(a=>a.chatterId===cid).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  if(!lista.length)return'';
+  const body=lista.map(a=>{
+    const col=a.igp>=70?'var(--ok)':a.igp>=50?'var(--warn)':a.igp?'var(--bad)':'var(--text3)';
+    const dt=a.date?new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+    return`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden">
+      <div style="padding:9px 12px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleClAn('ficha-${a.id}')">
+        <div style="font-size:11.5px;color:var(--text3)">${dt}${a.autoAnalise?' <span style="font-size:9px;font-weight:700;color:var(--accent)">🤖 autoanálise</span>':''}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:15px;font-weight:800;font-family:var(--font-mono);color:${col}">${a.igp||'—'}</span>
+          <span style="font-size:9px;color:var(--text3)" id="cl-ic-ficha-${a.id}">▼</span>
+        </div>
+      </div>
+      <div id="cl-body-ficha-${a.id}" style="display:none"><div class="cl-md" style="padding:14px">${clMd(a.raw||'')}</div></div>
+    </div>`;
+  }).join('');
+  return fichaAccordion('convanalisadas-'+cid,'',
+    `<div><div class="panel-title">🔬 Conversas Analisadas</div><div class="panel-note">${lista.length} conversa${lista.length>1?'s':''} — inclui as que ele mesmo autoanalisou</div></div>`,
+    body
+  );
 }
 
 /* ===========================================================
@@ -10462,7 +10539,7 @@ function listenToRelatoriosSemanaisPendentes(){
 }
 function aplicarRelatorioSemanalPendente(docId,data){
   try{
-    if(!data.chatterId||!data.raw||!data.weekKey){
+    if(!data.chatterId||!data.rawGestora||!data.weekKey){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'dados incompletos'});
       return;
     }
@@ -10470,11 +10547,11 @@ function aplicarRelatorioSemanalPendente(docId,data){
     if(!S.chatlabWeeklyReports)S.chatlabWeeklyReports={};
     if(!S.chatlabWeeklyReports[data.chatterId])S.chatlabWeeklyReports[data.chatterId]=[];
     S.chatlabWeeklyReports[data.chatterId]=S.chatlabWeeklyReports[data.chatterId].filter(r=>r.weekKey!==data.weekKey);
-    S.chatlabWeeklyReports[data.chatterId].push({weekKey:data.weekKey,date:data.date||new Date().toISOString(),raw:data.raw,generatedBy:'chatter',analisesCount:data.analisesCount||0});
+    S.chatlabWeeklyReports[data.chatterId].push({weekKey:data.weekKey,date:data.date||new Date().toISOString(),rawGestora:data.rawGestora,rawChatter:data.rawChatter||data.rawGestora,generatedBy:'chatter',analisesCount:data.analisesCount||0,metrics:data.metrics||{}});
     save();
-    if(currentViewName()==='chatlab'){
-      const sel=document.getElementById('cl-chatter');
-      if(sel&&sel.value===data.chatterId)renderRelatorioSemanalChatLab(data.chatterId);
+    if(currentViewName()==='testers'){
+      const sel=document.getElementById('tester-select');
+      if(sel&&sel.value===data.chatterId)renderTesterDetail(data.chatterId);
     }
     toast(`📅 ${c?c.name:'Um chatter'} gerou o relatório semanal dele — já aplicado`);
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar relatório semanal como processado',e));
@@ -10583,7 +10660,9 @@ function renderTesterDetail(cid){
   ):'';
 
   const mandamentosPanel=mandamentosPanelHtml(cid);
-  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+mandamentosPanel+`
+  const relatorioSemanalPanel=relatorioSemanalFichaHtml(cid);
+  const conversasAnalisadasPanel=conversasAnalisadasFichaHtml(cid);
+  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+relatorioSemanalPanel+mandamentosPanel+conversasAnalisadasPanel+`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-weight:800;font-size:16px">${c.name}</div>

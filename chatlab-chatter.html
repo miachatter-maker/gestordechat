@@ -91,7 +91,13 @@ SINAIS DE WHALE (Manual de Criação de Whale): 3+ compras espaçadas, intervalo
 
 REGRA DE VENDA RÁPIDA (turno 15h-23h, maior volume): pedido espontâneo de personalizado/whats já é sinal de compra — vender na hora; quando a oferta parte do chatter, sempre validar com sexting antes; nunca ofertar preço alto pra quem não validou.
 
-ERROS CLÁSSICOS DO PLAYBOOK (usar como catálogo de erro, não inventar outros): pular etapa de script, oferecer mídia paga sem ter passado por sexting, ceder desconto sem pedir nada em troca, mandar mídia de graça quando só pediram "pra ver", sumir depois de mandar conteúdo, usar escassez falsa, empilhar mais de uma técnica de persuasão na mesma mensagem, tratar todo mundo com o mesmo tom independente do arquétipo, discutir preço em vez de reforçar valor, vender antes de aquecer.
+ERROS CLÁSSICOS DO PLAYBOOK (usar como catálogo de erro, não inventar outros): pular etapa de script, oferecer mídia paga sem ter passado por sexting, ceder desconto sem pedir nada em troca, mandar mídia de graça quando só pediram "pra ver", sumir depois de mandar conteúdo, usar escassez falsa, empilhar mais de uma técnica de persuasão na mesma mensagem, tratar todo mundo com o mesmo tom independente do arquétipo, discutir preço em vez de reforçar valor, vender antes de aquecer, fala mecânica/robótica (mensagem genérica que ignora o que o assinante acabou de dizer).
+
+COMO PUXAR ASSUNTO (Manual "Como Puxar Assunto com Assinantes" — usar pra diagnosticar e corrigir fala mecânica, tipo o problema do Renan):
+"Não tenho assunto" é mito — todo assinante entrega deixa, o trabalho é achar e puxar o fio, não inventar do zero. Fluxo em 3 passos: 1) PERGUNTA ABERTA (nunca fechada tipo "tudo bem?"/"curtiu?" — pergunta que puxa opinião, gosto, o que faria, ex: "como tá sendo seu dia?" em vez de "tudo bem?") pra coletar informação real sobre a pessoa; 2) FALAR DO QUE ELE GOSTA (uma vez descoberto o assunto, ir fundo nele em vez de tentar inventar outro — a pessoa se sente ouvida e valorizada, isso sozinho já gera vínculo); 3) CONTAR UMA HISTÓRIA PARECIDA DA PERSONA depois que ele se abriu (reciprocidade — conversa não pode ser só interrogatório, ela também precisa "soltar" informação, sempre coerente com o que já contou antes pra essa pessoa).
+Erros de fala mecânica a apontar: rajada de perguntas fechadas em sequência, resposta genérica que não usa nada do que o assinante acabou de escrever (soa robótico/copiado e colado), não ler o histórico da conversa antes de responder (a deixa muitas vezes já está lá em cima), só perguntar sem nunca contribuir com algo próprio (interrogatório), forçar assunto quando a pessoa claramente não está afim (nem toda conversa depende do chatter — às vezes é só o momento errado da pessoa, não é falha dele).
+
+CUIDADO COM TAREFAS/METAS DE TEMPO: nunca sugira desafio ou tarefa de treino do tipo "feche uma venda em X minutos" ou qualquer meta que force o chatter a apressar o lead pulando a escada de temperatura — isso pressiona o assinante, quebra a régua 1→2→...→8 do script e tende a atrapalhar mais do que ajudar. Toda tarefa de treino/autoteste sugerida deve ser sobre PRATICAR uma técnica específica (ex: "aplique pergunta aberta em pelo menos 3 conversas essa semana"), nunca sobre bater um prazo ou meta de tempo de fechamento.
 `;
 const CHATLAB_COPILOTO_SYSTEM=`Você é o Copiloto Tático da equipe de chat — orienta o chatter EM TEMPO REAL, durante a conversa, com base no playbook interno da agência abaixo. Responda em português, curto e direto, SEMPRE em JSON válido (nada de texto fora do JSON), com exatamente estas chaves:
 {"temperatura":{"nivel":0,"label":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}
@@ -266,6 +272,18 @@ function renderForm(){
     </div>
   `;
 }
+// Calcula métricas objetivas da semana (mesma lógica do app principal) —
+// só pra acompanhar junto no doc pendente, o chatter não vê números aqui.
+function calcMetricasSemana(analises){
+  const comIgp=analises.filter(a=>a.igp!=null);
+  const avgIGP=comIgp.length?Math.round(comIgp.reduce((s,a)=>s+(a.igp||0),0)/comIgp.length):null;
+  const tagged=analises.filter(a=>a.tags);
+  const taxaConversao=tagged.length?Math.round(tagged.filter(a=>a.tags.converteu==='sim').length/tagged.length*100):null;
+  const arqTally={};
+  tagged.forEach(a=>{if(a.tags.arquetipo)arqTally[a.tags.arquetipo]=(arqTally[a.tags.arquetipo]||0)+1;});
+  const topArquetipo=Object.entries(arqTally).sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
+  return{avgIGP,taxaConversao,topArquetipo};
+}
 async function carregarRelatorioSemanal(){
   const el=document.getElementById('relatorio-semanal');
   if(!el||!fbDb)return;
@@ -281,7 +299,7 @@ async function carregarRelatorioSemanal(){
     if(atual){
       const origem=atual.generatedBy==='chatter'?'gerado por você':'gerado pela sua gestora';
       el.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:8px">${weekKeyToLabel(wk)} · ${atual.analisesCount||0} análise${(atual.analisesCount||0)>1?'s':''} · ${origem}</div>
-        <div class="cl-md">${clMd(atual.raw)}</div>
+        <div class="cl-md">${clMd(atual.rawChatter||atual.rawGestora||'')}</div>
         <button class="btn btn-ghost" style="margin-top:10px" onclick="gerarMeuRelatorioSemanal()">🔄 Gerar de novo (atualiza com análises novas)</button>`;
     }else{
       el.innerHTML=`<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">Ainda não tem relatório dessa semana (${weekKeyToLabel(wk)}).</div>
@@ -311,16 +329,25 @@ window.gerarMeuRelatorioSemanal=async function(){
       return;
     }
     const wk=currentWeekKey();
+    const metrics=calcMetricasSemana(analises);
     const contexto=analises.map((a,i)=>`Análise ${i+1} — ${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})} — IGP ${a.igp||'—'}${a.tags?.principalErro?` — erro principal: ${a.tags.principalErro}`:''}${a.tags?.converteu?` — converteu: ${a.tags.converteu}`:''}${a.tags?.arquetipo?` — arquétipo: ${a.tags.arquetipo}`:''}\n${a.resumo||''}`).join('\n\n---\n\n');
-    const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, escrevendo um relatório semanal de evolução PRA O PRÓPRIO CHATTER ler — tom direto, didático e encorajador, mas honesto sobre os problemas reais. Baseie-se só nas análises fornecidas abaixo, nunca invente dado que não está lá.`;
-    const prompt=`Chatter: ${chatterNome||'chatter'}. Semana: ${weekKeyToLabel(wk)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''} essa semana, rodadas por ele mesmo e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva um relatório semanal em Markdown, curto, direto e prático, com exatamente estas seções:\n## ✅ O Que Melhorou (compare as análises mais antigas da semana com as mais recentes, se der pra perceber evolução)\n## 🔁 Continue Assim (pontos fortes a manter)\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram nas análises acima — use só o que está nos dados, não invente outros)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema listado acima)\n## 📝 Tarefa de Autoteste (uma prática específica e mensurável pra treinar sozinho nos próximos dias e depois conferir rodando uma nova autoanálise)`;
-    const text=await clFetchAI(system,prompt,3000);
+    const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, usando EXATAMENTE o playbook interno abaixo (não critérios genéricos). Baseie-se só nas análises fornecidas, nunca invente dado que não está lá.\n\n${PLAYBOOK_CATALOGO}`;
+    const prompt=`Chatter: ${chatterNome||'chatter'}. Semana: ${weekKeyToLabel(wk)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''}, rodadas por ele mesmo e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva DUAS versões do relatório semanal, nessa ordem exata:\n\n1) VERSÃO PRA GESTORA (Markdown, direto, analítico, com evidência de cada análise) com exatamente estas seções:\n## 💪 Pontos Fortes\n## ⚠️ Fraquezas\n## 📈 O Que Melhorou\n## 🎯 Perfil Deste Chatter (diga se ele tende bem pra venda rápida, prioriza conexão/vínculo, ou prioriza qualificar o lead antes de tudo — com evidência das análises, pra gestora saber onde ele funciona mais)\n## 🧭 Tipo de Lead Que Ele Atende Melhor (qual arquétipo de lead ele converte/conduz melhor)\n## 🗣️ Como É a Condução da Conversa\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram — só o que está nos dados)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema)\n\n2) Logo em seguida, um bloco \`\`\`chatter contendo a versão PRO PRÓPRIO CHATTER ler — tom completamente diferente: informal, simples, como se fosse um chatter mais experiente dando dica de colega pra colega, NUNCA se apresentando como gerente/gestora ou usando linguagem formal. Cubra: o que ele mandou bem essa semana, os erros mais comuns em linguagem simples e como corrigir, e uma tarefa de autoteste pra ele praticar sozinho nos próximos dias (nunca uma meta de tempo/prazo de venda — só prática de técnica específica).`;
+    const text=await clFetchAI(system,prompt,3500);
     if(!text)throw new Error('Resposta vazia da IA');
+    const fenceM=text.match(/```chatter\s*([\s\S]*?)```/i);
+    let rawGestora=text.trim(),rawChatter='';
+    if(fenceM){
+      rawChatter=fenceM[1].trim();
+      rawGestora=text.slice(0,fenceM.index).trim();
+    }else{
+      rawChatter=rawGestora;
+    }
 
-    // Mostra na hora pro chatter e manda a fila pro app principal aplicar
-    // sozinho (mesmo padrão da autoanálise por conversa).
+    // Mostra na hora só a versão casual (a versão de gestão fica só pra ela
+    // ver na Ficha) — e manda a fila pro app principal aplicar sozinho.
     el.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:8px">${weekKeyToLabel(wk)} · ${analises.length} análise${analises.length>1?'s':''} · gerado por você</div>
-      <div class="cl-md">${clMd(text)}</div>
+      <div class="cl-md">${clMd(rawChatter)}</div>
       <button class="btn btn-ghost" style="margin-top:10px" onclick="gerarMeuRelatorioSemanal()">🔄 Gerar de novo (atualiza com análises novas)</button>`;
     toast('✅ Relatório gerado — sua gestora também recebe automaticamente.');
 
@@ -330,7 +357,7 @@ window.gerarMeuRelatorioSemanal=async function(){
       chatterId,chatterNome,
       weekKey:wk,
       date:new Date().toISOString(),
-      raw:text,
+      rawGestora,rawChatter,metrics,
       analisesCount:analises.length,
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
