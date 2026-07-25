@@ -1240,6 +1240,7 @@ body{
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" id="cl-btn" onclick="rodarChatLab()">⚡ Analisar</button>
       <button class="btn btn-ghost" onclick="limparChatLab()">Limpar</button>
+      <button class="btn btn-ghost" onclick="gerarLinkChatlabChatter()">🔗 Link de autoanálise</button>
     </div>
   </div>
 
@@ -1688,6 +1689,19 @@ body{
   <button class="btn btn-primary btn-block" onclick="copiarLinkAvaliacao()">📋 Copiar link</button>
   <div class="modalbtns" style="margin-top:10px">
     <button class="btn btn-ghost btn-block" onclick="closeModal('m-avaliacao-link')">Fechar</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-chatlab-link"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🔗 Link de autoanálise</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Envie esse link pro chatter — ele cola a própria conversa, recebe o feedback da IA na hora (menos o Plano de Treinamento, que é só pra gestão) e a análise completa já entra automaticamente no seu ChatLab, sem precisar rodar você mesma.</div>
+  <div class="field">
+    <input class="finput" id="chatlab-link-input" readonly onclick="this.select()" style="font-size:12px">
+  </div>
+  <button class="btn btn-primary btn-block" onclick="copiarLinkChatlab()">📋 Copiar link</button>
+  <div class="modalbtns" style="margin-top:10px">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-chatlab-link')">Fechar</button>
   </div>
 </div></div>
 

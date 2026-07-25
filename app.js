@@ -330,6 +330,7 @@ function initFirebase(){
     },8000);
     listenToFirestore(t);
     listenToAvaliacoesPendentes();
+    listenToChatlabPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -8788,7 +8789,7 @@ function renderChatLabHistorico(){
     return`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden">
       <div style="padding:10px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleClAn('${a.id}')">
         <div>
-          <div style="font-size:13px;font-weight:700">${c?c.name:'?'}</div>
+          <div style="font-size:13px;font-weight:700">${c?c.name:'?'}${a.autoAnalise?' <span style="font-size:9.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:5px;margin-left:4px;vertical-align:middle">🤖 autoanálise</span>':''}</div>
           <div style="font-size:11px;color:var(--text3)">${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -10279,6 +10280,85 @@ function aplicarAvaliacaoPendente(docId,data){
     console.error('Erro ao aplicar avaliação pendente',e);
   }
 }
+
+/* ===========================================================
+   CHATLAB — autoanálise do chatter (link online, sem login)
+   Mesma ideia da Avaliação de Chatter: gera um link
+   (chatlab-chatter.html?id=<chatterId>) que o próprio chatter abre,
+   cola a conversa e roda a análise da IA sozinho — pra se corrigir no
+   dia a dia, em vez de depender só da gestora apontar erro por erro.
+   A página pública escreve o registro completo (com Plano de
+   Treinamento) na mesma coleção 'gestorpro', marcado com
+   type:'chatlabPendente' — o app principal escuta (listenToChatlabPendentes,
+   chamado junto do resto em initFirebase) e aplica sozinho no
+   S.chatlabAnalyses, marcado com autoAnalise:true pra aparecer
+   sinalizado no histórico.
+   =========================================================== */
+function gerarLinkChatlabChatter(){
+  const cid=document.getElementById('cl-chatter')?.value;
+  if(!cid){toast('⚠️ Selecione um chatter antes de gerar o link');return;}
+  const c=S.chatters.find(ch=>ch.id===cid);
+  if(!c)return;
+  const url=`${location.origin}/chatlab-chatter.html?id=${encodeURIComponent(cid)}&nome=${encodeURIComponent(c.name)}`;
+  const input=document.getElementById('chatlab-link-input');
+  if(input)input.value=url;
+  openModal('m-chatlab-link');
+}
+function copiarLinkChatlab(){
+  const input=document.getElementById('chatlab-link-input');
+  if(!input)return;
+  input.select();
+  navigator.clipboard?.writeText(input.value).then(()=>{
+    toast('📋 Link copiado — envie pro chatter.');
+  }).catch(()=>{
+    document.execCommand('copy');
+    toast('📋 Link copiado — envie pro chatter.');
+  });
+}
+function listenToChatlabPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','chatlabPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarChatlabPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir autoanálises pendentes do ChatLab',err);
+    });
+}
+function aplicarChatlabPendente(docId,data){
+  try{
+    if(!data.chatterId||!data.raw){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'dados incompletos'});
+      return;
+    }
+    // Trava simples contra duplicidade caso o snapshot dispare mais de uma
+    // vez pro mesmo documento (não deveria, mas não custa proteger).
+    if(S.chatlabAnalyses.some(a=>a.sourceDocId===docId))return;
+    const c=S.chatters.find(ch=>ch.id===data.chatterId);
+    S.chatlabAnalyses.push({
+      id:'cla'+Date.now(),
+      chatterId:data.chatterId,
+      date:data.date||new Date().toISOString(),
+      igp:data.igp||null,
+      raw:data.raw,
+      resumo:data.resumo||'',
+      tags:data.tags||null,
+      autoAnalise:true,
+      sourceDocId:docId
+    });
+    save();
+    if(currentViewName()==='chatlab'){renderChatLabHistorico();renderChatLabRanking();}
+    toast(`🤖 ${c?c.name:'Um chatter'} rodou uma autoanálise no ChatLab — já aplicada`);
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar autoanálise como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar autoanálise pendente do ChatLab',e);
+  }
+}
+
 function renderTesterDetail(cid){
   const el=document.getElementById('tester-content');
   if(!el)return;
