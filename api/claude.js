@@ -94,14 +94,15 @@ export default async function handler(req, res) {
     // tokens), e esses tokens saem do MESMO orçamento de max_tokens que a
     // resposta final — em prompts grandes (ex: análise completa do ChatLab)
     // isso consumia o orçamento todo só pensando, cortando a resposta visível
-    // no meio (JSON quebrado, markdown incompleto sem a seção final). Baixar
-    // pra thinkingLevel 'low' resolve isso sem precisar aumentar max_tokens
-    // em cada chamada do app.js.
+    // no meio (JSON quebrado, markdown incompleto sem a seção final).
+    // 'low' ainda deixava conversas reais (mais longas que meu teste) cortarem
+    // no meio — 'minimal' é o nível mais baixo que o modelo aceita (não
+    // garante zero raciocínio em casos complexos, mas chega perto).
     const geminiBody = {
       contents,
       generationConfig: {
         maxOutputTokens: max_tokens || 2000,
-        thinkingConfig: { thinkingLevel: 'low' }
+        thinkingConfig: { thinkingLevel: 'minimal' }
       }
     };
     if (system) geminiBody.systemInstruction = { parts: [{ text: system }] };
