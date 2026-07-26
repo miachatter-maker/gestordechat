@@ -11266,8 +11266,10 @@ Toda medalha exige treinamento em dia e zero advertências ativas nos últimos 9
 
 DADOS QUE PODEM FALTAR NO CONTEXTO: "advertências ativas nos últimos 90 dias" e "tempo de casa exato" ainda NÃO são rastreados pelo sistema — quando isso for relevante pra uma checagem de elegibilidade de medalha/cargo, diga explicitamente que essa parte específica não pôde ser verificada por falta desse dado, em vez de supor ou inventar. Isso deve aparecer só como uma nota curta, não repetida em cada ficha.
 
+5) ChatLab — dados de qualidade de condução da conversa (complementam o faturamento, não substituem): pra cada chatter você também recebe, quando disponível, as métricas das conversas analisadas no ChatLab essa semana — IGP (nota de 0 a 100 sobre a qualidade da condução: conexão, técnica, condução, sinais de compra), taxa de conversão das conversas analisadas, arquétipo de lead mais comum enfrentado, e quantos sinais de whale (cliente de alto valor) foram identificados. Use isso pra qualificar o diagnóstico financeiro: faturamento alto com IGP baixo geralmente indica que o resultado veio de tráfego/sorte, não de técnica (risco de não se sustentar); faturamento baixo com IGP alto geralmente indica problema de volume de leads/tráfego, não de habilidade do chatter — a recomendação deve refletir essa diferença. Quando um chatter não teve nenhuma conversa analisada no ChatLab essa semana, diga isso e não invente uma leitura de qualidade pra ele.
+
 O QUE CALCULAR — POR CHATTER
-Para cada chatter, monte: faturamento do período (semana e mês) e variação vs. período anterior (%); nível de meta batido na semana (70/85/100/superação) e prêmio correspondente já com boost quando houver; comissão fixa do período; bônus de high ticket; bônus de modelo extra se aplicável; ganho total estimado no período; posição frente ao piso (ganho do MÊS vs. piso da medalha atual — alerta se está dependendo do piso, ok se supera com folga); status de medalha (mantém / risco de queda / elegível pra subir, usando o histórico de faturamento das últimas semanas como indicador aproximado quando a categoria oficial de semanas passadas não estiver disponível); status de cargo (elegibilidade pra promoção ou sinal de que o cargo atual não está sendo sustentado); diagnóstico interpretativo (2–4 frases); recomendação de ação concreta pra liderança.
+Para cada chatter, monte: faturamento do período (semana e mês) e variação vs. período anterior (%); nível de meta batido na semana (70/85/100/superação) e prêmio correspondente já com boost quando houver; comissão fixa do período; bônus de high ticket; bônus de modelo extra se aplicável; ganho total estimado no período; posição frente ao piso (ganho do MÊS vs. piso da medalha atual — alerta se está dependendo do piso, ok se supera com folga); status de medalha (mantém / risco de queda / elegível pra subir, usando o histórico de faturamento das últimas semanas como indicador aproximado quando a categoria oficial de semanas passadas não estiver disponível); status de cargo (elegibilidade pra promoção ou sinal de que o cargo atual não está sendo sustentado); leitura cruzada entre faturamento e qualidade de condução (ChatLab), quando houver dado; diagnóstico interpretativo (2–4 frases); recomendação de ação concreta pra liderança.
 
 O QUE CALCULAR — POR EQUIPE / POR MODELO
 Faturamento total do período e variação vs. período anterior; ranking interno dos chatters (maior pro menor ganho); distribuição de categorias assumidas (quantos em A/B/C/D/E); concentração de risco (se o faturamento depende excessivamente de 1–2 chatters); diagnóstico da equipe; recomendação de ação em nível de equipe (redistribuição de modelos, ajuste de escala, reforço/contratação, padronizar categoria de meta, etc.).
@@ -11281,9 +11283,10 @@ Faturamento (semana/mês): R$ X | variação: +/-Y%
 Categoria assumida: [A-E] | Nível batido: [70/85/100/superação Nx]
 Comissão fixa: R$ X | Prêmio de meta: R$ X | High ticket: R$ X | Modelo extra: R$ X
 Ganho total estimado: R$ X | Piso da medalha: R$ X → [acima/no limite/abaixo]
+ChatLab (semana): IGP X/100 | Conversão Y% | Arquétipo mais comum: Z | Whales: N [ou "sem conversas analisadas essa semana"]
 Situação da medalha: [mantém / risco de queda / elegível para subir]
 Situação do cargo: [estável / elegível para promoção / em risco]
-Diagnóstico: [2-4 frases]
+Diagnóstico: [2-4 frases — cruzando faturamento com a leitura do ChatLab quando houver dado]
 Recomendação para a liderança: [ação concreta e objetiva]
 
 RESUMO — Equipe/Modelo [nome]
@@ -11291,6 +11294,7 @@ RESUMO — Equipe/Modelo [nome]
 Faturamento total: R$ X | variação: +/-Y%
 Ranking interno: 1) ... 2) ... 3) ...
 Distribuição de categorias: A:x B:x C:x D:x E:x
+ChatLab da equipe: IGP médio X/100 | Whales identificados: N
 Concentração de risco: [sim/não + detalhe]
 Diagnóstico da equipe: [2-4 frases]
 Recomendação de ação: [ação concreta e objetiva]
@@ -11338,12 +11342,17 @@ function buildFaturamentoContext(){
     const historico4sem=[-3,-2,-1,0].map(o=>getChatterWeekRevenue(c.id,o)+getChatterExtraRevenue(c.id,o));
     const models=getChatterModelsWorkedWeek(c.id,0).map(m=>m.name);
     const cargo=PAG_LEVEL_LABEL[c.level]||c.level;
-    perChatter.push({c,fat,extraFat,fatAtual,variacao,avgHtPct,htTotal,cat,medal,real,monthEarn,pisoMes,pisoCompMes,historico4sem,models,cargo});
+    // ChatLab da semana — reaproveita as mesmas funções do relatório semanal
+    // (coletarAnalisesDaSemana/calcMetricasSemana), não recalcula nada novo.
+    const clAnalises=coletarAnalisesDaSemana(c.id);
+    const clMetrics=calcMetricasSemana(clAnalises);
+    perChatter.push({c,fat,extraFat,fatAtual,variacao,avgHtPct,htTotal,cat,medal,real,monthEarn,pisoMes,pisoCompMes,historico4sem,models,cargo,clAnalises,clMetrics});
     lines.push(`\n- ${c.name} | Cargo: ${cargo} | Medalha: ${PAG_MEDAL_LABEL[medal]} | Categoria assumida: ${cat} | Modelo(s) atendida(s) esta semana: ${models.join(', ')||'nenhuma escala registrada'}`+
       `\n  Faturamento semana: R$${fatAtual.toFixed(2)} (normal R$${fat.toFixed(2)} + hora extra R$${extraFat.toFixed(2)}) | variação vs. semana anterior: ${variacao>=0?'+':''}${variacao}% | nível batido: ${nivelBatido}`+
       `\n  High ticket: ${avgHtPct}% do faturamento (R$${htTotal.toFixed(2)}) | Faturamento últimas 4 semanas (mais antiga→mais recente): ${historico4sem.map(v=>'R$'+v.toFixed(2)).join(' → ')}`+
       `\n  GANHO SEMANA já calculado = comissão R$${real.comissao.toFixed(2)} + prêmio de meta R$${real.premio.toFixed(2)} + high ticket R$${real.htBonus.toFixed(2)} + modelo extra R$${real.extraBonus.toFixed(2)} = TOTAL R$${real.total.toFixed(2)}`+
-      `\n  GANHO MÊS (até agora) já calculado = comissão R$${monthEarn.comissao.toFixed(2)} + prêmio de meta R$${monthEarn.premio.toFixed(2)} + high ticket R$${monthEarn.htBonus.toFixed(2)} + modelo extra R$${monthEarn.extraBonus.toFixed(2)} = TOTAL R$${monthEarn.total.toFixed(2)} | Piso mensal da medalha: R$${pisoMes.toFixed(2)}${pisoCompMes>0?` → empresa completaria +R$${pisoCompMes.toFixed(2)} se fechar assim (ABAIXO DO PISO)`:' → já passou do piso ✅'}`);
+      `\n  GANHO MÊS (até agora) já calculado = comissão R$${monthEarn.comissao.toFixed(2)} + prêmio de meta R$${monthEarn.premio.toFixed(2)} + high ticket R$${monthEarn.htBonus.toFixed(2)} + modelo extra R$${monthEarn.extraBonus.toFixed(2)} = TOTAL R$${monthEarn.total.toFixed(2)} | Piso mensal da medalha: R$${pisoMes.toFixed(2)}${pisoCompMes>0?` → empresa completaria +R$${pisoCompMes.toFixed(2)} se fechar assim (ABAIXO DO PISO)`:' → já passou do piso ✅'}`+
+      `\n  ChatLab (semana): ${clAnalises.length?`${clAnalises.length} conversa${clAnalises.length>1?'s':''} analisada${clAnalises.length>1?'s':''} | IGP médio ${clMetrics.avgIGP!=null?clMetrics.avgIGP+'/100':'—'} | taxa de conversão ${clMetrics.taxaConversao!=null?clMetrics.taxaConversao+'%':'—'} | arquétipo mais comum: ${clMetrics.topArquetipo||'—'} | sinais de whale: ${clMetrics.whaleCount}`:'nenhuma conversa analisada no ChatLab essa semana'}`);
   });
 
   // Agrupamento por equipe/modelo (modelo principal trabalhado na semana)
@@ -11362,7 +11371,10 @@ function buildFaturamentoContext(){
     const catDist={A:0,B:0,C:0,D:0,E:0};
     list.forEach(p=>{if(catDist[p.cat]!=null)catDist[p.cat]++;});
     const top2Share=totalAtual>0?Math.round((ranking.length?[...list].sort((a,b)=>b.fatAtual-a.fatAtual).slice(0,2).reduce((s,p)=>s+p.fatAtual,0):0)/totalAtual*100):0;
-    lines.push(`\n- Modelo ${modelName} (${list.length} chatter${list.length>1?'s':''}): faturamento total semana R$${totalAtual.toFixed(2)} | variação vs. semana anterior: ${variacaoTime>=0?'+':''}${variacaoTime}% | ranking: ${ranking.join(', ')||'-'} | distribuição de categorias: A:${catDist.A} B:${catDist.B} C:${catDist.C} D:${catDist.D} E:${catDist.E} | top 2 chatters concentram ${top2Share}% do faturamento da equipe`);
+    const comIgpTime=list.filter(p=>p.clMetrics.avgIGP!=null);
+    const igpMedioTime=comIgpTime.length?Math.round(comIgpTime.reduce((s,p)=>s+p.clMetrics.avgIGP,0)/comIgpTime.length):null;
+    const whalesTime=list.reduce((s,p)=>s+(p.clMetrics.whaleCount||0),0);
+    lines.push(`\n- Modelo ${modelName} (${list.length} chatter${list.length>1?'s':''}): faturamento total semana R$${totalAtual.toFixed(2)} | variação vs. semana anterior: ${variacaoTime>=0?'+':''}${variacaoTime}% | ranking: ${ranking.join(', ')||'-'} | distribuição de categorias: A:${catDist.A} B:${catDist.B} C:${catDist.C} D:${catDist.D} E:${catDist.E} | top 2 chatters concentram ${top2Share}% do faturamento da equipe | ChatLab da equipe: IGP médio ${igpMedioTime!=null?igpMedioTime+'/100':'sem análises da equipe essa semana'} · sinais de whale: ${whalesTime}`);
   });
 
   return lines.join('\n');
