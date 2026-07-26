@@ -44,6 +44,14 @@ const MAX_ROUNDS = 2;
 const RETRY_DELAY_MS = 2500;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Round-robin (não sorteio) entre as chaves. A função serverless costuma
+// ficar "quente" (mesma instância reaproveitada) por vários pedidos seguidos
+// em pouco tempo — com chave aleatória, pedidos próximos no tempo podem cair
+// todos na mesma chave por puro azar do sorteio, estourando o limite por
+// minuto dela sozinha mesmo com outras chaves de sobra. Um contador que
+// avança a cada pedido garante alternância de verdade entre elas.
+let roundRobinCounter = 0;
+
 async function callGemini(apiKey, geminiBody) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const upstream = await fetch(url, {
@@ -107,10 +115,8 @@ export default async function handler(req, res) {
     };
     if (system) geminiBody.systemInstruction = { parts: [{ text: system }] };
 
-    // Começa em uma chave aleatória a cada requisição pra espalhar o uso
-    // entre elas ao longo do dia, em vez de sempre bater na primeira até
-    // ela estourar sozinha.
-    const startIdx = Math.floor(Math.random() * API_KEYS.length);
+    // Alterna de verdade entre as chaves (round-robin), não sorteio.
+    const startIdx = (roundRobinCounter++) % API_KEYS.length;
     let upstream, data;
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
