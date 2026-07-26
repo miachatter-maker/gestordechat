@@ -7752,14 +7752,22 @@ function toggleRetentionDay(date){
 // substituída por uma nova já com as datas da PRÓXIMA turma — não fica presa
 // numa semana antiga. Edições manuais dela durante a semana são preservadas
 // (só troca quando a data muda). Não mexe nos treinamentos criados por você.
+const RETENTION_TRAINING_TITLE='🔥 Aquecimento Discord — toda semana, Segunda a Quinta (Treinamento na Sexta)';
 function ensureRetentionTrainingEntry(){
   const mon=fmt(getRetentionWeekMonday());
   const existing=S.trainings.find(t=>t.autoRetention);
-  if(existing&&existing.date===mon)return false;
+  if(existing&&existing.date===mon){
+    // Corrige só o título de entradas antigas já salvas (rótulo mudou de
+    // "Seg-Sex" pra deixar claro que o Aquecimento em si é Segunda-Quinta e
+    // o Treinamento é na Sexta) sem mexer nos roteiros que já foram editados
+    // durante a semana.
+    if(existing.title!==RETENTION_TRAINING_TITLE){existing.title=RETENTION_TRAINING_TITLE;return true;}
+    return false;
+  }
   S.trainings=S.trainings.filter(t=>!t.autoRetention);
   S.trainings.push({
     id:'tr-retention-'+mon,
-    title:'🔥 Aquecimento Discord — toda semana, Segunda a Quinta (Treinamento na Sexta)',
+    title:RETENTION_TRAINING_TITLE,
     date:mon,
     autoRetention:true,
     days:RETENTION_AGENDA_DAYS.map(d=>({day:d.dia,script:`${d.titulo}\n\n${d.texto}`}))
