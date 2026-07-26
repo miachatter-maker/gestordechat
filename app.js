@@ -7649,6 +7649,63 @@ function getAutoDailyAgendaItems(dateKey){
   });
   return items;
 }
+// Igual getAutoDailyAgendaItems, mas pra TODOS os dias futuros (e atrasados
+// não concluídos) de uma vez — não só hoje. É o que alimenta o quadro único
+// "📌 Próximos Compromissos" na Agenda, que sempre se atualiza sozinho, sem
+// precisar cadastrar nada à parte: some da lista só quando o item original
+// é marcado como feito (mesmo dado de S.orientations/weeklyTasks/etc).
+function getAllUpcomingCommitments(){
+  const items=[];
+  S.orientations.filter(o=>o.time&&o.date&&!o.done).forEach(o=>{
+    const c=S.chatters.find(ch=>ch.id===o.chatterId);
+    items.push({date:o.date,time:o.time,
+      text:`🎯 Orientação — ${c?c.name:'?'}: ${o.text}`,
+      toggle:`toggleOrientationDone('${o.id}')`,
+      view:`openOrientView('${o.id}')`,tag:'Orientação'});
+  });
+  Object.keys(S.weeklyTasks).forEach(wk=>{
+    (S.weeklyTasks[wk]||[]).forEach(t=>{
+      if(t.date&&t.time&&!t.done){
+        items.push({date:t.date,time:t.time,text:`📅 ${t.text}`,
+          toggle:`toggleTaskDone('weekly','${wk}','${t.id}')`,tag:'Semanal'});
+      }
+    });
+  });
+  Object.keys(S.monthlyTasks).forEach(mk=>{
+    (S.monthlyTasks[mk]||[]).forEach(t=>{
+      if(t.date&&t.time&&!t.done){
+        items.push({date:t.date,time:t.time,text:`🗓️ ${t.text}`,
+          toggle:`toggleTaskDone('monthly','${mk}','${t.id}')`,tag:'Mensal'});
+      }
+    });
+  });
+  getRetentionAgendaItems().forEach(r=>{
+    if(!S.retentionDone[r.date]){
+      items.push({date:r.date,time:'13:00',text:`🎓 ${r.titulo}`,
+        toggle:`toggleRetentionDay('${r.date}')`,tag:'Treinamento'});
+    }
+  });
+  return items.sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+}
+function upcomingCommitmentRowHtml(t){
+  const overdue=t.date<todayKey();
+  const dateLabel=t.date.slice(8,10)+'/'+t.date.slice(5,7);
+  const textStyle=`flex:1;font-size:13px;${t.view?'cursor:pointer;text-decoration:underline;text-decoration-style:dotted;':''}`;
+  const textClick=t.view?` onclick="${t.view}"`:'';
+  return`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">
+    <button onclick="${t.toggle}" style="width:20px;height:20px;border-radius:5px;border:2px solid ${overdue?'var(--bad)':'var(--line-strong)'};background:transparent;cursor:pointer;flex-shrink:0"></button>
+    <span style="font-size:10.5px;font-family:var(--font-mono);color:${overdue?'var(--bad)':'var(--text3)'};width:74px;flex-shrink:0">${dateLabel} ${t.time}</span>
+    <span style="${textStyle}"${textClick}>${t.text}</span>
+    <span style="font-size:9.5px;color:${overdue?'var(--bad)':'var(--accent)'};background:${overdue?'var(--bad-soft)':'var(--accent-soft)'};padding:2px 6px;border-radius:5px;flex-shrink:0;white-space:nowrap">${overdue?'Atrasado':t.tag}</span>
+  </div>`;
+}
+function renderUpcomingCommitments(){
+  const el=document.getElementById('upcoming-commitments-list');
+  if(!el)return;
+  const items=getAllUpcomingCommitments();
+  if(!items.length){el.innerHTML='<div style="font-size:12.5px;color:var(--text3);padding:6px 0">Nenhum compromisso com data e hora marcado.</div>';return;}
+  el.innerHTML=items.slice(0,40).map(upcomingCommitmentRowHtml).join('');
+}
 function renderTaskBoard(containerId,scope,key){
   const el=document.getElementById(containerId);
   if(!el)return;
@@ -7687,6 +7744,7 @@ function renderTaskBoards(){
   renderTaskBoard('daily-tasks-list','daily',selectedTaskDay);
   renderTaskBoard('weekly-tasks-list','weekly',getWeekKey());
   renderTaskBoard('monthly-tasks-list','monthly',todayKey().slice(0,7));
+  renderUpcomingCommitments();
 }
 
 /* ===========================================================
@@ -8496,6 +8554,7 @@ function saveJustificativa2(chatterId,text,datesStr){
 
 function renderGestao(){
   renderManagerProfile();
+  renderDemandas2();
   renderTaskBoards();
   renderEventActionList();
   renderTrainings();
