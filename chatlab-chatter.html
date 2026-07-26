@@ -99,12 +99,12 @@ Erros de fala mecânica a apontar: rajada de perguntas fechadas em sequência, r
 
 CUIDADO COM TAREFAS/METAS DE TEMPO: nunca sugira desafio ou tarefa de treino do tipo "feche uma venda em X minutos" ou qualquer meta que force o chatter a apressar o lead pulando a escada de temperatura — isso pressiona o assinante, quebra a régua 1→2→...→8 do script e tende a atrapalhar mais do que ajudar. Toda tarefa de treino/autoteste sugerida deve ser sobre PRATICAR uma técnica específica (ex: "aplique pergunta aberta em pelo menos 3 conversas essa semana"), nunca sobre bater um prazo ou meta de tempo de fechamento.
 `;
-const CHATLAB_COPILOTO_SYSTEM=`Você é o Copiloto Tático da equipe de chat — orienta o chatter EM TEMPO REAL, durante a conversa, com base no playbook interno da agência abaixo. Responda em português, curto e direto, SEMPRE em JSON válido (nada de texto fora do JSON), com exatamente estas chaves:
-{"temperatura":{"nivel":0,"label":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}
-
-${PLAYBOOK_CATALOGO}
-
-Se a conversa for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" nesse campo — nunca invente evidência que não está no texto colado. Campos sem achado relevante (alerta, sinalDeWhale) podem ficar como string vazia.`;
+// Schema do Copiloto Tático — antes era um pedido SEPARADO pra IA
+// (CHATLAB_COPILOTO_SYSTEM + clRunCopiloto), disparado em paralelo com a
+// análise completa: 2 pedidos à IA por clique de "Analisar", o dobro de
+// gasto de cota. Agora vem embutido na mesma resposta da análise completa
+// (ver rodarAutoanalise), como um bloco ```copiloto no início — só 1 pedido.
+const CHATLAB_COPILOTO_SCHEMA='{"temperatura":{"nivel":0,"label":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}';
 const AI_PROXY_URL='/api/claude';
 
 function aiQuotaError(data){
@@ -131,22 +131,36 @@ async function clFetchAI(system,userContent,maxTokens){
   }
   return text;
 }
-async function clRunCopiloto(conv){
-  let lastErr=null;
-  for(let attempt=0;attempt<2;attempt++){
-    try{
-      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,3000);
-      if(!text)throw new Error('Resposta vazia da IA (provavelmente limite de uso da IA no momento)');
-      const s=text.indexOf('{'),e=text.lastIndexOf('}');
-      if(s<0||e<0)throw new Error('Resposta cortada, tentando de novo…');
-      return JSON.parse(text.slice(s,e+1));
-    }catch(err){
-      lastErr=err;
-      if(err.quota)break;
-      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+// Quando você RESPONDE (cita) uma mensagem específica no chat, o app de
+// mensagens gera um bloco de 3 linhas: o NOME de quem mandou a mensagem
+// citada, a mensagem citada (repetida — já apareceu antes na conversa) e só
+// então a resposta nova de verdade. Esse NOME sozinho confunde a IA sobre
+// quem é quem (às vezes é o nome de quem NÃO está falando ali). Detecta esse
+// padrão (nome sozinho seguido de uma linha que já apareceu antes) e remove
+// as duas linhas, deixando só a resposta nova.
+function limparNomesDeRespostaCitada(conv){
+  if(!conv)return conv;
+  const linhas=conv.split('\n');
+  const vistas=new Set();
+  const nomeRegex=/^\p{Lu}[\p{Ll}'’]{1,20}$/u;
+  const out=[];
+  for(let i=0;i<linhas.length;i++){
+    const linha=linhas[i];
+    const norm=linha.trim().toLowerCase();
+    if(norm&&nomeRegex.test(linha.trim())&&i+1<linhas.length){
+      const proximaRaw=linhas[i+1].trim();
+      const temLetra=/\p{L}/u.test(proximaRaw);
+      const ehHorario=/^\d{1,2}:\d{2}$/.test(proximaRaw);
+      const proxima=proximaRaw.toLowerCase();
+      if(temLetra&&!ehHorario&&proxima&&vistas.has(proxima)){
+        i++;
+        continue;
+      }
     }
+    if(norm)vistas.add(norm);
+    out.push(linha);
   }
-  throw lastErr;
+  return out.join('\n');
 }
 function clMd(md){
   return md
@@ -408,17 +422,22 @@ window.rodarAutoanalise=async function(){
   btn.disabled=true;btn.textContent='Analisando…';
   document.getElementById('resultado').innerHTML='<div style="text-align:center;padding:24px;color:var(--text2);font-size:13px">⏳ A IA está analisando sua conversa…</div>';
 
+  // Copiloto tático vem embutido na MESMA chamada da análise completa (ver
+  // comentário em CHATLAB_COPILOTO_SCHEMA) — 1 pedido à IA por clique, não 2.
   renderCopiloto('loading');
-  clRunCopiloto(conv).then(obj=>renderCopiloto('ok',obj)).catch(err=>renderCopiloto('error',err));
 
   const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de chatters usando EXATAMENTE o playbook interno da agência abaixo — não critérios genéricos de vendas. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.\n\n${PLAYBOOK_CATALOGO}`;
-  const prompt=`Analise a conversa do chatter **${chatterNome||'chatter'}**.${ctx?'\nContexto: '+ctx:''}\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
+  const convLimpa=limparNomesDeRespostaCitada(conv);
+  const copilotoInstrucao=`Antes de mais nada, gere um bloco \`\`\`copiloto contendo APENAS um JSON válido (nada de texto fora dele) com exatamente estas chaves, resumindo uma orientação tática rápida pro chatter usar AGORA nessa conversa — se ela for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" no campo em vez de inventar:\n${CHATLAB_COPILOTO_SCHEMA}\n\nDepois desse bloco, continue com a análise completa abaixo — são DUAS coisas na mesma resposta, não pule nenhuma das duas.\n\n`;
+  const prompt=copilotoInstrucao+`Analise a conversa do chatter **${chatterNome||'chatter'}**.${ctx?'\nContexto: '+ctx:''}\n\nANTES DE ANALISAR: identifique com cuidado qual lado da conversa é você (${chatterNome||'o chatter'}, quem atende/vende) e qual é o lead/cliente (quem compra/consome) — nunca inverta os dois.\n\n---\nCONVERSA:\n${convLimpa}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
 
   try{
     let text='',lastErr=null;
     for(let attempt=0;attempt<2;attempt++){
       try{
-        text=await clFetchAI(system,prompt,6000);
+        // 7000 (não 6000) porque a resposta agora inclui também o bloco
+        // ```copiloto embutido, além da análise completa.
+        text=await clFetchAI(system,prompt,7000);
       }catch(err){
         lastErr=err;text='';
         if(err.quota)break;
@@ -431,6 +450,17 @@ window.rodarAutoanalise=async function(){
       if(attempt===0)await new Promise(r=>setTimeout(r,1500));
     }
     if(!text)throw lastErr||new Error('Resposta vazia da IA');
+
+    // Extrai o bloco ```copiloto ANTES de tudo — o resto (parsing do IGP,
+    // tags, renderização) precisa ver só a análise completa.
+    const copM=text.match(/```copiloto\s*([\s\S]*?)```/i);
+    if(copM){
+      try{renderCopiloto('ok',JSON.parse(copM[1]));}
+      catch(e){renderCopiloto('error',{message:'Copiloto: resposta em formato inesperado'});}
+      text=(text.slice(0,copM.index)+text.slice(copM.index+copM[0].length)).trim();
+    }else{
+      renderCopiloto('error',{message:'Copiloto não veio nessa resposta'});
+    }
 
     const igpM=text.match(/IGP[^:]*:\s*\**\s*(\d+)/i);
     const igp=igpM?parseInt(igpM[1]):null;
@@ -469,6 +499,9 @@ window.rodarAutoanalise=async function(){
     toast('✅ Análise concluída — sua gestora também recebe automaticamente.');
     carregarHistorico();
   }catch(err){
+    // Copiloto vem na MESMA resposta agora — se a chamada toda falhou, o
+    // card dele não pode ficar preso em "calculando" pra sempre.
+    renderCopiloto('error',err);
     if(err.quota){
       document.getElementById('resultado').innerHTML=`<div class="error-box">⏳ Limite de uso da IA no momento — espere cerca de ${err.waitSeconds}s e tente de novo. Sua conversa colada continua no campo.</div>`;
     }else{

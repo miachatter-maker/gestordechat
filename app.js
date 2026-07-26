@@ -8730,12 +8730,15 @@ CUIDADO COM TAREFAS/METAS DE TEMPO: nunca sugira desafio ou tarefa de treino do 
 // enquanto ele ainda está na conversa. Formato enxuto de propósito: não é
 // o relatório completo do gestor (isso é rodarChatLab), é orientação
 // imediata de "o que fazer agora".
-const CHATLAB_COPILOTO_SYSTEM=`Você é o Copiloto Tático da equipe de chat — orienta o chatter EM TEMPO REAL, durante a conversa, com base no playbook interno da agência abaixo. Responda em português, curto e direto, SEMPRE em JSON válido (nada de texto fora do JSON), com exatamente estas chaves:
-{"temperatura":{"nivel":0,"label":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}
-
-${PLAYBOOK_CATALOGO}
-
-Se a conversa for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" nesse campo — nunca invente evidência que não está no texto colado. Campos sem achado relevante (alerta, sinalDeWhale) podem ficar como string vazia.`;
+// Schema do Copiloto Tático (dica rápida "o que fazer agora" pro chatter) —
+// antes era um pedido SEPARADO pra IA (CHATLAB_COPILOTO_SYSTEM + clRunCopiloto),
+// disparado em paralelo com a análise completa: 2 pedidos à IA por clique de
+// "Analisar", o dobro de gasto de cota, só no ChatLab (nenhuma outra
+// ferramenta faz isso) — era a causa real de "o ChatLab sempre falha por
+// limite de uso". Agora o copiloto vem EMBUTIDO na mesma resposta da análise
+// completa, como um bloco ```copiloto no início (ver montarPromptAnaliseChatLab
+// / rodarChatLab) — só 1 pedido à IA por análise.
+const CHATLAB_COPILOTO_SCHEMA='{"temperatura":{"nivel":0,"label":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}';
 // A infra de IA (AI_PROXY_URL) às vezes corta a resposta no meio (flaky —
 // varia de tentativa pra tentativa, não é sempre no mesmo ponto) — por
 // isso tenta de novo automaticamente antes de mostrar erro pro chatter.
@@ -8754,28 +8757,6 @@ async function clFetchAI(system,userContent,maxTokens){
     if(qerr)throw qerr;
   }
   return text;
-}
-async function clRunCopiloto(conv){
-  let lastErr=null;
-  for(let attempt=0;attempt<2;attempt++){
-    try{
-      // 1800 (não 600) porque o modelo atual "pensa" antes de responder e
-      // esses tokens de raciocínio saem do mesmo orçamento — com pouca
-      // margem o JSON final vinha cortado no meio (erro de parse).
-      const text=await clFetchAI(CHATLAB_COPILOTO_SYSTEM,'CONVERSA:\n'+conv,3000);
-      if(!text)throw new Error('Resposta vazia da IA (provavelmente limite de uso da IA no momento)');
-      const s=text.indexOf('{'),e=text.lastIndexOf('}');
-      if(s<0||e<0)throw new Error('Resposta cortada, tentando de novo…');
-      return JSON.parse(text.slice(s,e+1));
-    }catch(err){
-      lastErr=err;
-      // Se já é erro de limite de uso, já sabemos o tempo real de espera —
-      // tentar de novo em 1.5s só gastaria mais uma requisição da cota.
-      if(err.quota)break;
-      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
-    }
-  }
-  throw lastErr;
 }
 function renderClCopilotoResult(state,obj){
   const el=document.getElementById('cl-copiloto');
@@ -8952,11 +8933,49 @@ function clMd(md){
     .replace(/(<li[\s\S]*?<\/li>\n?)+/g,'<ul style="padding-left:18px;margin:6px 0">$&</ul>')
     .replace(/\n{2,}/g,'<br>');
 }
+// Quando alguém RESPONDE (cita) uma mensagem específica no chat, o app de
+// mensagens gera um bloco de 3 linhas: o NOME de quem mandou a mensagem
+// citada, a mensagem citada (repetida — ela já apareceu antes na conversa)
+// e só então a resposta nova de verdade. Esse NOME sozinho na linha confunde
+// a IA — ela lê como se fosse quem está falando ali, mas às vezes é
+// justamente o nome de quem NÃO está falando naquele trecho (ex: aparece
+// "Feli" mas quem respondeu de verdade foi o Rafael, citando uma fala da
+// Feli). Detecta esse padrão (nome sozinho seguido de uma linha que já
+// apareceu antes) e remove as duas linhas, deixando só a resposta nova —
+// assim a IA não tenta usar esses nomes pra decidir quem é quem.
+function limparNomesDeRespostaCitada(conv){
+  if(!conv)return conv;
+  const linhas=conv.split('\n');
+  const vistas=new Set();
+  const nomeRegex=/^\p{Lu}[\p{Ll}'’]{1,20}$/u;
+  const out=[];
+  for(let i=0;i<linhas.length;i++){
+    const linha=linhas[i];
+    const norm=linha.trim().toLowerCase();
+    if(norm&&nomeRegex.test(linha.trim())&&i+1<linhas.length){
+      // a linha seguinte só conta como "mensagem citada repetida" se tiver
+      // texto de verdade — horários (18:33) e emojis sozinhos se repetem o
+      // tempo todo na conversa e não podem disparar o corte por engano.
+      const proximaRaw=linhas[i+1].trim();
+      const temLetra=/\p{L}/u.test(proximaRaw);
+      const ehHorario=/^\d{1,2}:\d{2}$/.test(proximaRaw);
+      const proxima=proximaRaw.toLowerCase();
+      if(temLetra&&!ehHorario&&proxima&&vistas.has(proxima)){
+        i++; // pula a linha do nome + a linha citada (duplicada)
+        continue;
+      }
+    }
+    if(norm)vistas.add(norm);
+    out.push(linha);
+  }
+  return out.join('\n');
+}
 // Prompt compartilhado entre a análise normal e o "Refazer" (quando a IA
 // inverteu quem é o chatter e quem é o lead — problema real reportado pela
 // gestora). correcaoPapeis=true adiciona um aviso reforçado no topo pedindo
 // pra reler a conversa com atenção redobrada antes de reanalisar.
 function montarPromptAnaliseChatLab(c,conv,ctx,prevCount,correcaoPapeis){
+  conv=limparNomesDeRespostaCitada(conv);
   const aviso=correcaoPapeis?`⚠️ CORREÇÃO IMPORTANTE: a gestora CONFIRMOU que a análise anterior dessa mesma conversa inverteu os papéis. Ou seja, quem você tratou como CHATTER na análise anterior é, na verdade, o LEAD/CLIENTE — e quem você tratou como LEAD/CLIENTE é, na verdade, o CHATTER **${c.name}**. Inverta essa identificação, não repita a mesma leitura. Ignore a posição/ordem das mensagens e identifique pelo COMPORTAMENTO: quem conduz a conversa, oferece mídia, aplica técnica de venda e cobra preço é sempre o CHATTER **${c.name}** — mesmo que antes tenha sido lido como o lado que compra.\n\n`:'';
   return`${aviso}Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prevCount?'\nAnálise nº '+(prevCount+1)+' — compare evolução quando relevante.':''}\n\nANTES DE ANALISAR: identifique com cuidado qual lado da conversa é o CHATTER (${c.name}) e qual é o LEAD/CLIENTE — nunca inverta os dois. O CHATTER é quem está atendendo/vendendo: geralmente conduz a conversa, oferece mídia, aplica técnica de venda, cobra preço, mantém o tom de uma persona. O LEAD é quem está comprando/consumindo: geralmente pede coisas, reage, pergunta preço, decide comprar.\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
 }
@@ -8971,14 +8990,14 @@ async function rodarChatLab(){
   btn.disabled=true;btn.textContent='Analisando…';
   document.getElementById('cl-resultado').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px">⏳ A IA está analisando a conversa…</div>';
 
-  // Copiloto tático roda em paralelo — é rápido, o chatter vê orientação
-  // imediata enquanto a auditoria completa (mais lenta) ainda processa.
+  // Copiloto tático vem embutido na MESMA chamada da análise completa (ver
+  // comentário em CHATLAB_COPILOTO_SCHEMA) — 1 pedido à IA por clique, não 2.
   renderClCopilotoResult('loading');
-  clRunCopiloto(conv).then(obj=>renderClCopilotoResult('ok',obj)).catch(err=>renderClCopilotoResult('error',err));
 
   const prev=S.chatlabAnalyses.filter(a=>a.chatterId===cid);
   const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de chatters usando EXATAMENTE o playbook interno da agência abaixo — não critérios genéricos de vendas. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.\n\n${PLAYBOOK_CATALOGO}`;
-  const prompt=montarPromptAnaliseChatLab(c,conv,ctx,prev.length,false);
+  const copilotoInstrucao=`Antes de mais nada, gere um bloco \`\`\`copiloto contendo APENAS um JSON válido (nada de texto fora dele) com exatamente estas chaves, resumindo uma orientação tática rápida pro chatter usar AGORA nessa conversa — se ela for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" no campo em vez de inventar:\n${CHATLAB_COPILOTO_SCHEMA}\n\nDepois desse bloco, continue com a análise completa pedida abaixo — são DUAS coisas na mesma resposta, não pule nenhuma das duas.\n\n`;
+  const prompt=copilotoInstrucao+montarPromptAnaliseChatLab(c,conv,ctx,prev.length,false);
 
   try{
     // A infra de IA às vezes corta a resposta no meio (flaky, não é sempre
@@ -8987,7 +9006,10 @@ async function rodarChatLab(){
     let text='',lastErr=null;
     for(let attempt=0;attempt<2;attempt++){
       try{
-        text=await clFetchAI(system,prompt,6000);
+        // 7000 (não 6000) porque agora a resposta inclui TAMBÉM o bloco
+        // ```copiloto embutido — precisa de um pouco mais de orçamento de
+        // tokens além da análise completa em si.
+        text=await clFetchAI(system,prompt,7000);
       }catch(err){
         lastErr=err;
         text='';
@@ -9003,6 +9025,18 @@ async function rodarChatLab(){
       if(attempt===0)await new Promise(r=>setTimeout(r,1500));
     }
     if(!text)throw lastErr||new Error('Resposta vazia da IA');
+    // Extrai o bloco ```copiloto (dica tática embutida na mesma resposta) e
+    // tira do texto ANTES de tudo — o resto da função (parsing do IGP, tags,
+    // renderização em markdown) precisa ver só a análise completa, sem esse
+    // bloco misturado no meio.
+    const copM=text.match(/```copiloto\s*([\s\S]*?)```/i);
+    if(copM){
+      try{renderClCopilotoResult('ok',JSON.parse(copM[1]));}
+      catch(e){renderClCopilotoResult('error',new Error('Copiloto: resposta em formato inesperado'));}
+      text=(text.slice(0,copM.index)+text.slice(copM.index+copM[0].length)).trim();
+    }else{
+      renderClCopilotoResult('error',new Error('Copiloto não veio nessa resposta'));
+    }
     const igpM=text.match(/IGP[^:]*:\s*\**\s*(\d+)/i);
     const igp=igpM?parseInt(igpM[1]):null;
     // Extract resumo executivo snippet for the Evolução diagnostic square
@@ -9034,6 +9068,9 @@ async function rodarChatLab(){
     renderChatLabRanking();
     toast('✅ Análise salva — aparece na Evolução');
   }catch(err){
+    // Copiloto vem na MESMA resposta agora — se a chamada toda falhou, o
+    // painel dele não pode continuar preso em "calculando" pra sempre.
+    renderClCopilotoResult('error',err);
     if(err.quota){
       renderAIWaitCountdown('cl-resultado',err.waitSeconds,{prefix:'⏳ Análise completa — limite de uso da IA',panel:true,suffix:'a conversa colada continua no campo'});
     }else{
