@@ -298,7 +298,8 @@ function calcMetricasSemana(analises){
   const arqTally={};
   tagged.forEach(a=>{if(a.tags.arquetipo)arqTally[a.tags.arquetipo]=(arqTally[a.tags.arquetipo]||0)+1;});
   const topArquetipo=Object.entries(arqTally).sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
-  return{avgIGP,taxaConversao,topArquetipo};
+  const whaleCount=tagged.filter(a=>a.tags.sinalDeWhale).length;
+  return{avgIGP,taxaConversao,topArquetipo,whaleCount};
 }
 async function carregarRelatorioSemanal(){
   const el=document.getElementById('relatorio-semanal');

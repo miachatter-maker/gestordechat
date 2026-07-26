@@ -8823,6 +8823,7 @@ function renderChatLabRanking(){
     return{name:c?c.name:'?',total:p.total,taxa:p.total?Math.round(p.conv/p.total*100):0,
       ticketMedio:p.conv?p.valor/p.conv:0,whale:p.whale,topErro:topErro?topErro[0]:'—'};
   }).sort((a,b)=>b.taxa-a.taxa);
+  const totalWhales=ranked.reduce((s,r)=>s+r.whale,0);
 
   const arquetipoTally={};
   tagged.filter(a=>a.tags.converteu==='sim'&&a.tags.arquetipo).forEach(a=>{
@@ -8832,6 +8833,7 @@ function renderChatLabRanking(){
 
   el.innerHTML=`
     ${topArquetipo?`<div style="background:var(--accent-soft);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12.5px"><strong>Arquétipo que mais converte:</strong> ${topArquetipo[0]} (${topArquetipo[1]} venda${topArquetipo[1]>1?'s':''})</div>`:''}
+    ${totalWhales>0?`<div style="background:var(--accent-soft);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12.5px"><strong>🐋 ${totalWhales} sinal${totalWhales>1?'is':''} de whale</strong> identificado${totalWhales>1?'s':''} no total — veja quem criou na coluna 🐋 abaixo</div>`:''}
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <tr style="color:var(--text3);text-align:left"><th style="padding:4px 6px">Chatter</th><th style="padding:4px 6px">Conversas</th><th style="padding:4px 6px">Taxa conv.</th><th style="padding:4px 6px">Ticket médio</th><th style="padding:4px 6px">🐋</th><th style="padding:4px 6px">Erro mais comum</th></tr>
       ${ranked.map(r=>`<tr style="border-top:1px solid var(--line)">
@@ -8839,7 +8841,7 @@ function renderChatLabRanking(){
         <td style="padding:5px 6px">${r.total}</td>
         <td style="padding:5px 6px;color:${r.taxa>=50?'var(--ok)':r.taxa>=25?'var(--warn)':'var(--bad)'};font-weight:700">${r.taxa}%</td>
         <td style="padding:5px 6px;font-family:var(--font-mono)">${money(r.ticketMedio)}</td>
-        <td style="padding:5px 6px">${r.whale||''}</td>
+        <td style="padding:5px 6px;${r.whale>0?'color:var(--accent);font-weight:800':'color:var(--text3)'}">${r.whale||'—'}</td>
         <td style="padding:5px 6px;color:var(--text3)">${r.topErro}</td>
       </tr>`).join('')}
     </table>`;
@@ -9191,7 +9193,12 @@ function calcMetricasSemana(analises){
   const arqTally={};
   tagged.forEach(a=>{if(a.tags.arquetipo)arqTally[a.tags.arquetipo]=(arqTally[a.tags.arquetipo]||0)+1;});
   const topArquetipo=Object.entries(arqTally).sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
-  return{avgIGP,taxaConversao,topArquetipo};
+  // Quantas conversas da semana tiveram sinal de whale (cliente com padrão de
+  // comprador de alto valor, conforme o playbook) — pra dar visibilidade de
+  // quando o chatter consegue criar/converter um whale, não só ficar
+  // escondido dentro de cada análise individual.
+  const whaleCount=tagged.filter(a=>a.tags.sinalDeWhale).length;
+  return{avgIGP,taxaConversao,topArquetipo,whaleCount};
 }
 async function gerarRelatorioSemanalChatter(cid,generatedBy){
   const c=S.chatters.find(ch=>ch.id===cid);
@@ -9200,9 +9207,9 @@ async function gerarRelatorioSemanalChatter(cid,generatedBy){
   if(!analises.length){toast('⚠️ Nenhuma análise do ChatLab essa semana ainda pra gerar relatório');return;}
   const wk=getWeekKey(0);
   const metrics=calcMetricasSemana(analises);
-  const contexto=analises.map((a,i)=>`Análise ${i+1} — ${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})} — IGP ${a.igp||'—'}${a.tags?.principalErro?` — erro principal: ${a.tags.principalErro}`:''}${a.tags?.converteu?` — converteu: ${a.tags.converteu}`:''}${a.tags?.arquetipo?` — arquétipo: ${a.tags.arquetipo}`:''}\n${a.resumo||''}`).join('\n\n---\n\n');
+  const contexto=analises.map((a,i)=>`Análise ${i+1} — ${new Date(a.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})} — IGP ${a.igp||'—'}${a.tags?.principalErro?` — erro principal: ${a.tags.principalErro}`:''}${a.tags?.converteu?` — converteu: ${a.tags.converteu}`:''}${a.tags?.arquetipo?` — arquétipo: ${a.tags.arquetipo}`:''}${a.tags?.sinalDeWhale?' — 🐋 sinal de whale identificado nessa conversa':''}\n${a.resumo||''}`).join('\n\n---\n\n');
   const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat, usando EXATAMENTE o playbook interno abaixo (não critérios genéricos). Baseie-se só nas análises fornecidas, nunca invente dado que não está lá.\n\n${PLAYBOOK_CATALOGO}`;
-  const prompt=`Chatter: ${c.name}. Semana: ${weekLabel(0)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''}, rodadas por ele mesmo e/ou pela gestora).\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva DUAS versões do relatório semanal, nessa ordem exata:\n\n1) VERSÃO PRA GESTORA (Markdown, direto, analítico, com evidência de cada análise) com exatamente estas seções:\n## 💪 Pontos Fortes\n## ⚠️ Fraquezas\n## 📈 O Que Melhorou\n## 🎯 Perfil Deste Chatter (diga se ele tende bem pra venda rápida, prioriza conexão/vínculo, ou prioriza qualificar o lead antes de tudo — com evidência das análises, pra gestora saber onde ele funciona mais)\n## 🧭 Tipo de Lead Que Ele Atende Melhor (qual arquétipo de lead ele converte/conduz melhor)\n## 🗣️ Como É a Condução da Conversa\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram — só o que está nos dados)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema)\n\n2) Logo em seguida, um bloco \`\`\`chatter contendo a versão PRO PRÓPRIO CHATTER ler — tom completamente diferente: informal, simples, como se fosse um chatter mais experiente dando dica de colega pra colega, NUNCA se apresentando como gerente/gestora ou usando linguagem formal. Cubra: o que ele mandou bem essa semana, os erros mais comuns em linguagem simples e como corrigir, e uma tarefa de autoteste pra ele praticar sozinho nos próximos dias (nunca uma meta de tempo/prazo de venda — só prática de técnica específica).`;
+  const prompt=`Chatter: ${c.name}. Semana: ${weekLabel(0)} (${analises.length} análise${analises.length>1?'s':''} de conversa registrada${analises.length>1?'s':''}, rodadas por ele mesmo e/ou pela gestora). Sinais de whale identificados essa semana: ${metrics.whaleCount}.\n\nRESUMOS DAS ANÁLISES DA SEMANA:\n${contexto}\n\nEscreva DUAS versões do relatório semanal, nessa ordem exata:\n\n1) VERSÃO PRA GESTORA (Markdown, direto, analítico, com evidência de cada análise) com exatamente estas seções:\n## 💪 Pontos Fortes\n## ⚠️ Fraquezas\n## 📈 O Que Melhorou\n## 🎯 Perfil Deste Chatter (diga se ele tende bem pra venda rápida, prioriza conexão/vínculo, ou prioriza qualificar o lead antes de tudo — com evidência das análises, pra gestora saber onde ele funciona mais)\n## 🧭 Tipo de Lead Que Ele Atende Melhor (qual arquétipo de lead ele converte/conduz melhor)\n## 🗣️ Como É a Condução da Conversa\n## 🐋 Whales (se houve pelo menos 1 sinal de whale essa semana, destaque isso aqui: em qual conversa apareceu e o que especificamente o chatter fez certo que gerou esse sinal, segundo o playbook de Criação de Whale — se não houve nenhum, escreva só "Nenhum sinal de whale essa semana")\n## 🔴 Problemas Mais Frequentes (ranqueados por quantas vezes apareceram — só o que está nos dados)\n## 🎯 Plano Pra Próxima Semana (uma ação concreta por problema)\n\n2) Logo em seguida, um bloco \`\`\`chatter contendo a versão PRO PRÓPRIO CHATTER ler — tom completamente diferente: informal, simples, como se fosse um chatter mais experiente dando dica de colega pra colega, NUNCA se apresentando como gerente/gestora ou usando linguagem formal. Cubra: o que ele mandou bem essa semana (se criou algum whale, comemora isso especificamente como uma conquista), os erros mais comuns em linguagem simples e como corrigir, e uma tarefa de autoteste pra ele praticar sozinho nos próximos dias (nunca uma meta de tempo/prazo de venda — só prática de técnica específica).`;
   try{
     const text=await clFetchAI(system,prompt,3500);
     if(!text)throw new Error('Resposta vazia da IA');
@@ -9293,6 +9300,10 @@ function relatorioSemanalFichaHtml(cid){
       ${m.topArquetipo?`<div style="flex:1;min-width:90px;background:var(--bg-soft);border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text3)">ARQUÉTIPO+</div>
         <div style="font-size:13px;font-weight:800">${m.topArquetipo}</div>
+      </div>`:''}
+      ${m.whaleCount!=null?`<div style="flex:1;min-width:90px;background:${m.whaleCount>0?'var(--accent-soft)':'var(--bg-soft)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text3)">🐋 WHALES</div>
+        <div style="font-size:16px;font-weight:800;font-family:var(--font-mono);color:${m.whaleCount>0?'var(--accent)':'var(--text3)'}">${m.whaleCount}</div>
       </div>`:''}
     </div>
     <div class="cl-md">${clMd(atual.rawGestora)}</div>
