@@ -4079,6 +4079,25 @@ function renderModelsList(){
 function isChatterTerminated(c){
   return!!c.terminatedDate&&c.terminatedDate<=todayKey();
 }
+// Modelo(s) escalado(s) pra um chatter num dia específico (a partir da
+// escala/turno) — na prática quase sempre é só 1, já que ninguém atende mais
+// de uma modelo ao mesmo tempo. Usado pra saber automaticamente qual modelo
+// preencher no lançamento de faturamento, sem precisar de 1 coluna por modelo.
+function getChatterModelsForDate(cid,dateKey){
+  const dayKey=DAY_KEYS[new Date(dateKey+'T12:00:00').getDay()];
+  const ids=[...new Set(S.shifts.filter(s=>s.chatterId===cid&&(s.days||[]).includes(dayKey)&&s.folgaDia!==dayKey).flatMap(s=>s.modelIds||[]))];
+  return ids.map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
+}
+// Chamado pelo input de receita da linha — descobre a modelo certa (fixa, se
+// só tem 1 escalada, ou pelo <select> quando tem 0/2+) e salva nessa chave.
+function saveRevenueRow(chatterId,dateKey,inputEl){
+  const row=inputEl.closest('tr');
+  const fixedModelId=row?.dataset.fixedModel;
+  const select=row?.querySelector('select[data-fat-model]');
+  const modelId=fixedModelId||select?.value;
+  if(!modelId){toast('⚠️ Selecione a modelo antes de lançar');return;}
+  saveRevenue(chatterId,modelId,inputEl.value,dateKey);
+}
 function renderRevenueTable(){
   const el=document.getElementById('revenue-table');
   if(!el)return;
@@ -4090,51 +4109,54 @@ function renderRevenueTable(){
   // próprio fluxo de faturamento (Gerador Elite / Testers / Reservas)
   const allChatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
 
-  // Check if any data exists for this date (from reports or manual)
-  const hasReportData=allChatters.some(c=>S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0)>0));
-
   let html='';
 
-  // Table header
+  // Table header — 1 coluna de receita só, já que cada chatter atende 1
+  // modelo por vez (a modelo é detectada da escala, não escolhida por coluna)
   html+=`<div style="overflow-x:auto"><table class="rtable">
     <thead><tr>
       <th>Chatter</th>
-      ${S.models.map(m=>`<th style="text-align:right">${m.emoji||'🧩'} ${m.name}</th>`).join('')}
-      <th style="text-align:right;color:var(--ok)">Total</th>
+      <th>Modelo</th>
+      <th style="text-align:right;color:var(--ok)">Receita (R$)</th>
     </tr></thead><tbody>`;
 
   let dayTotal=0;
   allChatters.forEach(c=>{
-    let rowTotal=0;
-    const cells=S.models.map(m=>{
-      const key=`${c.id}_${m.id}_${dateKey}`;
-      const val=parseFloat(S.revenues[key])||0;
-      rowTotal+=val;
-      return`<td style="text-align:right">
-        <input type="number" class="rinput" value="${val||''}" placeholder="—"
-          oninput="saveRevenue('${c.id}','${m.id}',this.value,'${dateKey}')">
-      </td>`;
-    }).join('');
-    dayTotal+=rowTotal;
-    const rowColor=rowTotal>0?'':'opacity:0.5';
-    html+=`<tr class="chatter-fire-row" data-key="${c.id}" style="${rowColor};touch-action:pan-y">
+    const scheduled=getChatterModelsForDate(c.id,dateKey);
+    let modelCell='',rowVal=0,fixedAttr='';
+    if(scheduled.length===1){
+      const m=scheduled[0];
+      fixedAttr=`data-fixed-model="${m.id}"`;
+      rowVal=parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0;
+      modelCell=`<div style="font-size:12.5px">${m.emoji||'🧩'} ${m.name}</div>`;
+    } else {
+      // 0 modelos escalados (folga/sem turno hoje) ou 2+ (troca/hora extra no
+      // mesmo dia) — só nesses casos aparece um seletor manual.
+      const options=scheduled.length?scheduled:S.models;
+      const withRev=options.find(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0)>0);
+      const selectedModel=withRev||options[0];
+      rowVal=selectedModel?parseFloat(S.revenues[`${c.id}_${selectedModel.id}_${dateKey}`])||0:0;
+      modelCell=`<select data-fat-model onchange="renderRevenueTable()" style="font-size:11.5px;padding:3px 5px;border-radius:6px;border:1px solid var(--line);background:var(--bg-soft);color:var(--text)">
+        ${options.map(m=>`<option value="${m.id}" ${selectedModel&&m.id===selectedModel.id?'selected':''}>${m.emoji||'🧩'} ${m.name}</option>`).join('')}
+      </select>${!scheduled.length?'<div style="font-size:9px;color:var(--text3);margin-top:2px">sem escala hoje</div>':''}`;
+    }
+    dayTotal+=rowVal;
+    const rowColor=rowVal>0?'':'opacity:0.5';
+    html+=`<tr class="chatter-fire-row" data-key="${c.id}" ${fixedAttr} style="${rowColor};touch-action:pan-y">
       <td><div style="font-weight:700;font-size:13px">${c.name}</div></td>
-      ${cells}
-      <td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:${rowTotal>0?'var(--ok)':'var(--text3)'}">
-        ${rowTotal>0?money(rowTotal):'—'}
+      <td>${modelCell}</td>
+      <td style="text-align:right">
+        <input type="number" class="rinput" value="${rowVal||''}" placeholder="—"
+          oninput="saveRevenueRow('${c.id}','${dateKey}',this)">
       </td>
     </tr>`;
   });
 
   // Total row
-  html+='<tr class="rtotalrow"><td><strong>TOTAL DIA</strong></td>';
-  S.models.forEach(m=>{
-    let ct=0;allChatters.forEach(c=>{ct+=parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0;});
-    html+=`<td style="text-align:right;font-family:var(--font-mono)">${ct>0?money(ct):'—'}</td>`;
-  });
-  html+=`<td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:var(--ok)">${dayTotal>0?money(dayTotal):'—'}</td>`;
-  html+='</tr></tbody></table></div>';
-  html+='<div style="font-size:10.5px;color:var(--text3);margin-top:6px">Arraste o nome de alguém pro lado pra demitir (some do faturamento a partir de hoje)</div>';
+  html+=`<tr class="rtotalrow"><td colspan="2"><strong>TOTAL DIA</strong></td>
+    <td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:var(--ok)">${dayTotal>0?money(dayTotal):'—'}</td></tr>`;
+  html+='</tbody></table></div>';
+  html+='<div style="font-size:10.5px;color:var(--text3);margin-top:6px">Arraste o nome de alguém pro lado pra demitir (some do faturamento a partir de hoje). A modelo é detectada automaticamente pela escala do dia — só aparece pra escolher quando não tem escala ou tem mais de uma no mesmo dia.</div>';
 
   el.innerHTML=html;
   attachSwipeDismiss(el,'.chatter-fire-row',key=>fireChatterFromFaturamento(key));
@@ -11228,80 +11250,14 @@ function renderPagamento(){
 }
 
 /* ===========================================================
-   MÉTRICAS — Agente de Análise de Faturamento (Chatters Seduct).
-   Lê os dados JÁ CALCULADOS pelas mesmas funções da aba Pagamento
-   (calcChatterPagamento, getChatterMonthEarnings, medalha/categoria
-   automáticas) e pede pra IA montar o diagnóstico + recomendação de
-   ação por chatter e por equipe/modelo, no formato de ficha definido
-   pela gestora. 1 chamada de IA por clique (mesmo padrão de economia
-   de cota usado no ChatLab).
+   MÉTRICAS — tabelas comparativas 100% matemáticas (sem IA), a
+   partir dos dados que o sistema já tem (faturamento, horas
+   trabalhadas, ChatLab). Nada aqui depende de uma chamada de IA pra
+   atualizar — é tudo calculado na hora, direto do estado do app. A
+   IA só entra se a gestora digitar uma pergunta específica no final
+   da página, pra interpretar os números já prontos — nunca roda
+   sozinha.
    =========================================================== */
-const AGENTE_FATURAMENTO_SYSTEM=`PAPEL
-Você é o Analista de Performance e Faturamento da Seduct. Sua função é ler os dados de faturamento de cada chatter (individual) e de cada equipe/modelo, calcular métricas com base no sistema oficial de remuneração da empresa, e entregar uma leitura clara para a liderança (Mia), incluindo diagnóstico e recomendação de ação para cada chatter e para cada equipe.
-
-Você não é apenas uma calculadora: depois de gerar os números, você interpreta o que eles significam e diz o que a liderança deveria fazer a respeito — reforçar, corrigir, elogiar, treinar, redistribuir modelos, revisar categoria de meta, etc.
-
-IMPORTANTE: os valores financeiros que você vai receber no contexto (comissão, prêmio de meta com boost de superação, bônus de high ticket 8%, bônus de modelo extra 10%, piso) JÁ VÊM CALCULADOS pelas funções reais do sistema de pagamento da empresa. Nunca refaça contas do zero, nunca invente fórmula nova — apenas leia, compare e interprete os números já calculados que estão no contexto.
-
-CONTEXTO — SISTEMA DE REMUNERAÇÃO SEDUCT
-1) As cinco frentes de ganho (somam-se no mês): comissão fixa mensal (% sobre 100% do faturamento líquido, conforme a medalha); prêmio de meta semanal por categoria A–E, com 3 níveis (70/85/100% da meta) cada um com prêmio fixo em reais, e boost multiplicador quando supera 100% (+20%→1,2x / +40%→1,4x / +60%→1,6x / +100%→2,0x / +150%→2,5x / +250%→3,5x); bônus de high ticket = 8% sobre toda venda líquida ≥R$300, sem teto; bônus de modelo extra = 10% do que faturar em hora extra em outra modelo.
-Categorias (faturamento líquido semanal necessário → prêmio em cada nível):
-A: 70%=R$2.500→R$100 · 85%=R$3.000→R$120 · 100%=R$3.500→R$140
-B: 70%=R$3.500→R$175 · 85%=R$4.000→R$210 · 100%=R$5.000→R$250
-C: 70%=R$5.000→R$350 · 85%=R$6.000→R$425 · 100%=R$7.000→R$500
-D: 70%=R$7.000→R$560 · 85%=R$8.500→R$680 · 100%=R$10.000→R$800
-E: 70%=R$10.000→R$900 · 85%=R$12.000→R$1.100 · 100%=R$14.000→R$1.300
-
-2) Piso garantido (rede de segurança MENSAL, contado do dia 2 ao dia 2 do mês seguinte): se a soma de tudo que o chatter ganhou no mês não chegar ao piso da sua medalha, a empresa completa a diferença. Só vale pra quem ficou ativo o mês inteiro.
-Piso por medalha: Sem medalha R$1.000 · Bronze R$1.200 · Prata R$1.500 · Ouro R$1.800 · Diamante R$2.500.
-
-3) Medalhas (comissão, piso e requisitos):
-Bronze — 1 mês de casa · Categoria B+ em ≥3 das últimas 4 semanas · comissão 4% · piso R$1.200 · bônus de entrada R$50
-Prata — 3 meses de casa · Categoria C+ em ≥3 das últimas 4 semanas · comissão 4,5% · piso R$1.500 · bônus de entrada R$100
-Ouro — 6 meses de casa · Categoria C+ nas últimas 4 semanas + faturamento mínimo R$25 mil/mês · comissão 5% · piso R$1.800 · bônus de entrada R$150+kit
-Diamante — 12 meses de casa · Categoria D+ nas últimas 4 semanas + faturamento mínimo R$35 mil/mês · comissão 6% · piso R$2.500 · bônus de entrada R$200+kit
-Toda medalha exige treinamento em dia e zero advertências ativas nos últimos 90 dias. Verificação no início de cada mês: sobe quem passa a cumprir o próximo nível, mantém quem segue cumprindo o próprio nível, cai um nível ao receber advertência ativa ou cair abaixo da performance exigida (queda sempre de 1 nível por vez, exceto desligamento do treinamento que zera tudo).
-
-4) Cargos (trilha separada das medalhas): Atendimento: Chatter Teste (3 dias, R$50 fixos, sem meta/comissão) → Chatter Júnior (contratado, sistema completo, atende modelos iniciantes) → Chatter Pleno → Chatter Sênior (mínimo 60 dias + avaliação, atende modelos de alta performance). Liderança: Padrinho (forma novos talentos) → Manager (lidera equipe) → Manager Leader. Cargo não é permanente: sobe e desce por entrega, não por tempo de casa.
-
-DADOS QUE PODEM FALTAR NO CONTEXTO: "advertências ativas nos últimos 90 dias" e "tempo de casa exato" ainda NÃO são rastreados pelo sistema — quando isso for relevante pra uma checagem de elegibilidade de medalha/cargo, diga explicitamente que essa parte específica não pôde ser verificada por falta desse dado, em vez de supor ou inventar. Isso deve aparecer só como uma nota curta, não repetida em cada ficha.
-
-5) ChatLab — dados de qualidade de condução da conversa (complementam o faturamento, não substituem): pra cada chatter você também recebe, quando disponível, as métricas das conversas analisadas no ChatLab essa semana — IGP (nota de 0 a 100 sobre a qualidade da condução: conexão, técnica, condução, sinais de compra), taxa de conversão das conversas analisadas, arquétipo de lead mais comum enfrentado, e quantos sinais de whale (cliente de alto valor) foram identificados. Use isso pra qualificar o diagnóstico financeiro: faturamento alto com IGP baixo geralmente indica que o resultado veio de tráfego/sorte, não de técnica (risco de não se sustentar); faturamento baixo com IGP alto geralmente indica problema de volume de leads/tráfego, não de habilidade do chatter — a recomendação deve refletir essa diferença. Quando um chatter não teve nenhuma conversa analisada no ChatLab essa semana, diga isso e não invente uma leitura de qualidade pra ele.
-
-O QUE CALCULAR — POR CHATTER
-Para cada chatter, monte: faturamento do período (semana e mês) e variação vs. período anterior (%); nível de meta batido na semana (70/85/100/superação) e prêmio correspondente já com boost quando houver; comissão fixa do período; bônus de high ticket; bônus de modelo extra se aplicável; ganho total estimado no período; posição frente ao piso (ganho do MÊS vs. piso da medalha atual — alerta se está dependendo do piso, ok se supera com folga); status de medalha (mantém / risco de queda / elegível pra subir, usando o histórico de faturamento das últimas semanas como indicador aproximado quando a categoria oficial de semanas passadas não estiver disponível); status de cargo (elegibilidade pra promoção ou sinal de que o cargo atual não está sendo sustentado); leitura cruzada entre faturamento e qualidade de condução (ChatLab), quando houver dado; diagnóstico interpretativo (2–4 frases); recomendação de ação concreta pra liderança.
-
-O QUE CALCULAR — POR EQUIPE / POR MODELO
-Faturamento total do período e variação vs. período anterior; ranking interno dos chatters (maior pro menor ganho); distribuição de categorias assumidas (quantos em A/B/C/D/E); concentração de risco (se o faturamento depende excessivamente de 1–2 chatters); diagnóstico da equipe; recomendação de ação em nível de equipe (redistribuição de modelos, ajuste de escala, reforço/contratação, padronizar categoria de meta, etc.).
-
-FORMATO DE SAÍDA
-Gere sempre no formato de "ficha", uma por chatter, seguida de um resumo por equipe/modelo:
-
-FICHA — [Nome do chatter] | Modelo(s): [...] | Cargo: [...] | Medalha: [...]
-────────────────────────────────────────
-Faturamento (semana/mês): R$ X | variação: +/-Y%
-Categoria assumida: [A-E] | Nível batido: [70/85/100/superação Nx]
-Comissão fixa: R$ X | Prêmio de meta: R$ X | High ticket: R$ X | Modelo extra: R$ X
-Ganho total estimado: R$ X | Piso da medalha: R$ X → [acima/no limite/abaixo]
-ChatLab (semana): IGP X/100 | Conversão Y% | Arquétipo mais comum: Z | Whales: N [ou "sem conversas analisadas essa semana"]
-Situação da medalha: [mantém / risco de queda / elegível para subir]
-Situação do cargo: [estável / elegível para promoção / em risco]
-Diagnóstico: [2-4 frases — cruzando faturamento com a leitura do ChatLab quando houver dado]
-Recomendação para a liderança: [ação concreta e objetiva]
-
-RESUMO — Equipe/Modelo [nome]
-────────────────────────────────────────
-Faturamento total: R$ X | variação: +/-Y%
-Ranking interno: 1) ... 2) ... 3) ...
-Distribuição de categorias: A:x B:x C:x D:x E:x
-ChatLab da equipe: IGP médio X/100 | Whales identificados: N
-Concentração de risco: [sim/não + detalhe]
-Diagnóstico da equipe: [2-4 frases]
-Recomendação de ação: [ação concreta e objetiva]
-
-TOM E PRINCÍPIOS DE INTERPRETAÇÃO
-Seja direto e objetivo — sem enrolação, sem floreio motivacional genérico. Mia precisa de leitura acionável, não de slogans. Sempre baseie a interpretação nos números apresentados, nunca em suposição sem dado. Quando faltar dado pra calcular algo, diga isso explicitamente em vez de estimar sem avisar. Trate risco de queda de medalha ou de piso como alerta prioritário — destacado, não escondido no meio do texto. Toda recomendação deve ser uma ação, não uma observação vaga (evite "acompanhar de perto"; prefira algo como "agendar 1:1 esta semana pra revisar categoria de meta, hoje sub-alocada em B enquanto o histórico sustenta C"). Ao comparar chatters, seja justa: leve em conta cargo e modelo atendida (um Júnior em modelo iniciante não deve ser comparado direto com um Sênior em modelo de alta performance sem essa ressalva). Responda em português.`;
-
 const PAG_LEVEL_LABEL={treinamento:'Em treinamento',teste:'Chatter Teste',junior:'Chatter Júnior',pleno:'Chatter Pleno',senior:'Chatter Sênior',padrinho:'👑 Padrinho'};
 
 function getChatterModelsWorkedWeek(cid,offset){
@@ -11309,124 +11265,276 @@ function getChatterModelsWorkedWeek(cid,offset){
   const ids=[...new Set(S.shifts.filter(s=>s.chatterId===cid&&(s.days||[]).some(dk=>wd.includes(dk))).flatMap(s=>s.modelIds||[]))];
   return ids.map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
 }
+// Ticket médio da semana — média dos dias com dado, mesma fonte usada em
+// Pagamento/Evolução (f.analytics.weeklyData[dk].ticketMedio), sem refazer conta.
+function getChatterWeekTicketMedio(cid,offset){
+  const f=S.chatterFichas[cid];
+  const analytics=f?.analytics?.weeklyData||{};
+  const wd=getWeekDates(offset);
+  let sum=0,days=0;
+  wd.forEach(d=>{const a=analytics[fmt(d)];if(a&&a.ticketMedio>0){sum+=a.ticketMedio;days++;}});
+  return days?sum/days:0;
+}
 
-function buildFaturamentoContext(){
+// Categorias do Dashboard que o ChatLab já pede pra IA notar (0-10) em cada
+// análise — nomes usados pra reconhecer a linha da tabela dentro do texto
+// markdown já salvo (raw), sem precisar rodar IA de novo pra extrair isso.
+const CHATLAB_CATEGORIAS=[
+  {key:'conexao',label:'Conexão Emocional',match:/conex[ãa]o/i},
+  {key:'conversao',label:'Conversão e Timing',match:/convers[ãa]o/i},
+  {key:'sinaisCompra',label:'Leitura de Sinais de Compra',match:/sinais? de compra/i},
+  {key:'conducao',label:'Condução',match:/^condu|condução/i},
+  {key:'inteligenciaEmocional',label:'Inteligência Emocional',match:/intelig[êe]ncia emocional/i},
+  {key:'perfilLead',label:'Perfil do Lead',match:/perfil do lead/i},
+  {key:'qualificacao',label:'Qualificação',match:/qualifica/i},
+  {key:'inteligenciaComercial',label:'Inteligência Comercial',match:/intelig[êe]ncia comercial/i},
+  {key:'criatividade',label:'Criatividade',match:/criativ/i},
+  {key:'gestaoTempo',label:'Gestão do Tempo',match:/gest[ãa]o do tempo/i},
+  {key:'retencao',label:'Retenção',match:/retenç/i},
+];
+// Extrai as notas 0-10 do "Dashboard (tabela indicador × nota)" que já fica
+// salvo dentro do texto (raw) de cada análise do ChatLab — pura leitura de
+// texto já existente, nenhuma chamada nova de IA.
+function parseChatLabDashboard(raw){
+  if(!raw)return{};
+  const scores={};
+  const dashM=raw.match(/##\s*📊?\s*Dashboard[\s\S]*?(?=\n##\s|$)/i);
+  const section=dashM?dashM[0]:raw;
+  const lineRe=/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ /]{2,40}?)\s*[:|]\s*\**(\d{1,2})\s*\/\s*10/g;
+  let m;
+  while((m=lineRe.exec(section))){
+    const nome=m[1].trim();
+    const nota=parseInt(m[2],10);
+    if(isNaN(nota)||nota<0||nota>10)continue;
+    const cat=CHATLAB_CATEGORIAS.find(c=>c.match.test(nome));
+    if(cat&&scores[cat.key]==null)scores[cat.key]=nota;
+  }
+  return scores;
+}
+// Média das notas por categoria, a partir de um conjunto de análises já
+// coletado (ex: coletarAnalisesDaSemana) — só soma/divide, sem IA.
+function getChatLabCategoryAverages(analises){
+  const sums={},counts={};
+  (analises||[]).forEach(a=>{
+    const scores=parseChatLabDashboard(a.raw);
+    Object.entries(scores).forEach(([k,v])=>{sums[k]=(sums[k]||0)+v;counts[k]=(counts[k]||0)+1;});
+  });
+  const avgs={};
+  Object.keys(sums).forEach(k=>{avgs[k]=sums[k]/counts[k];});
+  return avgs;
+}
+
+function fmtPct(v){return v==null?'—':`${Math.round(v)}%`;}
+function fmtPctSigned(v){return v==null?'—':`${v>0?'+':''}${Math.round(v)}%`;}
+
+// Monta TODOS os dados derivados de uma vez (matemática pura, sem IA) — as
+// funções de render só formatam o que já está aqui.
+function buildMetricasData(){
   const wkey=getWeekKey(0);
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
-  const lines=[];
-  lines.push(`Semana atual: ${weekLabel(0)} (chave ${wkey}). Mês em andamento: ${getMonthDaysSoFar().length} de ${getDaysInCurrentMonth()} dias já passados.`);
-  lines.push(`⚠️ Campos "advertências ativas nos últimos 90 dias" e "tempo de casa exato" NÃO são rastreados pelo sistema ainda — não estão disponíveis pra nenhum chatter abaixo.`);
 
-  const perChatter=[];
-  chatters.forEach(c=>{
+  const perChatter=chatters.map(c=>{
     const fat=getChatterWeekRevenue(c.id,0);
     const extraFat=getChatterExtraRevenue(c.id,0);
-    const fatAnterior=getChatterWeekRevenue(c.id,-1)+getChatterExtraRevenue(c.id,-1);
     const fatAtual=fat+extraFat;
-    const variacao=fatAnterior>0?Math.round(((fatAtual-fatAnterior)/fatAnterior)*100):(fatAtual>0?100:0);
-    const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,0);
-    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
-    const manualMedalRaw=S.chatterFichas?.[c.id]?.manualMedal;
-    const catInfo=PAG_CATS[cat]||PAG_CATS.B;
-    const autoMedal=autoMedalForPct(fat>0?fat/catInfo.n100*100:0);
-    const medal=(manualMedalRaw!==undefined&&manualMedalRaw!=='')?parseInt(manualMedalRaw,10):autoMedal;
-    const metaManual=parseFloat((S.chatterWeekGoals[wkey]||{})[c.id])||0;
-    const real=calcChatterPagamento(fat,medal,cat,htTotal,extraFat,metaManual);
-    let nivelBatido='nenhum nível batido';
-    if(fat>=real.n100){const pctOver=Math.round(((fat-real.n100)/real.n100)*100);nivelBatido=pctOver>0?`superação de +${pctOver}% (boost ${pagBoost(pctOver)}x)`:'100%';}
-    else if(fat>=real.n85)nivelBatido='85%';
-    else if(fat>=real.n70)nivelBatido='70%';
-    const monthEarn=getChatterMonthEarnings(c.id,medal,cat);
-    const pisoMes=PAG_PISO[medal]||1000;
-    const pisoCompMes=Math.max(0,pisoMes-monthEarn.total);
-    const historico4sem=[-3,-2,-1,0].map(o=>getChatterWeekRevenue(c.id,o)+getChatterExtraRevenue(c.id,o));
-    const models=getChatterModelsWorkedWeek(c.id,0).map(m=>m.name);
-    const cargo=PAG_LEVEL_LABEL[c.level]||c.level;
-    // ChatLab da semana — reaproveita as mesmas funções do relatório semanal
-    // (coletarAnalisesDaSemana/calcMetricasSemana), não recalcula nada novo.
+    const fatAnterior=getChatterWeekRevenue(c.id,-1)+getChatterExtraRevenue(c.id,-1);
+    const variacao=fatAnterior>0?Math.round(((fatAtual-fatAnterior)/fatAnterior)*100):(fatAtual>0?100:null);
+    const {horas}=getChatterWeekWorkStats(c.id,0);
+    const receitaPorHora=horas>0?fatAtual/horas:null;
+    const ticketMedio=getChatterWeekTicketMedio(c.id,0);
     const clAnalises=coletarAnalisesDaSemana(c.id);
     const clMetrics=calcMetricasSemana(clAnalises);
-    perChatter.push({c,fat,extraFat,fatAtual,variacao,avgHtPct,htTotal,cat,medal,real,monthEarn,pisoMes,pisoCompMes,historico4sem,models,cargo,clAnalises,clMetrics});
-    lines.push(`\n- ${c.name} | Cargo: ${cargo} | Medalha: ${PAG_MEDAL_LABEL[medal]} | Categoria assumida: ${cat} | Modelo(s) atendida(s) esta semana: ${models.join(', ')||'nenhuma escala registrada'}`+
-      `\n  Faturamento semana: R$${fatAtual.toFixed(2)} (normal R$${fat.toFixed(2)} + hora extra R$${extraFat.toFixed(2)}) | variação vs. semana anterior: ${variacao>=0?'+':''}${variacao}% | nível batido: ${nivelBatido}`+
-      `\n  High ticket: ${avgHtPct}% do faturamento (R$${htTotal.toFixed(2)}) | Faturamento últimas 4 semanas (mais antiga→mais recente): ${historico4sem.map(v=>'R$'+v.toFixed(2)).join(' → ')}`+
-      `\n  GANHO SEMANA já calculado = comissão R$${real.comissao.toFixed(2)} + prêmio de meta R$${real.premio.toFixed(2)} + high ticket R$${real.htBonus.toFixed(2)} + modelo extra R$${real.extraBonus.toFixed(2)} = TOTAL R$${real.total.toFixed(2)}`+
-      `\n  GANHO MÊS (até agora) já calculado = comissão R$${monthEarn.comissao.toFixed(2)} + prêmio de meta R$${monthEarn.premio.toFixed(2)} + high ticket R$${monthEarn.htBonus.toFixed(2)} + modelo extra R$${monthEarn.extraBonus.toFixed(2)} = TOTAL R$${monthEarn.total.toFixed(2)} | Piso mensal da medalha: R$${pisoMes.toFixed(2)}${pisoCompMes>0?` → empresa completaria +R$${pisoCompMes.toFixed(2)} se fechar assim (ABAIXO DO PISO)`:' → já passou do piso ✅'}`+
-      `\n  ChatLab (semana): ${clAnalises.length?`${clAnalises.length} conversa${clAnalises.length>1?'s':''} analisada${clAnalises.length>1?'s':''} | IGP médio ${clMetrics.avgIGP!=null?clMetrics.avgIGP+'/100':'—'} | taxa de conversão ${clMetrics.taxaConversao!=null?clMetrics.taxaConversao+'%':'—'} | arquétipo mais comum: ${clMetrics.topArquetipo||'—'} | sinais de whale: ${clMetrics.whaleCount}`:'nenhuma conversa analisada no ChatLab essa semana'}`);
+    const catAvgs=getChatLabCategoryAverages(clAnalises);
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const catInfo=PAG_CATS[cat]||PAG_CATS.B;
+    const metaManual=parseFloat((S.chatterWeekGoals[wkey]||{})[c.id])||0;
+    const metaAlvo=metaManual>0?metaManual:catInfo.n100;
+    const perfPct=metaAlvo>0?Math.round(fat/metaAlvo*100):null;
+    const models=getChatterModelsWorkedWeek(c.id,0).map(m=>m.name);
+    const cargo=PAG_LEVEL_LABEL[c.level]||c.level;
+    // Consistência: variação (desvio padrão) do % de meta batido nas últimas
+    // 4 semanas — mesmo método já usado na aba Projeção, só convertido pra
+    // "quanto maior, mais estável" (100 - desvio).
+    const weekPcts=[-3,-2,-1,0].map(o=>{
+      const r=getChatterWeekRevenue(c.id,o);
+      return catInfo.n100>0?Math.round(r/catInfo.n100*100):0;
+    });
+    const validPcts=weekPcts.filter(p=>p>0);
+    let consistencia=null;
+    if(validPcts.length>=2){
+      const avg=validPcts.reduce((s,p)=>s+p,0)/validPcts.length;
+      const variance=validPcts.reduce((s,p)=>s+Math.pow(p-avg,2),0)/validPcts.length;
+      consistencia=Math.max(0,Math.round(100-Math.sqrt(variance)));
+    }
+    const idComponentes={performance:perfPct,crescimento:variacao,qualidade:clMetrics.avgIGP,consistencia};
+    const idValues=Object.values(idComponentes).filter(v=>v!=null);
+    const idGeral=idValues.length?Math.round(idValues.reduce((s,v)=>s+v,0)/idValues.length):null;
+    return{c,fat,extraFat,fatAtual,fatAnterior,variacao,horas,receitaPorHora,ticketMedio,clAnalises,clMetrics,catAvgs,cat,models,cargo,idComponentes,idGeral};
   });
 
-  // Agrupamento por equipe/modelo (modelo principal trabalhado na semana)
+  const totalOperacao=perChatter.reduce((s,p)=>s+p.fatAtual,0);
+  perChatter.forEach(p=>{p.dependencia=totalOperacao>0?Math.round(p.fatAtual/totalOperacao*100):0;});
+
+  // Evolução por modelo — quem trabalhou em cada modelo essa semana, quanto
+  // a modelo faturou vs semana passada, e quem foi o chatter que mais
+  // faturou nela.
   const groups={};
   perChatter.forEach(p=>{
     const key=p.models[0]||'Sem modelo definida';
     if(!groups[key])groups[key]=[];
     groups[key].push(p);
   });
-  lines.push(`\n\nRESUMO POR EQUIPE/MODELO (dados agregados pelo sistema):`);
-  Object.entries(groups).forEach(([modelName,list])=>{
+  const porModelo=Object.entries(groups).map(([modelName,list])=>{
     const totalAtual=list.reduce((s,p)=>s+p.fatAtual,0);
-    const totalAnterior=list.reduce((s,p)=>{const prev=getChatterWeekRevenue(p.c.id,-1)+getChatterExtraRevenue(p.c.id,-1);return s+prev;},0);
-    const variacaoTime=totalAnterior>0?Math.round(((totalAtual-totalAnterior)/totalAnterior)*100):(totalAtual>0?100:0);
-    const ranking=[...list].sort((a,b)=>b.real.total-a.real.total).map((p,i)=>`${i+1}) ${p.c.name} (R$${p.real.total.toFixed(2)})`);
-    const catDist={A:0,B:0,C:0,D:0,E:0};
-    list.forEach(p=>{if(catDist[p.cat]!=null)catDist[p.cat]++;});
-    const top2Share=totalAtual>0?Math.round((ranking.length?[...list].sort((a,b)=>b.fatAtual-a.fatAtual).slice(0,2).reduce((s,p)=>s+p.fatAtual,0):0)/totalAtual*100):0;
-    const comIgpTime=list.filter(p=>p.clMetrics.avgIGP!=null);
-    const igpMedioTime=comIgpTime.length?Math.round(comIgpTime.reduce((s,p)=>s+p.clMetrics.avgIGP,0)/comIgpTime.length):null;
-    const whalesTime=list.reduce((s,p)=>s+(p.clMetrics.whaleCount||0),0);
-    lines.push(`\n- Modelo ${modelName} (${list.length} chatter${list.length>1?'s':''}): faturamento total semana R$${totalAtual.toFixed(2)} | variação vs. semana anterior: ${variacaoTime>=0?'+':''}${variacaoTime}% | ranking: ${ranking.join(', ')||'-'} | distribuição de categorias: A:${catDist.A} B:${catDist.B} C:${catDist.C} D:${catDist.D} E:${catDist.E} | top 2 chatters concentram ${top2Share}% do faturamento da equipe | ChatLab da equipe: IGP médio ${igpMedioTime!=null?igpMedioTime+'/100':'sem análises da equipe essa semana'} · sinais de whale: ${whalesTime}`);
+    const totalAnterior=list.reduce((s,p)=>s+p.fatAnterior,0);
+    const variacaoTime=totalAnterior>0?Math.round(((totalAtual-totalAnterior)/totalAnterior)*100):(totalAtual>0?100:null);
+    const melhor=[...list].sort((a,b)=>b.fatAtual-a.fatAtual)[0]||null;
+    return{modelName,totalAtual,totalAnterior,variacaoTime,melhor,list};
+  }).sort((a,b)=>b.totalAtual-a.totalAtual);
+
+  // Melhor chatter por categoria do ChatLab (média das notas 0-10 já salvas)
+  const leaderboard=CHATLAB_CATEGORIAS.map(cat=>{
+    const candidatos=perChatter.filter(p=>p.catAvgs[cat.key]!=null).map(p=>({name:p.c.name,nota:p.catAvgs[cat.key]}));
+    candidatos.sort((a,b)=>b.nota-a.nota);
+    return{...cat,melhor:candidatos[0]||null,candidatos};
   });
 
-  return lines.join('\n');
+  return{wkey,perChatter,porModelo,leaderboard,totalOperacao};
 }
 
-async function gerarAnaliseFaturamento(){
-  const btn=document.getElementById('metricas-btn');
-  const out=document.getElementById('metricas-resultado');
-  if(btn){btn.disabled=true;btn.textContent='🤖 Analisando…';}
-  if(out)out.innerHTML='<div style="color:var(--text2);font-size:12.5px;padding:10px 0">⏳ Analisando faturamento de todos os chatters…</div>';
-  try{
-    const contexto=buildFaturamentoContext();
-    const prompt=`DADOS DE FATURAMENTO E PAGAMENTO (gerados automaticamente pelo sistema, já calculados pelas regras reais — semana atual e mês em andamento):\n\n${contexto}\n\nGere a análise completa: uma FICHA para CADA chatter listado acima (no formato exato do seu papel), seguida do RESUMO por equipe/modelo. Não repita o aviso sobre advertências/tempo de casa em cada ficha — mencione isso só uma vez, no início.`;
-    let text='',lastErr=null;
-    for(let attempt=0;attempt<2;attempt++){
-      try{ text=await clFetchAI(AGENTE_FATURAMENTO_SYSTEM,prompt,8000); }
-      catch(err){ lastErr=err;text=''; if(err.quota)break; if(attempt===0)await new Promise(r=>setTimeout(r,1500)); continue; }
-      if(text&&/RESUMO\s*—\s*Equipe/i.test(text))break;
-      lastErr=new Error('Resposta incompleta da IA (provavelmente limite de uso no momento — espere um minuto e tente de novo)');
-      text='';
-      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
-    }
-    if(!text)throw lastErr||new Error('Resposta vazia da IA');
-    if(out)out.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">${clMd(text)}</div>`;
-    if(!S.faturamentoAnalises)S.faturamentoAnalises=[];
-    S.faturamentoAnalises.unshift({id:'fat'+Date.now(),date:todayKey(),weekKey:getWeekKey(0),text});
-    S.faturamentoAnalises=S.faturamentoAnalises.slice(0,10);
-    save();
-    renderMetricasHistorico();
-  }catch(err){
-    console.error('Erro na Análise de Faturamento',err);
-    if(err.quota){renderAIWaitCountdown('metricas-resultado',err.waitSeconds,{prefix:'⏳ Análise de Faturamento — limite de uso da IA',panel:true});}
-    else if(out)out.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
-  }finally{
-    if(btn){btn.disabled=false;btn.textContent='🤖 Gerar Análise de Faturamento';}
-  }
+function renderMetricasTabelaChatters(data){
+  const rows=[...data.perChatter].sort((a,b)=>b.fatAtual-a.fatAtual);
+  return`<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">📋 Chatters — ${weekLabel(0)}</div><div class="panel-note">Calculado automaticamente do faturamento, horas e ChatLab já registrados — atualiza sozinho, sem IA</div></div></div>
+    <div style="overflow-x:auto"><table class="rtable">
+      <thead><tr>
+        <th>Chatter</th>
+        <th style="text-align:right">Receita semana</th>
+        <th style="text-align:right">vs sem. passada</th>
+        <th style="text-align:right">Receita/hora</th>
+        <th style="text-align:right">Conversão (ChatLab)</th>
+        <th style="text-align:right">Ticket médio</th>
+        <th style="text-align:right">Dependência</th>
+      </tr></thead><tbody>
+      ${rows.map(p=>`<tr>
+        <td><div style="font-weight:700;font-size:12.5px">${p.c.name}</div><div style="font-size:9.5px;color:var(--text3)">${p.models.join(', ')||'sem escala'}</div></td>
+        <td style="text-align:right;font-family:var(--font-mono);font-weight:700">${money(p.fatAtual)}</td>
+        <td style="text-align:right;font-weight:700;color:${p.variacao==null?'var(--text3)':p.variacao>=0?'var(--ok)':'var(--bad)'}">${fmtPctSigned(p.variacao)}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${p.receitaPorHora!=null?money(p.receitaPorHora):'—'}</td>
+        <td style="text-align:right">${p.clMetrics.taxaConversao!=null?p.clMetrics.taxaConversao+'%':'—'}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${p.ticketMedio>0?money(p.ticketMedio):'—'}</td>
+        <td style="text-align:right;font-weight:700">${p.dependencia}%</td>
+      </tr>`).join('')}
+    </tbody></table></div>
+  </div>`;
 }
 
-function renderMetricasHistorico(){
-  const el=document.getElementById('metricas-historico');
-  if(!el)return;
-  const hist=S.faturamentoAnalises||[];
-  if(!hist.length){el.innerHTML='';return;}
-  el.innerHTML=`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Análises anteriores</div>`+
-    hist.slice(0,10).map(h=>`<details style="margin-bottom:6px">
-      <summary style="cursor:pointer;font-size:12px;color:var(--text2)">${h.date} — semana ${h.weekKey}</summary>
-      <div style="padding:8px 0 0 4px">${clMd(h.text)}</div>
-    </details>`).join('');
+function renderMetricasID(data){
+  const rows=[...data.perChatter].sort((a,b)=>(b.idGeral||0)-(a.idGeral||0));
+  return`<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🆔 ID — Índice de Desenvolvimento Semanal</div><div class="panel-note">% performance (faturamento vs meta da categoria) · % crescimento (vs semana passada) · % qualidade (IGP médio do ChatLab) · % consistência (variação nas últimas 4 semanas)</div></div></div>
+    <div style="overflow-x:auto"><table class="rtable">
+      <thead><tr>
+        <th>Chatter</th>
+        <th style="text-align:right">% Performance</th>
+        <th style="text-align:right">% Crescimento</th>
+        <th style="text-align:right">% Qualidade</th>
+        <th style="text-align:right">% Consistência</th>
+        <th style="text-align:right;color:var(--accent)">ID Geral</th>
+      </tr></thead><tbody>
+      ${rows.map(p=>{const id=p.idComponentes;return`<tr>
+        <td style="font-weight:700;font-size:12.5px">${p.c.name}</td>
+        <td style="text-align:right">${fmtPct(id.performance)}</td>
+        <td style="text-align:right;color:${id.crescimento==null?'var(--text3)':id.crescimento>=0?'var(--ok)':'var(--bad)'}">${fmtPctSigned(id.crescimento)}</td>
+        <td style="text-align:right">${id.qualidade!=null?id.qualidade+'%':'—'}</td>
+        <td style="text-align:right">${fmtPct(id.consistencia)}</td>
+        <td style="text-align:right;font-weight:800;color:var(--accent)">${p.idGeral!=null?p.idGeral+'%':'—'}</td>
+      </tr>`;}).join('')}
+    </tbody></table></div>
+    <div style="font-size:10px;color:var(--text3);margin-top:6px">ID Geral = média simples dos indicadores disponíveis pra cada chatter (não é uma fórmula oficial da empresa, só uma leitura rápida de conjunto).</div>
+  </div>`;
+}
+
+function renderMetricasEvolucaoModelo(data){
+  return`<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">📈 Evolução por Modelo</div><div class="panel-note">Faturamento da semana vs semana passada, e quem mais faturou em cada modelo</div></div></div>
+    ${data.porModelo.map(m=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+      <div>
+        <div style="font-weight:700;font-size:13px">${m.modelName}</div>
+        <div style="font-size:10.5px;color:var(--text3)">melhor da semana: ${m.melhor?m.melhor.c.name+' ('+money(m.melhor.fatAtual)+')':'—'}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:var(--font-mono);font-weight:800">${money(m.totalAtual)}</div>
+        <div style="font-size:11px;font-weight:700;color:${m.variacaoTime==null?'var(--text3)':m.variacaoTime>=0?'var(--ok)':'var(--bad)'}">${fmtPctSigned(m.variacaoTime)}</div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderMetricasLeaderboard(data){
+  const comDados=data.leaderboard.filter(l=>l.melhor);
+  if(!comDados.length)return`<div class="panel"><div class="panel-head"><div class="panel-title">🏆 Melhor chatter por categoria (ChatLab)</div></div><div style="font-size:12px;color:var(--text3)">Ainda sem conversas analisadas no ChatLab essa semana pra calcular isso.</div></div>`;
+  return`<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🏆 Melhor chatter por categoria (ChatLab)</div><div class="panel-note">Média das notas 0-10 que já ficaram salvas em cada análise dessa semana — extraído automaticamente do texto, sem chamada nova de IA</div></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${comDados.map(l=>`<div style="background:var(--bg-soft);border-radius:10px;padding:10px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">${l.label}</div>
+        <div style="font-size:13.5px;font-weight:800">${l.melhor.name}</div>
+        <div style="font-size:11px;color:var(--accent);font-weight:700">${l.melhor.nota.toFixed(1)}/10</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 function renderMetricas(){
-  renderMetricasHistorico();
+  const el=document.getElementById('metricas-tabelas');
+  if(!el)return;
+  const data=buildMetricasData();
+  _metricasDataCache=data;
+  el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
+}
+
+// ---- Perguntar à IA sobre os dados já calculados (opcional, sob demanda) ----
+let _metricasDataCache=null;
+function buildMetricasContextoParaIA(data){
+  const lines=[];
+  lines.push(`Semana: ${weekLabel(0)} (${data.wkey}). Faturamento total da operação: ${money(data.totalOperacao)}.`);
+  data.perChatter.forEach(p=>{
+    lines.push(`- ${p.c.name} (${p.cargo}, modelo(s): ${p.models.join(', ')||'sem escala'}): receita semana ${money(p.fatAtual)} (variação ${fmtPctSigned(p.variacao)}), receita/hora ${p.receitaPorHora!=null?money(p.receitaPorHora):'—'}, conversão ChatLab ${p.clMetrics.taxaConversao!=null?p.clMetrics.taxaConversao+'%':'—'}, ticket médio ${p.ticketMedio>0?money(p.ticketMedio):'—'}, dependência da operação ${p.dependencia}%, ID geral ${p.idGeral!=null?p.idGeral+'%':'—'} (performance ${fmtPct(p.idComponentes.performance)}, crescimento ${fmtPctSigned(p.idComponentes.crescimento)}, qualidade ${p.idComponentes.qualidade!=null?p.idComponentes.qualidade+'%':'—'}, consistência ${fmtPct(p.idComponentes.consistencia)}).`);
+  });
+  lines.push(`\nEvolução por modelo:`);
+  data.porModelo.forEach(m=>{
+    lines.push(`- ${m.modelName}: faturamento ${money(m.totalAtual)} (variação ${fmtPctSigned(m.variacaoTime)}), melhor chatter: ${m.melhor?m.melhor.c.name:'—'}.`);
+  });
+  const comLeader=data.leaderboard.filter(l=>l.melhor);
+  if(comLeader.length){
+    lines.push(`\nMelhor chatter por categoria do ChatLab essa semana:`);
+    comLeader.forEach(l=>lines.push(`- ${l.label}: ${l.melhor.name} (${l.melhor.nota.toFixed(1)}/10)`));
+  }
+  return lines.join('\n');
+}
+const METRICAS_IA_SYSTEM=`Você é um analista de operação sênior de uma agência de chatters. Todos os números que você recebe abaixo JÁ VÊM CALCULADOS automaticamente pelo sistema (faturamento, horas, ChatLab) — nunca refaça conta nem invente número novo, só leia, compare e interprete o que a gestora perguntar. Se a pergunta pedir algo que não está nos dados fornecidos, diga isso claramente em vez de supor. Responda em português, direto, sem enrolação, em markdown simples.`;
+async function perguntarIAMetricas(){
+  const input=document.getElementById('metricas-ia-input');
+  const question=(input?.value||'').trim();
+  if(!question){toast('Digite uma pergunta antes.');return;}
+  const btn=document.getElementById('metricas-ia-btn');
+  const out=document.getElementById('metricas-ia-resposta');
+  if(btn){btn.disabled=true;btn.textContent='🤖 Analisando...';}
+  if(out)out.innerHTML='<div style="color:var(--text3);font-size:12.5px">Consultando os dados já calculados...</div>';
+  try{
+    const data=_metricasDataCache||buildMetricasData();
+    const contexto=buildMetricasContextoParaIA(data);
+    const prompt=`DADOS JÁ CALCULADOS PELO SISTEMA (semana atual):\n\n${contexto}\n\nPERGUNTA DA GESTORA:\n${question}`;
+    const text=await clFetchAI(METRICAS_IA_SYSTEM,prompt,2000);
+    if(!text)throw new Error('Resposta vazia da IA');
+    if(out)out.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px">${clMd(text)}</div>`;
+  }catch(err){
+    if(err.quota){renderAIWaitCountdown('metricas-ia-resposta',err.waitSeconds,{prefix:'⏳ limite de uso da IA',panel:true});}
+    else if(out)out.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🤖 Perguntar';}
+  }
 }
 
 // Quantos dias de trabalho ainda restam essa semana pra um chatter (hoje
