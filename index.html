@@ -857,17 +857,6 @@ body{
     <div id="manager-profile-display"></div>
   </div>
 
-  <!-- A VERIFICAR COM O FINANCEIRO -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">💰 A Verificar com o Financeiro</div><div class="panel-note">Questões pra conferir com o financeiro ou nas planilhas</div></div></div>
-    <div id="demandas2-list"></div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <input class="finput" id="demandas2-text" placeholder="O que verificar..." style="flex:1" onkeydown="if(event.key==='Enter')addDemanda2()">
-      <input type="date" class="finput" id="demandas2-date" style="flex:0 0 auto;width:130px">
-      <button class="btn btn-primary btn-sm" onclick="addDemanda2()">+</button>
-    </div>
-  </div>
-
   <!-- TAREFAS DIÁRIAS (recorrentes por dia da semana, com horário) -->
   <div class="panel">
     <div class="panel-head"><div><div class="panel-title">📆 Tarefas Diárias</div><div class="panel-note">Toque marca prioridade (🌸) · segure apertado pra editar/trocar horário</div></div></div>
@@ -901,6 +890,17 @@ body{
       <input type="time" class="finput" id="monthly-task-time" style="flex:0 0 auto;width:90px">
       <input class="finput" id="monthly-task-input" placeholder="Nova tarefa..." style="flex:1" onkeydown="if(event.key==='Enter')addMonthlyTask()">
       <button class="btn btn-primary btn-sm" onclick="addMonthlyTask()">+</button>
+    </div>
+  </div>
+
+  <!-- A VERIFICAR COM O FINANCEIRO -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">💰 A Verificar com o Financeiro</div><div class="panel-note">Questões pra conferir com o financeiro ou nas planilhas</div></div></div>
+    <div id="demandas2-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input class="finput" id="demandas2-text" placeholder="O que verificar..." style="flex:1" onkeydown="if(event.key==='Enter')addDemanda2()">
+      <input type="date" class="finput" id="demandas2-date" style="flex:0 0 auto;width:130px">
+      <button class="btn btn-primary btn-sm" onclick="addDemanda2()">+</button>
     </div>
   </div>
 

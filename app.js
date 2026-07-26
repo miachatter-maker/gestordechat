@@ -5172,11 +5172,19 @@ function renderTrainings(){
     const daysAgo=Math.floor((new Date(today)-new Date(t.date))/86400000);
     const currentDay=daysAgo>=0?daysAgo+1:null;
     const dayScript=currentDay?t.days.find(d=>d.day===currentDay)?.script||null:null;
+    // O ciclo de Aquecimento Discord é recorrente (toda semana, Segunda a
+    // Quinta — a Sexta já é o Treinamento em si), não um evento de UM dia só
+    // — mostrar a data ISO crua (ex: 2026-07-27) dava a entender erradamente
+    // que era um compromisso de dia único, então pra essa entrada específica
+    // mostra a cadência em vez da data.
+    const subtitle=t.autoRetention
+      ?`Toda semana: Segunda a Quinta (Treinamento na Sexta)${currentDay?` · Dia ${currentDay}`:' · não iniciado'}`
+      :`${t.date}${currentDay?` · Dia ${currentDay}`:' · não iniciado'}`;
     return`<div class="training-swipe-row" data-key="${t.id}" style="background:var(--warn-soft);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid var(--warn);touch-action:pan-y">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleTrainingDetail('${t.id}')">
         <div>
           <div style="font-weight:700;font-size:14px">🎓 ${t.title}</div>
-          <div style="font-size:11.5px;color:var(--text2)">${t.date}${currentDay?` · Dia ${currentDay}`:' · não iniciado'}</div>
+          <div style="font-size:11.5px;color:var(--text2)">${subtitle}</div>
         </div>
         <span style="font-size:11px;color:var(--warn)">▸</span>
       </div>
@@ -7751,7 +7759,7 @@ function ensureRetentionTrainingEntry(){
   S.trainings=S.trainings.filter(t=>!t.autoRetention);
   S.trainings.push({
     id:'tr-retention-'+mon,
-    title:'🔥 Aquecimento Discord — Turma da semana (Seg-Sex)',
+    title:'🔥 Aquecimento Discord — toda semana, Segunda a Quinta (Treinamento na Sexta)',
     date:mon,
     autoRetention:true,
     days:RETENTION_AGENDA_DAYS.map(d=>({day:d.dia,script:`${d.titulo}\n\n${d.texto}`}))
