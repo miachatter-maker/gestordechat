@@ -7267,6 +7267,7 @@ function renderDemandas2(){
   if(!el)return;
   const items=Array.isArray(S.demandas2)?S.demandas2:[];
   if(!items.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhuma demanda</div>';return;}
+  const today=todayKey();
   el.innerHTML=items.map(item=>{
     const overdue=item.date&&item.date<today;
     const near=item.date&&!overdue&&isWithin48h(item.date);
