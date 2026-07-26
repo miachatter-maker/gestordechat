@@ -925,7 +925,7 @@ function money(n){return 'R$ '+ (n||0).toLocaleString('pt-BR',{minimumFractionDi
 function moneyShort(n){return 'R$'+(n||0).toLocaleString('pt-BR',{maximumFractionDigits:0});}
 
 // ---------- NAV ----------
-const VIEWS=['home','turno','semana','time','fat','report','extra','gerador','gestao','fichas','estudos','evolucao','chatlab','testers','reservas','pagamento','projecao'];
+const VIEWS=['home','turno','semana','time','fat','report','extra','gerador','gestao','fichas','estudos','evolucao','chatlab','testers','reservas','pagamento','metricas','projecao'];
 // Render timestamp cache — debounce rapid re-renders (Firebase sync spam)
 const _rts={};
 
@@ -963,6 +963,7 @@ function renderView(v){
   else if(v==='testers')renderTesters();
   else if(v==='reservas')renderReservas();
   else if(v==='pagamento')renderPagamento();
+  else if(v==='metricas')renderMetricas();
   else if(v==='projecao')renderProjecao();
 }
 document.querySelectorAll('.toptab,.navbtn').forEach(el=>el.addEventListener('click',()=>navTo(el.dataset.go)));
@@ -11224,6 +11225,196 @@ function renderPagamento(){
   // Gerente chatters config
   renderGerChattersConfig();
   renderGerPreview();
+}
+
+/* ===========================================================
+   MÉTRICAS — Agente de Análise de Faturamento (Chatters Seduct).
+   Lê os dados JÁ CALCULADOS pelas mesmas funções da aba Pagamento
+   (calcChatterPagamento, getChatterMonthEarnings, medalha/categoria
+   automáticas) e pede pra IA montar o diagnóstico + recomendação de
+   ação por chatter e por equipe/modelo, no formato de ficha definido
+   pela gestora. 1 chamada de IA por clique (mesmo padrão de economia
+   de cota usado no ChatLab).
+   =========================================================== */
+const AGENTE_FATURAMENTO_SYSTEM=`PAPEL
+Você é o Analista de Performance e Faturamento da Seduct. Sua função é ler os dados de faturamento de cada chatter (individual) e de cada equipe/modelo, calcular métricas com base no sistema oficial de remuneração da empresa, e entregar uma leitura clara para a liderança (Mia), incluindo diagnóstico e recomendação de ação para cada chatter e para cada equipe.
+
+Você não é apenas uma calculadora: depois de gerar os números, você interpreta o que eles significam e diz o que a liderança deveria fazer a respeito — reforçar, corrigir, elogiar, treinar, redistribuir modelos, revisar categoria de meta, etc.
+
+IMPORTANTE: os valores financeiros que você vai receber no contexto (comissão, prêmio de meta com boost de superação, bônus de high ticket 8%, bônus de modelo extra 10%, piso) JÁ VÊM CALCULADOS pelas funções reais do sistema de pagamento da empresa. Nunca refaça contas do zero, nunca invente fórmula nova — apenas leia, compare e interprete os números já calculados que estão no contexto.
+
+CONTEXTO — SISTEMA DE REMUNERAÇÃO SEDUCT
+1) As cinco frentes de ganho (somam-se no mês): comissão fixa mensal (% sobre 100% do faturamento líquido, conforme a medalha); prêmio de meta semanal por categoria A–E, com 3 níveis (70/85/100% da meta) cada um com prêmio fixo em reais, e boost multiplicador quando supera 100% (+20%→1,2x / +40%→1,4x / +60%→1,6x / +100%→2,0x / +150%→2,5x / +250%→3,5x); bônus de high ticket = 8% sobre toda venda líquida ≥R$300, sem teto; bônus de modelo extra = 10% do que faturar em hora extra em outra modelo.
+Categorias (faturamento líquido semanal necessário → prêmio em cada nível):
+A: 70%=R$2.500→R$100 · 85%=R$3.000→R$120 · 100%=R$3.500→R$140
+B: 70%=R$3.500→R$175 · 85%=R$4.000→R$210 · 100%=R$5.000→R$250
+C: 70%=R$5.000→R$350 · 85%=R$6.000→R$425 · 100%=R$7.000→R$500
+D: 70%=R$7.000→R$560 · 85%=R$8.500→R$680 · 100%=R$10.000→R$800
+E: 70%=R$10.000→R$900 · 85%=R$12.000→R$1.100 · 100%=R$14.000→R$1.300
+
+2) Piso garantido (rede de segurança MENSAL, contado do dia 2 ao dia 2 do mês seguinte): se a soma de tudo que o chatter ganhou no mês não chegar ao piso da sua medalha, a empresa completa a diferença. Só vale pra quem ficou ativo o mês inteiro.
+Piso por medalha: Sem medalha R$1.000 · Bronze R$1.200 · Prata R$1.500 · Ouro R$1.800 · Diamante R$2.500.
+
+3) Medalhas (comissão, piso e requisitos):
+Bronze — 1 mês de casa · Categoria B+ em ≥3 das últimas 4 semanas · comissão 4% · piso R$1.200 · bônus de entrada R$50
+Prata — 3 meses de casa · Categoria C+ em ≥3 das últimas 4 semanas · comissão 4,5% · piso R$1.500 · bônus de entrada R$100
+Ouro — 6 meses de casa · Categoria C+ nas últimas 4 semanas + faturamento mínimo R$25 mil/mês · comissão 5% · piso R$1.800 · bônus de entrada R$150+kit
+Diamante — 12 meses de casa · Categoria D+ nas últimas 4 semanas + faturamento mínimo R$35 mil/mês · comissão 6% · piso R$2.500 · bônus de entrada R$200+kit
+Toda medalha exige treinamento em dia e zero advertências ativas nos últimos 90 dias. Verificação no início de cada mês: sobe quem passa a cumprir o próximo nível, mantém quem segue cumprindo o próprio nível, cai um nível ao receber advertência ativa ou cair abaixo da performance exigida (queda sempre de 1 nível por vez, exceto desligamento do treinamento que zera tudo).
+
+4) Cargos (trilha separada das medalhas): Atendimento: Chatter Teste (3 dias, R$50 fixos, sem meta/comissão) → Chatter Júnior (contratado, sistema completo, atende modelos iniciantes) → Chatter Pleno → Chatter Sênior (mínimo 60 dias + avaliação, atende modelos de alta performance). Liderança: Padrinho (forma novos talentos) → Manager (lidera equipe) → Manager Leader. Cargo não é permanente: sobe e desce por entrega, não por tempo de casa.
+
+DADOS QUE PODEM FALTAR NO CONTEXTO: "advertências ativas nos últimos 90 dias" e "tempo de casa exato" ainda NÃO são rastreados pelo sistema — quando isso for relevante pra uma checagem de elegibilidade de medalha/cargo, diga explicitamente que essa parte específica não pôde ser verificada por falta desse dado, em vez de supor ou inventar. Isso deve aparecer só como uma nota curta, não repetida em cada ficha.
+
+O QUE CALCULAR — POR CHATTER
+Para cada chatter, monte: faturamento do período (semana e mês) e variação vs. período anterior (%); nível de meta batido na semana (70/85/100/superação) e prêmio correspondente já com boost quando houver; comissão fixa do período; bônus de high ticket; bônus de modelo extra se aplicável; ganho total estimado no período; posição frente ao piso (ganho do MÊS vs. piso da medalha atual — alerta se está dependendo do piso, ok se supera com folga); status de medalha (mantém / risco de queda / elegível pra subir, usando o histórico de faturamento das últimas semanas como indicador aproximado quando a categoria oficial de semanas passadas não estiver disponível); status de cargo (elegibilidade pra promoção ou sinal de que o cargo atual não está sendo sustentado); diagnóstico interpretativo (2–4 frases); recomendação de ação concreta pra liderança.
+
+O QUE CALCULAR — POR EQUIPE / POR MODELO
+Faturamento total do período e variação vs. período anterior; ranking interno dos chatters (maior pro menor ganho); distribuição de categorias assumidas (quantos em A/B/C/D/E); concentração de risco (se o faturamento depende excessivamente de 1–2 chatters); diagnóstico da equipe; recomendação de ação em nível de equipe (redistribuição de modelos, ajuste de escala, reforço/contratação, padronizar categoria de meta, etc.).
+
+FORMATO DE SAÍDA
+Gere sempre no formato de "ficha", uma por chatter, seguida de um resumo por equipe/modelo:
+
+FICHA — [Nome do chatter] | Modelo(s): [...] | Cargo: [...] | Medalha: [...]
+────────────────────────────────────────
+Faturamento (semana/mês): R$ X | variação: +/-Y%
+Categoria assumida: [A-E] | Nível batido: [70/85/100/superação Nx]
+Comissão fixa: R$ X | Prêmio de meta: R$ X | High ticket: R$ X | Modelo extra: R$ X
+Ganho total estimado: R$ X | Piso da medalha: R$ X → [acima/no limite/abaixo]
+Situação da medalha: [mantém / risco de queda / elegível para subir]
+Situação do cargo: [estável / elegível para promoção / em risco]
+Diagnóstico: [2-4 frases]
+Recomendação para a liderança: [ação concreta e objetiva]
+
+RESUMO — Equipe/Modelo [nome]
+────────────────────────────────────────
+Faturamento total: R$ X | variação: +/-Y%
+Ranking interno: 1) ... 2) ... 3) ...
+Distribuição de categorias: A:x B:x C:x D:x E:x
+Concentração de risco: [sim/não + detalhe]
+Diagnóstico da equipe: [2-4 frases]
+Recomendação de ação: [ação concreta e objetiva]
+
+TOM E PRINCÍPIOS DE INTERPRETAÇÃO
+Seja direto e objetivo — sem enrolação, sem floreio motivacional genérico. Mia precisa de leitura acionável, não de slogans. Sempre baseie a interpretação nos números apresentados, nunca em suposição sem dado. Quando faltar dado pra calcular algo, diga isso explicitamente em vez de estimar sem avisar. Trate risco de queda de medalha ou de piso como alerta prioritário — destacado, não escondido no meio do texto. Toda recomendação deve ser uma ação, não uma observação vaga (evite "acompanhar de perto"; prefira algo como "agendar 1:1 esta semana pra revisar categoria de meta, hoje sub-alocada em B enquanto o histórico sustenta C"). Ao comparar chatters, seja justa: leve em conta cargo e modelo atendida (um Júnior em modelo iniciante não deve ser comparado direto com um Sênior em modelo de alta performance sem essa ressalva). Responda em português.`;
+
+const PAG_LEVEL_LABEL={treinamento:'Em treinamento',teste:'Chatter Teste',junior:'Chatter Júnior',pleno:'Chatter Pleno',senior:'Chatter Sênior',padrinho:'👑 Padrinho'};
+
+function getChatterModelsWorkedWeek(cid,offset){
+  const wd=getWeekDates(offset).map(d=>DAY_KEYS[d.getDay()]);
+  const ids=[...new Set(S.shifts.filter(s=>s.chatterId===cid&&(s.days||[]).some(dk=>wd.includes(dk))).flatMap(s=>s.modelIds||[]))];
+  return ids.map(mid=>S.models.find(m=>m.id===mid)).filter(Boolean);
+}
+
+function buildFaturamentoContext(){
+  const wkey=getWeekKey(0);
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
+  const lines=[];
+  lines.push(`Semana atual: ${weekLabel(0)} (chave ${wkey}). Mês em andamento: ${getMonthDaysSoFar().length} de ${getDaysInCurrentMonth()} dias já passados.`);
+  lines.push(`⚠️ Campos "advertências ativas nos últimos 90 dias" e "tempo de casa exato" NÃO são rastreados pelo sistema ainda — não estão disponíveis pra nenhum chatter abaixo.`);
+
+  const perChatter=[];
+  chatters.forEach(c=>{
+    const fat=getChatterWeekRevenue(c.id,0);
+    const extraFat=getChatterExtraRevenue(c.id,0);
+    const fatAnterior=getChatterWeekRevenue(c.id,-1)+getChatterExtraRevenue(c.id,-1);
+    const fatAtual=fat+extraFat;
+    const variacao=fatAnterior>0?Math.round(((fatAtual-fatAnterior)/fatAnterior)*100):(fatAtual>0?100:0);
+    const {avgHtPct,htTotal}=getChatterWeekHighTicket(c.id,0);
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const manualMedalRaw=S.chatterFichas?.[c.id]?.manualMedal;
+    const catInfo=PAG_CATS[cat]||PAG_CATS.B;
+    const autoMedal=autoMedalForPct(fat>0?fat/catInfo.n100*100:0);
+    const medal=(manualMedalRaw!==undefined&&manualMedalRaw!=='')?parseInt(manualMedalRaw,10):autoMedal;
+    const metaManual=parseFloat((S.chatterWeekGoals[wkey]||{})[c.id])||0;
+    const real=calcChatterPagamento(fat,medal,cat,htTotal,extraFat,metaManual);
+    let nivelBatido='nenhum nível batido';
+    if(fat>=real.n100){const pctOver=Math.round(((fat-real.n100)/real.n100)*100);nivelBatido=pctOver>0?`superação de +${pctOver}% (boost ${pagBoost(pctOver)}x)`:'100%';}
+    else if(fat>=real.n85)nivelBatido='85%';
+    else if(fat>=real.n70)nivelBatido='70%';
+    const monthEarn=getChatterMonthEarnings(c.id,medal,cat);
+    const pisoMes=PAG_PISO[medal]||1000;
+    const pisoCompMes=Math.max(0,pisoMes-monthEarn.total);
+    const historico4sem=[-3,-2,-1,0].map(o=>getChatterWeekRevenue(c.id,o)+getChatterExtraRevenue(c.id,o));
+    const models=getChatterModelsWorkedWeek(c.id,0).map(m=>m.name);
+    const cargo=PAG_LEVEL_LABEL[c.level]||c.level;
+    perChatter.push({c,fat,extraFat,fatAtual,variacao,avgHtPct,htTotal,cat,medal,real,monthEarn,pisoMes,pisoCompMes,historico4sem,models,cargo});
+    lines.push(`\n- ${c.name} | Cargo: ${cargo} | Medalha: ${PAG_MEDAL_LABEL[medal]} | Categoria assumida: ${cat} | Modelo(s) atendida(s) esta semana: ${models.join(', ')||'nenhuma escala registrada'}`+
+      `\n  Faturamento semana: R$${fatAtual.toFixed(2)} (normal R$${fat.toFixed(2)} + hora extra R$${extraFat.toFixed(2)}) | variação vs. semana anterior: ${variacao>=0?'+':''}${variacao}% | nível batido: ${nivelBatido}`+
+      `\n  High ticket: ${avgHtPct}% do faturamento (R$${htTotal.toFixed(2)}) | Faturamento últimas 4 semanas (mais antiga→mais recente): ${historico4sem.map(v=>'R$'+v.toFixed(2)).join(' → ')}`+
+      `\n  GANHO SEMANA já calculado = comissão R$${real.comissao.toFixed(2)} + prêmio de meta R$${real.premio.toFixed(2)} + high ticket R$${real.htBonus.toFixed(2)} + modelo extra R$${real.extraBonus.toFixed(2)} = TOTAL R$${real.total.toFixed(2)}`+
+      `\n  GANHO MÊS (até agora) já calculado = comissão R$${monthEarn.comissao.toFixed(2)} + prêmio de meta R$${monthEarn.premio.toFixed(2)} + high ticket R$${monthEarn.htBonus.toFixed(2)} + modelo extra R$${monthEarn.extraBonus.toFixed(2)} = TOTAL R$${monthEarn.total.toFixed(2)} | Piso mensal da medalha: R$${pisoMes.toFixed(2)}${pisoCompMes>0?` → empresa completaria +R$${pisoCompMes.toFixed(2)} se fechar assim (ABAIXO DO PISO)`:' → já passou do piso ✅'}`);
+  });
+
+  // Agrupamento por equipe/modelo (modelo principal trabalhado na semana)
+  const groups={};
+  perChatter.forEach(p=>{
+    const key=p.models[0]||'Sem modelo definida';
+    if(!groups[key])groups[key]=[];
+    groups[key].push(p);
+  });
+  lines.push(`\n\nRESUMO POR EQUIPE/MODELO (dados agregados pelo sistema):`);
+  Object.entries(groups).forEach(([modelName,list])=>{
+    const totalAtual=list.reduce((s,p)=>s+p.fatAtual,0);
+    const totalAnterior=list.reduce((s,p)=>{const prev=getChatterWeekRevenue(p.c.id,-1)+getChatterExtraRevenue(p.c.id,-1);return s+prev;},0);
+    const variacaoTime=totalAnterior>0?Math.round(((totalAtual-totalAnterior)/totalAnterior)*100):(totalAtual>0?100:0);
+    const ranking=[...list].sort((a,b)=>b.real.total-a.real.total).map((p,i)=>`${i+1}) ${p.c.name} (R$${p.real.total.toFixed(2)})`);
+    const catDist={A:0,B:0,C:0,D:0,E:0};
+    list.forEach(p=>{if(catDist[p.cat]!=null)catDist[p.cat]++;});
+    const top2Share=totalAtual>0?Math.round((ranking.length?[...list].sort((a,b)=>b.fatAtual-a.fatAtual).slice(0,2).reduce((s,p)=>s+p.fatAtual,0):0)/totalAtual*100):0;
+    lines.push(`\n- Modelo ${modelName} (${list.length} chatter${list.length>1?'s':''}): faturamento total semana R$${totalAtual.toFixed(2)} | variação vs. semana anterior: ${variacaoTime>=0?'+':''}${variacaoTime}% | ranking: ${ranking.join(', ')||'-'} | distribuição de categorias: A:${catDist.A} B:${catDist.B} C:${catDist.C} D:${catDist.D} E:${catDist.E} | top 2 chatters concentram ${top2Share}% do faturamento da equipe`);
+  });
+
+  return lines.join('\n');
+}
+
+async function gerarAnaliseFaturamento(){
+  const btn=document.getElementById('metricas-btn');
+  const out=document.getElementById('metricas-resultado');
+  if(btn){btn.disabled=true;btn.textContent='🤖 Analisando…';}
+  if(out)out.innerHTML='<div style="color:var(--text2);font-size:12.5px;padding:10px 0">⏳ Analisando faturamento de todos os chatters…</div>';
+  try{
+    const contexto=buildFaturamentoContext();
+    const prompt=`DADOS DE FATURAMENTO E PAGAMENTO (gerados automaticamente pelo sistema, já calculados pelas regras reais — semana atual e mês em andamento):\n\n${contexto}\n\nGere a análise completa: uma FICHA para CADA chatter listado acima (no formato exato do seu papel), seguida do RESUMO por equipe/modelo. Não repita o aviso sobre advertências/tempo de casa em cada ficha — mencione isso só uma vez, no início.`;
+    let text='',lastErr=null;
+    for(let attempt=0;attempt<2;attempt++){
+      try{ text=await clFetchAI(AGENTE_FATURAMENTO_SYSTEM,prompt,8000); }
+      catch(err){ lastErr=err;text=''; if(err.quota)break; if(attempt===0)await new Promise(r=>setTimeout(r,1500)); continue; }
+      if(text&&/RESUMO\s*—\s*Equipe/i.test(text))break;
+      lastErr=new Error('Resposta incompleta da IA (provavelmente limite de uso no momento — espere um minuto e tente de novo)');
+      text='';
+      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+    }
+    if(!text)throw lastErr||new Error('Resposta vazia da IA');
+    if(out)out.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">${clMd(text)}</div>`;
+    if(!S.faturamentoAnalises)S.faturamentoAnalises=[];
+    S.faturamentoAnalises.unshift({id:'fat'+Date.now(),date:todayKey(),weekKey:getWeekKey(0),text});
+    S.faturamentoAnalises=S.faturamentoAnalises.slice(0,10);
+    save();
+    renderMetricasHistorico();
+  }catch(err){
+    console.error('Erro na Análise de Faturamento',err);
+    if(err.quota){renderAIWaitCountdown('metricas-resultado',err.waitSeconds,{prefix:'⏳ Análise de Faturamento — limite de uso da IA',panel:true});}
+    else if(out)out.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🤖 Gerar Análise de Faturamento';}
+  }
+}
+
+function renderMetricasHistorico(){
+  const el=document.getElementById('metricas-historico');
+  if(!el)return;
+  const hist=S.faturamentoAnalises||[];
+  if(!hist.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Análises anteriores</div>`+
+    hist.slice(0,10).map(h=>`<details style="margin-bottom:6px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--text2)">${h.date} — semana ${h.weekKey}</summary>
+      <div style="padding:8px 0 0 4px">${clMd(h.text)}</div>
+    </details>`).join('');
+}
+
+function renderMetricas(){
+  renderMetricasHistorico();
 }
 
 // Quantos dias de trabalho ainda restam essa semana pra um chatter (hoje

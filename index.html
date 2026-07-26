@@ -402,6 +402,7 @@ body{
     <button class="toptab" data-go="testers">Testers</button>
     <button class="toptab" data-go="reservas">Reservas</button>
     <button class="toptab" data-go="pagamento">Pagamento</button>
+    <button class="toptab" data-go="metricas">Métricas</button>
     <button class="toptab" data-go="projecao">Projeção</button>
     
   </nav>
@@ -1213,6 +1214,24 @@ body{
         </table>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- ===================== MÉTRICAS (Agente de Análise de Faturamento) ===================== -->
+<section class="view" id="v-metricas">
+  <div class="eyebrow">faturamento</div>
+  <div class="view-title">Métricas</div>
+  <div class="view-sub">Agente de IA que lê comissão, medalha, categoria e high ticket já calculados e monta diagnóstico + recomendação por chatter e por equipe/modelo</div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📊 Análise de Faturamento</div></div>
+    <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Gera uma ficha por chatter (faturamento, medalha, categoria, high ticket, situação de medalha/cargo, diagnóstico e recomendação) e um resumo por equipe/modelo, com base nos dados reais desta semana e do mês em andamento.</div>
+    <button id="metricas-btn" onclick="gerarAnaliseFaturamento()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-family:var(--font-display);font-weight:700;font-size:13.5px;cursor:pointer">🤖 Gerar Análise de Faturamento</button>
+    <div id="metricas-resultado" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel" id="metricas-historico-panel">
+    <div id="metricas-historico"></div>
   </div>
 </section>
 
