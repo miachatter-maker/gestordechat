@@ -1139,7 +1139,9 @@ body{
   </div>
 
   <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
-    <div class="panel-head"><div><div class="panel-title">🤝 Solicitação de Afilhado</div><div class="panel-note">Padrinhos reivindicam quem querem apadrinhar no Link das Tarefas — decisão separada da aprovação do tester</div></div></div>
+    <div class="panel-head"><div><div class="panel-title">🤝 Solicitação de Afilhado</div><div class="panel-note">Padrinhos reivindicam quem querem apadrinhar no Documento dos Padrinhos — decisão separada da aprovação do tester</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="gerarLinkDocumentoPadrinhos()">🔗 Link do Documento</button>
+    </div>
     <div id="afilhado-claims-content"></div>
   </div>
 
@@ -1733,14 +1735,27 @@ body{
 
 <div class="modalbg" id="m-tarefas-novato-link"><div class="modal">
   <div class="modal-handle"></div>
-  <div class="modal-title">🔗 Link das Tarefas</div>
-  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Link ÚNICO — envie pra todos os testers e padrinhos. Cada um seleciona o próprio nome dentro da página. Testers preenchem as tarefas de Sexta/Sábado/Domingo (com prazo até 00h de cada dia); padrinhos veem o documento com o mapeamento + tarefas de todos e marcam quem querem apadrinhar.</div>
+  <div class="modal-title">🔗 Link das Tarefas (testers)</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Envie SÓ pros testers. Cada um seleciona o próprio nome e preenche as tarefas de Sexta/Sábado/Domingo (prazo até 00h de cada dia). Esse link não mostra o mapeamento nem as tarefas de ninguém — cada tester só vê o próprio preenchimento.</div>
   <div class="field">
     <input class="finput" id="tarefas-novato-link-input" readonly onclick="this.select()" style="font-size:12px">
   </div>
   <button class="btn btn-primary btn-block" onclick="copiarLinkTarefasNovato()">📋 Copiar link</button>
   <div class="modalbtns" style="margin-top:10px">
     <button class="btn btn-ghost btn-block" onclick="closeModal('m-tarefas-novato-link')">Fechar</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-documento-padrinhos-link"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">🔗 Link do Documento (padrinhos)</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Envie SÓ pros padrinhos. Cada um seleciona o próprio nome e vê o mapeamento + as tarefas já enviadas de todos os testers, atualizado ao vivo, com a caixa de "quero apadrinhar". Não envie esse link pros testers.</div>
+  <div class="field">
+    <input class="finput" id="documento-padrinhos-link-input" readonly onclick="this.select()" style="font-size:12px">
+  </div>
+  <button class="btn btn-primary btn-block" onclick="copiarLinkDocumentoPadrinhos()">📋 Copiar link</button>
+  <div class="modalbtns" style="margin-top:10px">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-documento-padrinhos-link')">Fechar</button>
   </div>
 </div></div>
 

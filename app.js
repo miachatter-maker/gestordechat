@@ -6519,7 +6519,7 @@ function renderMapTranscricoes(){
 }
 const MAPEAMENTO_NOVOS_SYSTEM=`Você é uma psicóloga organizacional e recrutadora sênior especialista em avaliar candidatos NOVOS pra vaga de chatter/atendimento em redes sociais (OnlyFans), a partir de uma breve auto-apresentação gravada (não é uma entrevista estruturada — pode ser curta e informal). Você recebe uma lista de pessoas diferentes, cada uma com nome e sua transcrição individual.
 
-Pra cada pessoa, analise o CONTEÚDO do que foi dito e também sinais de linguagem (segurança, clareza, hesitação, entusiasmo, tom) — preste atenção especial a: (1) como essa pessoa tende a responder à autoridade/liderança (se posiciona, é dócil, questiona, busca aprovação), e (2) traços SUTIS de personalidade que não estão explícitos no conteúdo, só no JEITO de falar.
+Pra cada pessoa, analise o CONTEÚDO do que foi dito e também sinais de linguagem (segurança, clareza, hesitação, entusiasmo, tom) — preste atenção especial a: (1) como essa pessoa tende a responder à autoridade/liderança (se posiciona, é dócil, questiona, busca aprovação), (2) traços SUTIS de personalidade que não estão explícitos no conteúdo, só no JEITO de falar, e (3) a experiência profissional que ela relatou (empregos anteriores, tempo de experiência, se já trabalhou com atendimento/vendas/redes sociais, se tem histórico de instabilidade ou passagens curtas) — avalie objetivamente se essa bagagem profissional é BOA, MÉDIA ou FRACA pra essa vaga especificamente, e por quê.
 
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
 {
@@ -6532,6 +6532,8 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhu
       "autoridadeMotivo": "1-2 frases justificando como essa pessoa tende a responder a comandos/liderança",
       "comunicacao": (0-100),
       "inteligenciaEmocional": (0-100),
+      "experienciaProfissional": "boa" | "média" | "fraca",
+      "experienciaProfissionalMotivo": "1-3 frases explicando por que a experiência profissional relatada é boa/média/fraca pra essa vaga específica — cite o que ela contou (ou a falta disso)",
       "motivadores": ["até 3, entre: dinheiro, reconhecimento, competição, estabilidade, aprendizado, propósito, liberdade, status, crescimento, impacto, pertencimento"],
       "riscoDetectado": true|false,
       "motivoRisco": "se riscoDetectado=true, explique objetivamente o sinal de risco (instabilidade, discurso contraditório, desonestidade percebida, falta de comprometimento etc); se false, deixe string vazia",
@@ -6631,6 +6633,7 @@ function renderMapeamentoNovosPool(){
             <div style="font-size:12px;color:var(--text2);margin-bottom:4px">🎭 <strong>Traço sutil:</strong> ${r.tracoSutil||'—'}</div>
             <div style="font-size:12px;color:var(--text2);margin-bottom:4px">👑 <strong>Autoridade:</strong> ${r.autoridade||'—'} — ${r.autoridadeMotivo||''}</div>
             <div style="font-size:12px;color:var(--text2);margin-bottom:4px">🗣️ Comunicação: ${r.comunicacao ?? '—'}/100 · 💛 Intel. emocional: ${r.inteligenciaEmocional ?? '—'}/100</div>
+            ${r.experienciaProfissional?`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">💼 <strong>Experiência profissional:</strong> <span style="color:${r.experienciaProfissional==='boa'?'var(--ok)':r.experienciaProfissional==='média'?'var(--warn)':'var(--bad)'};font-weight:700;text-transform:uppercase">${r.experienciaProfissional}</span> — ${r.experienciaProfissionalMotivo||''}</div>`:''}
             ${Array.isArray(r.motivadores)&&r.motivadores.length?`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">🎯 Motivadores: ${r.motivadores.join(', ')}</div>`:''}
             ${r.riscoDetectado?`<div style="font-size:12.5px;color:var(--bad);font-weight:700;margin-top:6px">⚠️ RISCO: ${r.motivoRisco||''}</div>`:''}
             <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">${r.resumo||''}</div>
@@ -10773,10 +10776,31 @@ function copiarLinkTarefasNovato(){
   if(!input)return;
   input.select();
   navigator.clipboard?.writeText(input.value).then(()=>{
-    toast('📋 Link copiado — envie pros testers e padrinhos.');
+    toast('📋 Link copiado — envie só pros testers.');
   }).catch(()=>{
     document.execCommand('copy');
-    toast('📋 Link copiado — envie pros testers e padrinhos.');
+    toast('📋 Link copiado — envie só pros testers.');
+  });
+}
+// Link ÚNICO (sem ?id) do Documento dos Padrinhos — SEPARADO do link de
+// tarefas dos testers de propósito: os testers não podem ver o mapeamento
+// nem as tarefas uns dos outros, então esse é um link diferente que só vai
+// pros padrinhos, com a página documento-padrinhos.html.
+function gerarLinkDocumentoPadrinhos(){
+  const url=`${location.origin}/documento-padrinhos.html`;
+  const input=document.getElementById('documento-padrinhos-link-input');
+  if(input)input.value=url;
+  openModal('m-documento-padrinhos-link');
+}
+function copiarLinkDocumentoPadrinhos(){
+  const input=document.getElementById('documento-padrinhos-link-input');
+  if(!input)return;
+  input.select();
+  navigator.clipboard?.writeText(input.value).then(()=>{
+    toast('📋 Link copiado — envie só pros padrinhos.');
+  }).catch(()=>{
+    document.execCommand('copy');
+    toast('📋 Link copiado — envie só pros padrinhos.');
   });
 }
 // "Limpar quem não avançou" — mantém no MAPEAMENTO DOS NOVOS só os nomes

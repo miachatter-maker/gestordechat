@@ -34,14 +34,10 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 .btn{display:block;width:100%;text-align:center;padding:13px;border-radius:var(--r-md);border:none;font-family:var(--font);font-weight:700;font-size:14.5px;cursor:pointer;}
 .btn-primary{background:var(--accent);color:#fff;}
 .btn-primary:disabled{opacity:.55;}
-.btn-ghost{background:var(--bg-soft);color:var(--text2);border:1px solid var(--line);}
 .error-box{background:var(--bad-soft);color:var(--bad);border-radius:9px;padding:12px;font-size:13px;margin-bottom:14px;}
 .warn-box{background:var(--warn-soft);color:var(--warn);border-radius:9px;padding:12px;font-size:12.5px;margin-bottom:12px;line-height:1.5;}
 .done-box{text-align:center;padding:14px 6px;}
 .done-box .emoji{font-size:30px;margin-bottom:6px;}
-.tabs{display:flex;gap:8px;margin-bottom:16px;}
-.tab{flex:1;text-align:center;padding:11px 6px;border-radius:10px;border:2px solid var(--line);background:#fff;font-weight:700;font-size:13px;color:var(--text2);cursor:pointer;}
-.tab.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-strong);}
 .badge{display:inline-block;padding:4px 9px;border-radius:20px;font-size:10.5px;font-weight:700;}
 .badge-enviado{background:var(--ok-soft);color:var(--ok);}
 .badge-bloqueado{background:var(--bad-soft);color:var(--bad);}
@@ -51,17 +47,7 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 .daycard.aberto{border-color:var(--accent);}
 .daycard-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
 .daycard-title{font-weight:800;font-size:14.5px;}
-.tarefa-desc{font-size:12.5px;color:var(--text2);line-height:1.6;background:var(--bg-soft);border-radius:8px;padding:10px 12px;margin-bottom:10px;}
-.tester-row{border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;margin-bottom:12px;}
-.tester-row-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;cursor:pointer;}
-.tester-name{font-weight:800;font-size:14.5px;}
-.tester-mapinfo{font-size:12px;color:var(--text2);margin-top:4px;line-height:1.5;}
-.badges-row{display:flex;gap:6px;margin-top:8px;}
-.claimbox{border:1px dashed var(--line-strong);border-radius:10px;padding:11px 12px;margin-top:10px;font-size:12.5px;}
 .ppm-link{font-size:12px;color:var(--accent-strong);font-weight:700;}
-.detail-body{display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px;}
-.detail-body.open{display:block;}
-.chev{font-size:16px;color:var(--text3);}
 .pastezone{border:2px dashed var(--line-strong);border-radius:var(--r-md);padding:16px 12px;text-align:center;font-size:12px;color:var(--text3);cursor:text;background:#fff;}
 .pastezone:focus{outline:none;border-color:var(--accent);background:var(--accent-soft);}
 .pastezone.filled{border-color:var(--ok);border-style:solid;}
@@ -74,7 +60,7 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 <div class="wrap" id="app">
   <div class="header">
     <div class="eyebrow">GestorPro · Agência Seduct</div>
-    <h1>📋 Tarefas de Novato & Padrinhos</h1>
+    <h1>📋 Tarefas de Novato</h1>
     <div class="sub" id="header-sub">Carregando...</div>
   </div>
   <div id="content"></div>
@@ -86,17 +72,18 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 <script src="firebase-bundle.js"></script>
 <script>
 /* ===========================================================
-   TAREFAS DE NOVATO — link ÚNICO (sem ?id), compartilhado por
-   testers e padrinhos. Cada um seleciona o próprio nome dentro da
-   página. Ciclo FIXO do calendário: toda Sexta é o Dia 1, todo
-   Sábado o Dia 2, todo Domingo o Dia 3 — prazo de cada dia é 00h00
-   do dia seguinte (vira bloqueado depois disso, critério de
-   eliminação). Escreve na mesma coleção 'gestorpro' do Firestore
-   (padrão type:'...Pendente', processado:false) que o app principal
-   já escuta (listenToTarefasNovatoPendentes / listenToAfilhadoClaimsPendentes
-   em app.js) — e também LÊ ao vivo tanto os documentos brutos quanto
-   central-dados/shard-fichas, pra funcionar em tempo real entre
-   testers e padrinhos mesmo que o app da gestora esteja fechado.
+   TAREFAS DE NOVATO — link do TESTER, apenas. Só mostra o
+   preenchimento das próprias tarefas de Sexta/Sábado/Domingo — o
+   tester NUNCA vê o mapeamento ou as tarefas de outros testers, nem
+   quem é padrinho de quem (isso fica só no documento separado dos
+   padrinhos, documento-padrinhos.html, com link próprio). Por isso
+   essa página busca o mínimo possível: só a lista de nomes dos
+   testers (pra montar o seletor) e, depois de escolher o nome, só os
+   PRÓPRIOS registros de tarefa dessa pessoa (consulta filtrada por
+   testerId, nunca a coleção inteira nem a ficha de outros chatters).
+   Ciclo FIXO do calendário: toda Sexta é o Dia 1, todo Sábado o Dia
+   2, todo Domingo o Dia 3 — prazo de cada dia é 00h00 do dia
+   seguinte (vira bloqueado depois disso, critério de eliminação).
    =========================================================== */
 
 const firebaseConfig={
@@ -112,28 +99,53 @@ const headerSub=document.getElementById('header-sub');
 const content=document.getElementById('content');
 
 let fbDb=null;
-let chatters=[],mapeamentoBatches=[],chatterFichasLive={},afilhadoClaimsLive=[];
-let rawTarefaDocs=[],rawClaimDocs=[];
-let activeTab=localStorage.getItem('tn_tab')||'tester';
+let chatters=[];
 let selTesterId=localStorage.getItem('tn_testerId')||'';
-let selPadrinhoId=localStorage.getItem('tn_padrinhoId')||'';
-let expandedTester='';
-// print do PPM: NÃO usa Firebase Storage (evita depender de um recurso que
-// precisa ser ativado à parte no console) — a imagem é comprimida no
-// próprio navegador e enviada como base64 dentro do mesmo documento do
-// Firestore, igual a qualquer outro campo de texto. diaN -> dataURL.
+let myRawTarefaDocs=[];
+let unsubMyTarefas=null;
+// print do PPM: sem Firebase Storage — comprimido no navegador e enviado
+// como base64 dentro do próprio documento do Firestore. diaN -> dataURL.
 const pendingImages={};
 
-function normNome(s){return(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();}
-window.openLightbox=function(src){
-  document.getElementById('lightbox-img').src=src;
-  document.getElementById('lightbox').style.display='flex';
+function p2(n){return String(n).padStart(2,'0');}
+function fmt(d){return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
+function getSextaDoCiclo(ref){
+  const d=new Date(ref);
+  const dow=d.getDay();
+  let diff;
+  if(dow===5)diff=0;else if(dow===6)diff=1;else if(dow===0)diff=2;else diff=dow+2;
+  return new Date(d.getFullYear(),d.getMonth(),d.getDate()-diff);
+}
+function getCicloAtual(){
+  const now=new Date();
+  const sex=getSextaDoCiclo(now);
+  const fridayKey=fmt(sex);
+  const dias=[1,2,3].map(n=>{
+    const dataDia=new Date(sex.getFullYear(),sex.getMonth(),sex.getDate()+(n-1));
+    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1);
+    return{dia:n,dataDia,prazo,label:['Sexta','Sábado','Domingo'][n-1]};
+  });
+  return{fridayKey,dias};
+}
+function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
+
+const TAREFAS_DIA={
+  1:{campos:[
+    {id:'resumo',label:'Resumo sincero',placeholder:'Escreva um feedback sincero com suas palavras sobre o que você entendeu até agora e o que achou do trabalho.'},
+    {id:'disponibilidade',label:'Confirmação de disponibilidade',placeholder:'Informe os dias e horários em que você estará disponível para atuar.'}
+  ]},
+  2:{campos:[
+    {id:'resumo',label:'Resumo do que entendeu',placeholder:'Escreva um resumo com suas palavras sobre o que você entendeu até agora.'},
+    {id:'cincoNotadas',label:'5 coisas notadas no vídeo de 1 hora',placeholder:'5 coisas que você notou que acontecem no vídeo de 1 hora.'}
+  ]},
+  3:{campos:[
+    {id:'resumo',label:'Resumo das técnicas e habilidades de hoje',placeholder:'Escreva um resumo com suas palavras sobre o que você entendeu das técnicas e habilidades de hoje.'}
+  ]}
 };
+
+window.openLightbox=function(src){document.getElementById('lightbox-img').src=src;document.getElementById('lightbox').style.display='flex';};
 window.closeLightbox=function(){document.getElementById('lightbox').style.display='none';};
 
-// Aceita tanto escolher um arquivo quanto COLAR (Ctrl+V) um print copiado —
-// nos dois casos vira um dataURL comprimido (JPEG, largura máx. 900px) pra
-// caber tranquilamente dentro do limite de 1MB de um documento do Firestore.
 function fileToCompressedDataUrl(file){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
@@ -183,43 +195,6 @@ async function setPendingPPM(diaN,file){
   }
 }
 
-/* ---------- ciclo Sexta/Sábado/Domingo (mesma lógica do app.js) ---------- */
-function p2(n){return String(n).padStart(2,'0');}
-function fmt(d){return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
-function getSextaDoCiclo(ref){
-  const d=new Date(ref);
-  const dow=d.getDay();
-  let diff;
-  if(dow===5)diff=0;else if(dow===6)diff=1;else if(dow===0)diff=2;else diff=dow+2;
-  return new Date(d.getFullYear(),d.getMonth(),d.getDate()-diff);
-}
-function getCicloAtual(){
-  const now=new Date();
-  const sex=getSextaDoCiclo(now);
-  const fridayKey=fmt(sex);
-  const dias=[1,2,3].map(n=>{
-    const dataDia=new Date(sex.getFullYear(),sex.getMonth(),sex.getDate()+(n-1));
-    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1);
-    return{dia:n,dataDia,prazo,label:['Sexta','Sábado','Domingo'][n-1]};
-  });
-  return{fridayKey,dias};
-}
-function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
-
-const TAREFAS_DIA={
-  1:{campos:[
-    {id:'resumo',label:'Resumo sincero',placeholder:'Escreva um feedback sincero com suas palavras sobre o que você entendeu até agora e o que achou do trabalho.'},
-    {id:'disponibilidade',label:'Confirmação de disponibilidade',placeholder:'Informe os dias e horários em que você estará disponível para atuar.'}
-  ]},
-  2:{campos:[
-    {id:'resumo',label:'Resumo do que entendeu',placeholder:'Escreva um resumo com suas palavras sobre o que você entendeu até agora.'},
-    {id:'cincoNotadas',label:'5 coisas notadas no vídeo de 1 hora',placeholder:'5 coisas que você notou que acontecem no vídeo de 1 hora.'}
-  ]},
-  3:{campos:[
-    {id:'resumo',label:'Resumo das técnicas e habilidades de hoje',placeholder:'Escreva um resumo com suas palavras sobre o que você entendeu das técnicas e habilidades de hoje.'}
-  ]}
-};
-
 /* ---------- init ---------- */
 if(typeof firebase==='undefined'){
   headerSub.textContent='Erro de conexão';
@@ -232,119 +207,36 @@ function init(){
     firebase.apps&&firebase.apps.length?firebase.app():firebase.initializeApp(firebaseConfig);
     fbDb=firebase.firestore();
     headerSub.textContent='Selecione seu nome pra começar';
-    content.innerHTML='<div class="warn-box">Carregando dados...</div>';
-    startListeners();
+    content.innerHTML='<div class="warn-box">Carregando...</div>';
+    // Só a lista de chatters (nomes) pra montar o seletor — nada de fichas,
+    // mapeamento ou dados de outros testers chega até essa página.
+    fbDb.collection('gestorpro').doc('central-dados').onSnapshot(doc=>{
+      if(!doc.exists)return;
+      const remote=doc.data();
+      if(remote&&remote.payload){
+        try{
+          const parsed=JSON.parse(remote.payload);
+          chatters=parsed.chatters||[];
+          renderAll();
+        }catch(e){console.error('Erro ao ler dados',e);}
+      }
+    },e=>{console.error('Erro central-dados',e);content.innerHTML='<div class="error-box">Erro ao carregar: '+e.message+'</div>';});
   }catch(e){
     console.error(e);
     headerSub.textContent='Erro de conexão';
     content.innerHTML='<div class="error-box">Erro ao conectar: '+e.message+'</div>';
   }
 }
-function startListeners(){
-  fbDb.collection('gestorpro').doc('central-dados').onSnapshot(doc=>{
-    if(!doc.exists)return;
-    const remote=doc.data();
-    if(remote&&remote.payload){
-      try{
-        const parsed=JSON.parse(remote.payload);
-        chatters=parsed.chatters||[];
-        mapeamentoBatches=parsed.mapeamentoBatches||[];
-        afilhadoClaimsLive=parsed.afilhadoClaims||[];
-        renderAll();
-      }catch(e){console.error('Erro ao ler central-dados',e);}
-    }
-  },e=>console.error('Erro central-dados',e));
-  fbDb.collection('gestorpro').doc('shard-fichas').onSnapshot(doc=>{
-    if(!doc.exists)return;
-    const remote=doc.data();
-    if(remote&&remote.payload){
-      try{
-        const parsed=JSON.parse(remote.payload);
-        chatterFichasLive=parsed.chatterFichas||{};
-        renderAll();
-      }catch(e){console.error('Erro ao ler shard-fichas',e);}
-    }
-  },e=>console.error('Erro shard-fichas',e));
-  fbDb.collection('gestorpro').where('type','==','tarefaNovatoPendente').onSnapshot(snap=>{
-    rawTarefaDocs=snap.docs.map(d=>d.data());
-    renderAll();
-  },e=>console.error('Erro tarefas pendentes',e));
-  fbDb.collection('gestorpro').where('type','==','afilhadoClaimPendente').onSnapshot(snap=>{
-    rawClaimDocs=snap.docs.map(d=>d.data());
-    renderAll();
-  },e=>console.error('Erro claims pendentes',e));
-}
 
-/* ---------- merges (fundem os docs brutos ao vivo com o que já foi processado no app) ---------- */
-function tsMillis(ts){
-  if(!ts)return 0;
-  if(typeof ts.toMillis==='function')return ts.toMillis();
-  if(ts.seconds)return ts.seconds*1000;
-  return 0;
-}
-function getMergedTarefas(testerId){
-  const base=JSON.parse(JSON.stringify((chatterFichasLive[testerId]&&chatterFichasLive[testerId].tarefasNovato)||{}));
-  rawTarefaDocs.filter(d=>d.testerId===testerId&&d.fridayKey&&d.dia).forEach(d=>{
-    if(!base[d.fridayKey])base[d.fridayKey]={};
-    const key='dia'+d.dia;
-    const existingReg=base[d.fridayKey][key];
-    const rawTime=tsMillis(d.criadoEm)||Date.now();
-    const existingTime=existingReg&&existingReg.enviadoEm?new Date(existingReg.enviadoEm).getTime():0;
-    if(!existingReg||rawTime>=existingTime){
-      base[d.fridayKey][key]={resumo:d.resumo||'',disponibilidade:d.disponibilidade||'',cincoNotadas:d.cincoNotadas||'',ppmImage:d.ppmImage||'',ppmUrl:d.ppmUrl||'',enviadoEm:new Date(rawTime).toISOString()};
-    }
-  });
-  return base;
-}
-function getStatusDia(testerId,fridayKey,diaN,dataDia,prazo){
-  const tarefas=getMergedTarefas(testerId);
-  const reg=tarefas[fridayKey]&&tarefas[fridayKey]['dia'+diaN];
-  if(reg&&reg.enviadoEm)return'enviado';
-  const agora=new Date();
-  if(agora>=prazo)return'bloqueado';
-  const inicioDia=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate());
-  if(agora>=inicioDia)return'aberto';
-  return'futuro';
-}
-function getMergedClaimForTester(testerId){
-  const central=afilhadoClaimsLive.find(c=>c.testerId===testerId&&['pendente','aprovado','reservado'].includes(c.status));
-  if(central)return central;
-  const raws=rawClaimDocs.filter(d=>d.testerId===testerId).sort((a,b)=>tsMillis(b.criadoEm)-tsMillis(a.criadoEm));
-  if(raws.length)return{testerId,testerNome:raws[0].testerNome,padrinhoId:raws[0].padrinhoId,padrinhoNome:raws[0].padrinhoNome,status:'pendente'};
-  return null;
-}
-function getMapeamentoInfo(nome){
-  let found=null;
-  [...mapeamentoBatches].forEach(b=>(b.results||[]).forEach(r=>{if(normNome(r.nome)===normNome(nome))found=r;}));
-  return found;
-}
-
-/* ---------- render raiz ---------- */
 function renderAll(){
   const testers=chatters.filter(c=>c.time==='tester');
-  const padrinhos=chatters.filter(c=>c.level==='padrinho');
   headerSub.textContent='Sexta / Sábado / Domingo — ciclo da semana atual';
-  content.innerHTML=`
-    <div class="tabs">
-      <div class="tab ${activeTab==='tester'?'active':''}" onclick="setTab('tester')">🧪 Sou Tester</div>
-      <div class="tab ${activeTab==='padrinho'?'active':''}" onclick="setTab('padrinho')">👑 Sou Padrinho</div>
-    </div>
-    <div id="tab-body"></div>
-  `;
-  if(activeTab==='tester')renderTesterTab(testers);
-  else renderPadrinhoTab(testers,padrinhos);
-}
-window.setTab=function(t){activeTab=t;localStorage.setItem('tn_tab',t);renderAll();};
-
-/* ---------- aba TESTER ---------- */
-function renderTesterTab(testers){
-  const body=document.getElementById('tab-body');
   if(!testers.length){
-    body.innerHTML='<div class="warn-box">Nenhum tester cadastrado ainda — peça pra gestora te criar no Mapeamento dos Novos antes de preencher as tarefas.</div>';
+    content.innerHTML='<div class="warn-box">Nenhum tester cadastrado ainda — peça pra gestora te criar no Mapeamento dos Novos antes de preencher as tarefas.</div>';
     return;
   }
   if(selTesterId&&!testers.some(t=>t.id===selTesterId))selTesterId='';
-  body.innerHTML=`
+  content.innerHTML=`
     <div class="card">
       <div class="field" style="margin-bottom:0">
         <label class="flabel">Selecione seu nome</label>
@@ -356,24 +248,71 @@ function renderTesterTab(testers){
     </div>
     <div id="tester-days"></div>
   `;
-  if(selTesterId)renderTesterDays(selTesterId);
+  if(selTesterId)subscribeMyTarefas(selTesterId);
 }
-window.onTesterChange=function(id){selTesterId=id;localStorage.setItem('tn_testerId',id);renderTesterDays(id);};
+window.onTesterChange=function(id){
+  selTesterId=id;
+  localStorage.setItem('tn_testerId',id);
+  Object.keys(pendingImages).forEach(k=>delete pendingImages[k]);
+  subscribeMyTarefas(id);
+};
+function subscribeMyTarefas(testerId){
+  if(unsubMyTarefas){unsubMyTarefas();unsubMyTarefas=null;}
+  const el=document.getElementById('tester-days');
+  if(!testerId){if(el)el.innerHTML='';return;}
+  if(el)el.innerHTML='<div class="warn-box">Carregando suas tarefas...</div>';
+  // Consulta filtrada só pelos PRÓPRIOS registros — nunca a coleção inteira.
+  unsubMyTarefas=fbDb.collection('gestorpro')
+    .where('type','==','tarefaNovatoPendente')
+    .where('testerId','==',testerId)
+    .onSnapshot(snap=>{
+      myRawTarefaDocs=snap.docs.map(d=>d.data());
+      renderTesterDays(testerId);
+    },e=>{console.error('Erro ao carregar tarefas',e);if(el)el.innerHTML='<div class="error-box">Erro ao carregar suas tarefas: '+e.message+'</div>';});
+}
+function tsMillis(ts){
+  if(!ts)return 0;
+  if(typeof ts.toMillis==='function')return ts.toMillis();
+  if(ts.seconds)return ts.seconds*1000;
+  return 0;
+}
+function getMinhasTarefas(){
+  const base={};
+  myRawTarefaDocs.filter(d=>d.fridayKey&&d.dia).forEach(d=>{
+    if(!base[d.fridayKey])base[d.fridayKey]={};
+    const key='dia'+d.dia;
+    const existing=base[d.fridayKey][key];
+    const rawTime=tsMillis(d.criadoEm)||Date.now();
+    const existingTime=existing&&existing.enviadoEm?new Date(existing.enviadoEm).getTime():0;
+    if(!existing||rawTime>=existingTime){
+      base[d.fridayKey][key]={resumo:d.resumo||'',disponibilidade:d.disponibilidade||'',cincoNotadas:d.cincoNotadas||'',ppmImage:d.ppmImage||'',enviadoEm:new Date(rawTime).toISOString()};
+    }
+  });
+  return base;
+}
+function getStatusDia(fridayKey,diaN,dataDia,prazo){
+  const tarefas=getMinhasTarefas();
+  const reg=tarefas[fridayKey]&&tarefas[fridayKey]['dia'+diaN];
+  if(reg&&reg.enviadoEm)return'enviado';
+  const agora=new Date();
+  if(agora>=prazo)return'bloqueado';
+  const inicioDia=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate());
+  if(agora>=inicioDia)return'aberto';
+  return'futuro';
+}
 function renderTesterDays(testerId){
   const el=document.getElementById('tester-days');
   if(!el)return;
-  if(!testerId){el.innerHTML='';return;}
   const ciclo=getCicloAtual();
   el.innerHTML=ciclo.dias.map(d=>{
-    const status=getStatusDia(testerId,ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
-    const tarefas=getMergedTarefas(testerId);
+    const status=getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
+    const tarefas=getMinhasTarefas();
     const reg=tarefas[ciclo.fridayKey]&&tarefas[ciclo.fridayKey]['dia'+d.dia];
     const badgeLabel={enviado:'✅ Enviado',bloqueado:'❌ Bloqueado',aberto:'🟢 Aberto agora',futuro:'⏳ Ainda não chegou'}[status];
     let bodyHtml='';
     if(status==='enviado'){
-      const imgSrc=reg.ppmImage||reg.ppmUrl||'';
       bodyHtml=`<div class="done-box"><div class="emoji">✅</div>Tarefa enviada em ${new Date(reg.enviadoEm).toLocaleString('pt-BR')}.</div>
-        ${imgSrc?`<img class="ppm-img" src="${imgSrc}" onclick="openLightbox(this.src)">`:''}`;
+        ${reg.ppmImage?`<img class="ppm-img" src="${reg.ppmImage}" onclick="openLightbox(this.src)">`:''}`;
     }else if(status==='bloqueado'){
       bodyHtml=`<div class="error-box" style="margin-bottom:0">Indisponível — o prazo desse dia (00h) já passou sem envio. Isso conta como critério de eliminação.</div>`;
     }else if(status==='futuro'){
@@ -416,8 +355,8 @@ window.enviarTarefaDia=async function(diaN){
   if(!tester)return;
   const ciclo=getCicloAtual();
   const diaInfo=ciclo.dias.find(d=>d.dia===diaN);
-  const status=getStatusDia(testerId,ciclo.fridayKey,diaN,diaInfo.dataDia,diaInfo.prazo);
-  if(status!=='aberto'){alert('Esse dia não está mais disponível pra envio.');renderAll();return;}
+  const status=getStatusDia(ciclo.fridayKey,diaN,diaInfo.dataDia,diaInfo.prazo);
+  if(status!=='aberto'){alert('Esse dia não está mais disponível pra envio.');renderTesterDays(testerId);return;}
   const ppmImage=pendingImages[diaN];
   if(!ppmImage){alert('Anexe (escolha o arquivo ou cole com Ctrl+V) o print do resultado do teste de PPM antes de enviar.');return;}
   const resumo=(document.getElementById('campo-resumo-'+diaN)?.value||'').trim();
@@ -440,106 +379,6 @@ window.enviarTarefaDia=async function(diaN){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
     if(btn){btn.disabled=false;btn.textContent='📤 Enviar tarefa do dia';}
-  }
-};
-
-/* ---------- aba PADRINHO ---------- */
-function renderPadrinhoTab(testers,padrinhos){
-  const body=document.getElementById('tab-body');
-  if(!padrinhos.length){
-    body.innerHTML='<div class="warn-box">Nenhum chatter marcado como 👑 Padrinho ainda — peça pra gestora definir o cargo na aba Equipe.</div>';
-    return;
-  }
-  if(selPadrinhoId&&!padrinhos.some(p=>p.id===selPadrinhoId))selPadrinhoId='';
-  body.innerHTML=`
-    <div class="card">
-      <div class="field" style="margin-bottom:0">
-        <label class="flabel">Selecione seu nome (padrinho)</label>
-        <select class="fselect" id="padrinho-select" onchange="onPadrinhoChange(this.value)">
-          <option value="">— selecionar —</option>
-          ${padrinhos.map(p=>`<option value="${p.id}" ${selPadrinhoId===p.id?'selected':''}>${p.name}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div id="padrinho-doc"></div>
-  `;
-  renderDocumentoPadrinhos(testers);
-}
-window.onPadrinhoChange=function(id){selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'));};
-window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'));};
-function renderDocumentoPadrinhos(testers){
-  const el=document.getElementById('padrinho-doc');
-  if(!el)return;
-  if(!testers.length){el.innerHTML='<div class="warn-box">Nenhum tester ativo no momento.</div>';return;}
-  const ciclo=getCicloAtual();
-  el.innerHTML=testers.map(t=>{
-    const map=getMapeamentoInfo(t.name);
-    const claim=getMergedClaimForTester(t.id);
-    const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
-    const isMine=selPadrinhoId&&padrinhoId===selPadrinhoId;
-    const badges=ciclo.dias.map(d=>{
-      const status=getStatusDia(t.id,ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
-      const label={enviado:'✅',bloqueado:'❌',aberto:'🟢',futuro:'⏳'}[status];
-      return`<span class="badge badge-${status}">${label} ${d.label.slice(0,3)}</span>`;
-    }).join('');
-    const open=expandedTester===t.id;
-    const tarefas=getMergedTarefas(t.id)[ciclo.fridayKey]||{};
-    const claimBoxHtml=(()=>{
-      if(padrinhoId){
-        const padrinhoAtual=chatters.find(c=>c.id===padrinhoId);
-        return`<div class="claimbox">👑 Padrinho aprovado: <strong>${padrinhoAtual?padrinhoAtual.name:'—'}</strong>${isMine?`<div style="margin-top:8px"><a class="btn btn-primary" style="text-decoration:none" href="avaliacao.html?id=${encodeURIComponent(t.id)}&nome=${encodeURIComponent(t.name)}">📜 Avalie seu afiliado</a></div>`:''}</div>`;
-      }
-      if(claim){
-        const meta={pendente:['⏳ Solicitação pendente de decisão da gestora','var(--warn)'],reservado:['🔵 Solicitação reservada pela gestora','var(--text2)']}[claim.status]||['⏳ Pendente','var(--warn)'];
-        return`<div class="claimbox">👑 Reivindicado por: <strong>${claim.padrinhoNome}</strong><div style="margin-top:4px;color:${meta[1]};font-weight:700;font-size:11.5px">${meta[0]}</div></div>`;
-      }
-      return`<div class="claimbox">Ninguém reivindicou esse tester ainda.
-        ${selPadrinhoId?`<button class="btn btn-primary" style="margin-top:8px" onclick="reivindicarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🙋 Quero apadrinhar</button>`:'<div style="margin-top:6px;color:var(--text3)">Selecione seu nome de padrinho acima pra poder reivindicar.</div>'}
-      </div>`;
-    })();
-    return`<div class="tester-row">
-      <div class="tester-row-head" onclick="toggleTesterDetail('${t.id}')">
-        <div>
-          <div class="tester-name">${t.name}</div>
-          ${map?`<div class="tester-mapinfo">"${map.personalidadeUmaFrase||''}" ${map.pontuacaoGeral?`· 🎯 ${map.pontuacaoGeral}/100`:''}</div>`:''}
-          <div class="badges-row">${badges}</div>
-        </div>
-        <span class="chev">${open?'▲':'▼'}</span>
-      </div>
-      <div class="detail-body ${open?'open':''}">
-        ${map?`<div class="tarefa-desc">${map.resumo||''}</div>`:''}
-        ${ciclo.dias.map(d=>{
-          const reg=tarefas['dia'+d.dia];
-          if(!reg)return'';
-          return`<div style="margin-bottom:10px">
-            <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">${d.label} — Dia ${d.dia}</div>
-            ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
-            ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
-            ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
-            ${(reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:''}
-          </div>`;
-        }).join('')}
-        ${claimBoxHtml}
-      </div>
-    </div>`;
-  }).join('');
-}
-window.reivindicarAfilhado=async function(testerId,testerNome){
-  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
-  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
-  if(!padrinho)return;
-  const existing=getMergedClaimForTester(testerId);
-  if(existing){alert('Esse tester já tem uma solicitação em aberto.');return;}
-  try{
-    await fbDb.collection('gestorpro').add({
-      type:'afilhadoClaimPendente',processado:false,
-      testerId,testerNome,
-      padrinhoId:selPadrinhoId,padrinhoNome:padrinho.name,
-      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
-    });
-  }catch(e){
-    console.error(e);
-    alert('Erro ao enviar: '+e.message);
   }
 };
 </script>
