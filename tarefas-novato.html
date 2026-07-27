@@ -62,6 +62,12 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 .detail-body{display:none;margin-top:10px;border-top:1px solid var(--line);padding-top:10px;}
 .detail-body.open{display:block;}
 .chev{font-size:16px;color:var(--text3);}
+.pastezone{border:2px dashed var(--line-strong);border-radius:var(--r-md);padding:16px 12px;text-align:center;font-size:12px;color:var(--text3);cursor:text;background:#fff;}
+.pastezone:focus{outline:none;border-color:var(--accent);background:var(--accent-soft);}
+.pastezone.filled{border-color:var(--ok);border-style:solid;}
+.pastezone img{max-width:100%;border-radius:8px;margin-top:8px;display:block;}
+.or-sep{text-align:center;font-size:11px;color:var(--text3);margin:8px 0;text-transform:uppercase;letter-spacing:.05em;}
+.ppm-img{max-width:220px;border-radius:9px;margin-top:8px;display:block;cursor:pointer;border:1px solid var(--line);}
 </style>
 </head>
 <body>
@@ -73,9 +79,11 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
   </div>
   <div id="content"></div>
 </div>
+<div id="lightbox" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center;padding:20px;cursor:zoom-out">
+  <img id="lightbox-img" style="max-width:100%;max-height:100%;border-radius:8px">
+</div>
 
 <script src="firebase-bundle.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
 <script>
 /* ===========================================================
    TAREFAS DE NOVATO — link ÚNICO (sem ?id), compartilhado por
@@ -103,15 +111,77 @@ const firebaseConfig={
 const headerSub=document.getElementById('header-sub');
 const content=document.getElementById('content');
 
-let fbDb=null,fbStorage=null,storageErro='';
+let fbDb=null;
 let chatters=[],mapeamentoBatches=[],chatterFichasLive={},afilhadoClaimsLive=[];
 let rawTarefaDocs=[],rawClaimDocs=[];
 let activeTab=localStorage.getItem('tn_tab')||'tester';
 let selTesterId=localStorage.getItem('tn_testerId')||'';
 let selPadrinhoId=localStorage.getItem('tn_padrinhoId')||'';
 let expandedTester='';
+// print do PPM: NÃO usa Firebase Storage (evita depender de um recurso que
+// precisa ser ativado à parte no console) — a imagem é comprimida no
+// próprio navegador e enviada como base64 dentro do mesmo documento do
+// Firestore, igual a qualquer outro campo de texto. diaN -> dataURL.
+const pendingImages={};
 
 function normNome(s){return(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();}
+window.openLightbox=function(src){
+  document.getElementById('lightbox-img').src=src;
+  document.getElementById('lightbox').style.display='flex';
+};
+window.closeLightbox=function(){document.getElementById('lightbox').style.display='none';};
+
+// Aceita tanto escolher um arquivo quanto COLAR (Ctrl+V) um print copiado —
+// nos dois casos vira um dataURL comprimido (JPEG, largura máx. 900px) pra
+// caber tranquilamente dentro do limite de 1MB de um documento do Firestore.
+function fileToCompressedDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        let w=img.width,h=img.height;
+        const maxW=900;
+        if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
+        const canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg',0.62));
+      };
+      img.onerror=()=>reject(new Error('Não consegui ler essa imagem.'));
+      img.src=reader.result;
+    };
+    reader.onerror=()=>reject(new Error('Não consegui ler esse arquivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+window.handlePastePPM=async function(e,diaN){
+  e.preventDefault();
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  let file=null;
+  for(const it of items){if(it.kind==='file'&&it.type&&it.type.startsWith('image/')){file=it.getAsFile();break;}}
+  if(!file){alert('Não encontrei nenhuma imagem colada — copie o print (Ctrl+C / botão direito → copiar imagem) e cole aqui de novo (Ctrl+V).');return;}
+  await setPendingPPM(diaN,file);
+};
+window.handleFilePPM=async function(e,diaN){
+  const file=e.target.files&&e.target.files[0];
+  if(!file)return;
+  await setPendingPPM(diaN,file);
+};
+async function setPendingPPM(diaN,file){
+  try{
+    const dataUrl=await fileToCompressedDataUrl(file);
+    pendingImages[diaN]=dataUrl;
+    const zone=document.getElementById('pastezone-'+diaN);
+    if(zone){
+      zone.classList.add('filled');
+      zone.innerHTML=`<img src="${dataUrl}"><div style="margin-top:6px;font-weight:700;color:var(--ok)">✅ Print anexado — clique aqui pra trocar</div>`;
+    }
+  }catch(err){
+    console.error(err);
+    alert('Não consegui processar essa imagem, tente outra.');
+  }
+}
 
 /* ---------- ciclo Sexta/Sábado/Domingo (mesma lógica do app.js) ---------- */
 function p2(n){return String(n).padStart(2,'0');}
@@ -161,7 +231,6 @@ function init(){
   try{
     firebase.apps&&firebase.apps.length?firebase.app():firebase.initializeApp(firebaseConfig);
     fbDb=firebase.firestore();
-    try{fbStorage=firebase.storage();}catch(e){storageErro='Envio de print temporariamente indisponível.';console.error(e);}
     headerSub.textContent='Selecione seu nome pra começar';
     content.innerHTML='<div class="warn-box">Carregando dados...</div>';
     startListeners();
@@ -222,7 +291,7 @@ function getMergedTarefas(testerId){
     const rawTime=tsMillis(d.criadoEm)||Date.now();
     const existingTime=existingReg&&existingReg.enviadoEm?new Date(existingReg.enviadoEm).getTime():0;
     if(!existingReg||rawTime>=existingTime){
-      base[d.fridayKey][key]={resumo:d.resumo||'',disponibilidade:d.disponibilidade||'',cincoNotadas:d.cincoNotadas||'',ppmUrl:d.ppmUrl||'',enviadoEm:new Date(rawTime).toISOString()};
+      base[d.fridayKey][key]={resumo:d.resumo||'',disponibilidade:d.disponibilidade||'',cincoNotadas:d.cincoNotadas||'',ppmImage:d.ppmImage||'',ppmUrl:d.ppmUrl||'',enviadoEm:new Date(rawTime).toISOString()};
     }
   });
   return base;
@@ -302,8 +371,9 @@ function renderTesterDays(testerId){
     const badgeLabel={enviado:'✅ Enviado',bloqueado:'❌ Bloqueado',aberto:'🟢 Aberto agora',futuro:'⏳ Ainda não chegou'}[status];
     let bodyHtml='';
     if(status==='enviado'){
+      const imgSrc=reg.ppmImage||reg.ppmUrl||'';
       bodyHtml=`<div class="done-box"><div class="emoji">✅</div>Tarefa enviada em ${new Date(reg.enviadoEm).toLocaleString('pt-BR')}.</div>
-        ${reg.ppmUrl?`<a class="ppm-link" href="${reg.ppmUrl}" target="_blank" rel="noopener">🖼️ Ver print do PPM enviado</a>`:''}`;
+        ${imgSrc?`<img class="ppm-img" src="${imgSrc}" onclick="openLightbox(this.src)">`:''}`;
     }else if(status==='bloqueado'){
       bodyHtml=`<div class="error-box" style="margin-bottom:0">Indisponível — o prazo desse dia (00h) já passou sem envio. Isso conta como critério de eliminação.</div>`;
     }else if(status==='futuro'){
@@ -323,8 +393,9 @@ function renderTesterDays(testerId){
         </div>
         <div class="field">
           <label class="flabel">📎 Print do resultado do PPM (obrigatório)</label>
-          <input type="file" accept="image/*" id="ppm-file-${d.dia}" class="finput" style="padding:8px">
-          ${storageErro?`<div style="font-size:11px;color:var(--bad);margin-top:6px">${storageErro}</div>`:''}
+          <div class="pastezone" id="pastezone-${d.dia}" tabindex="0" onpaste="handlePastePPM(event,${d.dia})">🖱️ Clique aqui e cole (Ctrl+V) o print copiado</div>
+          <div class="or-sep">ou</div>
+          <input type="file" accept="image/*" id="ppm-file-${d.dia}" class="finput" style="padding:8px" onchange="handleFilePPM(event,${d.dia})">
         </div>
         <button class="btn btn-primary" id="btn-enviar-dia-${d.dia}" onclick="enviarTarefaDia(${d.dia})">📤 Enviar tarefa do dia</button>
       `;
@@ -347,30 +418,24 @@ window.enviarTarefaDia=async function(diaN){
   const diaInfo=ciclo.dias.find(d=>d.dia===diaN);
   const status=getStatusDia(testerId,ciclo.fridayKey,diaN,diaInfo.dataDia,diaInfo.prazo);
   if(status!=='aberto'){alert('Esse dia não está mais disponível pra envio.');renderAll();return;}
-  const fileInput=document.getElementById('ppm-file-'+diaN);
-  const file=fileInput&&fileInput.files&&fileInput.files[0];
-  if(!file){alert('Anexe o print do resultado do teste de PPM antes de enviar.');return;}
+  const ppmImage=pendingImages[diaN];
+  if(!ppmImage){alert('Anexe (escolha o arquivo ou cole com Ctrl+V) o print do resultado do teste de PPM antes de enviar.');return;}
   const resumo=(document.getElementById('campo-resumo-'+diaN)?.value||'').trim();
   if(!resumo){alert('Escreva o resumo pedido antes de enviar.');return;}
   const btn=document.getElementById('btn-enviar-dia-'+diaN);
   btn.disabled=true;btn.textContent='Enviando...';
   try{
-    if(!fbStorage)throw new Error('Envio de print indisponível no momento — avise a gestora e tente de novo mais tarde.');
-    const ext=(file.name.split('.').pop()||'png').toLowerCase();
-    const path=`tarefas-novato/${testerId}/${ciclo.fridayKey}/dia${diaN}-${Date.now()}.${ext}`;
-    const ref=fbStorage.ref().child(path);
-    await ref.put(file);
-    const ppmUrl=await ref.getDownloadURL();
     const payload={
       type:'tarefaNovatoPendente',processado:false,
       testerId,testerNome:tester.name,
       fridayKey:ciclo.fridayKey,dia:diaN,
-      resumo,ppmUrl,
+      resumo,ppmImage,
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     };
     if(diaN===1)payload.disponibilidade=(document.getElementById('campo-disponibilidade-1')?.value||'').trim();
     if(diaN===2)payload.cincoNotadas=(document.getElementById('campo-cincoNotadas-2')?.value||'').trim();
     await fbDb.collection('gestorpro').add(payload);
+    delete pendingImages[diaN];
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
@@ -451,7 +516,7 @@ function renderDocumentoPadrinhos(testers){
             ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
             ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
             ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
-            ${reg.ppmUrl?`<a class="ppm-link" href="${reg.ppmUrl}" target="_blank" rel="noopener">🖼️ Ver print do PPM</a>`:''}
+            ${(reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:''}
           </div>`;
         }).join('')}
         ${claimBoxHtml}

@@ -10897,9 +10897,19 @@ function aplicarTarefaNovatoPendente(docId,data){
       resumo:data.resumo||'',
       disponibilidade:data.disponibilidade||'',
       cincoNotadas:data.cincoNotadas||'', // só usado no Dia 2
-      ppmUrl:data.ppmUrl||'',
+      ppmImage:data.ppmImage||'', // print comprimido em base64 (sem depender do Firebase Storage)
+      ppmUrl:data.ppmUrl||'', // mantido por compatibilidade, caso o Storage venha a ser usado no futuro
       enviadoEm:new Date().toISOString()
     };
+    // Poda ciclos antigos — cada print vira uma string base64 dentro do
+    // MESMO documento sharded (shard-fichas) que guarda a ficha de TODOS os
+    // chatters, então sem limpeza os prints de testers já decididos ficariam
+    // acumulando pra sempre até estourar o limite de 1MB do documento no
+    // Firestore. Mantém só os 2 ciclos (semanas) mais recentes por tester.
+    const ciclosSalvos=Object.keys(S.chatterFichas[c.id].tarefasNovato).sort();
+    if(ciclosSalvos.length>2){
+      ciclosSalvos.slice(0,ciclosSalvos.length-2).forEach(old=>delete S.chatterFichas[c.id].tarefasNovato[old]);
+    }
     save();
     toast(`📋 Tarefa do Dia ${diaN} de ${c.name} recebida via link.`);
     if(currentViewName()==='testers')renderTesters();
