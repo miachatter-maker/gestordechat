@@ -142,6 +142,7 @@ function migrateState(s){
   if(!s.mapRecordings)s.mapRecordings=[]; // [{id,name,transcript,date,mapped}] — gravações rápidas do novo Mapeamento (6 slots)
   if(!s.mapSlotDrafts)s.mapSlotDrafts={}; // '1'..'6' -> texto em andamento (recuperação se travar no meio da gravação)
   if(!s.mapeamentoBatches)s.mapeamentoBatches=[]; // [{id,date,results:[{id,name,recordingId,...campos da IA}]}] — MAPEAMENTO DOS NOVOS
+  if(!s.afilhadoClaims)s.afilhadoClaims=[]; // [{id,testerId,testerNome,padrinhoId,padrinhoNome,status:'pendente'|'aprovado'|'reprovado'|'reservado',criadoEm}] — quadro SOLICITAÇÃO DE AFILHADO (Testers)
   if(!s.weekGoals)s.weekGoals={};
   if(!s.revenues)s.revenues={};
   if(!s.models)s.models=[];
@@ -346,6 +347,8 @@ function initFirebase(){
     listenToAvaliacoesPendentes();
     listenToChatlabPendentes();
     listenToRelatoriosSemanaisPendentes();
+    listenToTarefasNovatoPendentes();
+    listenToAfilhadoClaimsPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -871,6 +874,50 @@ function fmt(d){return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate()
 function nowHHMM(){const n=new Date();return p2(n.getHours())+':'+p2(n.getMinutes());}
 function todayKey(){return fmt(new Date());}
 function getTodayDayKey(){return DAY_KEYS[new Date().getDay()];}
+
+/* ===========================================================
+   CICLO DE TAREFAS DE NOVATO — Sexta/Sábado/Domingo, ciclo fixo do
+   calendário (não relativo à data de entrada de cada tester). Toda
+   sexta é o "Dia 1", todo sábado "Dia 2", todo domingo "Dia 3" — e o
+   prazo de cada dia é 00h00 do dia seguinte (vira bloqueado depois
+   disso, é um critério de eliminação conforme pedido pela gestora).
+   =========================================================== */
+function getSextaDoCiclo(ref){
+  const d=new Date(ref);
+  const dow=d.getDay(); // 0=dom,5=sex,6=sab
+  let diff;
+  if(dow===5)diff=0;
+  else if(dow===6)diff=1;
+  else if(dow===0)diff=2;
+  else diff=dow+2; // seg(1)->3,ter(2)->4,qua(3)->5,qui(4)->6 dias desde a sexta anterior
+  const sex=new Date(d.getFullYear(),d.getMonth(),d.getDate()-diff);
+  return sex;
+}
+function getCicloNovatoInfo(ref){
+  const now=ref?new Date(ref):new Date();
+  const sex=getSextaDoCiclo(now);
+  const fridayKey=fmt(sex);
+  const dias=[1,2,3].map(n=>{
+    const dataDia=new Date(sex.getFullYear(),sex.getMonth(),sex.getDate()+(n-1));
+    const dataKey=fmt(dataDia);
+    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1); // 00h do dia seguinte
+    return{dia:n,dataKey,prazo,label:['Sexta','Sábado','Domingo'][n-1]};
+  });
+  return{fridayKey,dias};
+}
+// status do Dia N (1/2/3) de um tester dentro de um ciclo (fridayKey): 'enviado'|'bloqueado'|'aberto'|'futuro'
+function getStatusTarefaNovatoDia(cid,fridayKey,diaN){
+  const registro=S.chatterFichas?.[cid]?.tarefasNovato?.[fridayKey]?.['dia'+diaN];
+  if(registro&&registro.enviadoEm)return'enviado';
+  const sex=new Date(fridayKey+'T12:00:00');
+  const dataDia=new Date(sex.getFullYear(),sex.getMonth(),sex.getDate()+(diaN-1));
+  const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1);
+  const inicioDia=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate());
+  const agora=new Date();
+  if(agora>=prazo)return'bloqueado';
+  if(agora>=inicioDia)return'aberto';
+  return'futuro';
+}
 // weekOffset: 0=current, -1=last week, -2=two weeks ago, etc.
 let weekOffset=0;
 
@@ -10387,6 +10434,64 @@ function renderReservas(){
     </div>`;
   }).join('');
 }
+/* ===========================================================
+   SOLICITAÇÃO DE AFILHADO — quadro na aba Testers com decisão
+   PRÓPRIA e independente da decisão normal do tester (aprovado/
+   reprovado/reservas via setTesterDecision). Aqui a gestora decide
+   só sobre O PAREAMENTO padrinho↔tester reivindicado no link público
+   de tarefas: aprovar grava padrinhoId na ficha do tester (o que já
+   libera o botão "Avalie seu afiliado" pro padrinho no mesmo link);
+   reprovar remove a solicitação; reservar guarda pra decidir depois.
+   =========================================================== */
+function renderAfilhadoClaims(){
+  const el=document.getElementById('afilhado-claims-content');
+  if(!el)return;
+  const claims=S.afilhadoClaims||[];
+  if(!claims.length){
+    el.innerHTML=`<div style="font-size:12.5px;color:var(--text3)">Nenhuma solicitação ainda — aparece aqui quando um padrinho reivindicar um tester no Link das Tarefas.</div>`;
+    return;
+  }
+  const statusMeta={pendente:{label:'⏳ Pendente',color:'var(--warn)'},aprovado:{label:'✅ Aprovado — padrinho definido',color:'var(--ok)'},reservado:{label:'🔵 Reservado pra depois',color:'var(--text2)'}};
+  const ordenados=[...claims].sort((a,b)=>(a.status==='pendente'?0:1)-(b.status==='pendente'?0:1)||(b.criadoEm||'').localeCompare(a.criadoEm||''));
+  el.innerHTML=ordenados.map(cl=>{
+    const meta=statusMeta[cl.status]||statusMeta.pendente;
+    return`<div style="border:1px solid var(--line);border-left:3px solid ${meta.color};border-radius:9px;padding:11px 13px;margin-bottom:9px">
+      <div style="font-weight:700;font-size:13.5px">👑 ${cl.padrinhoNome||'—'} → 🧪 ${cl.testerNome||'—'}</div>
+      <div style="font-size:11px;color:${meta.color};font-weight:700;margin-top:2px">${meta.label}</div>
+      <div style="display:flex;gap:6px;margin-top:9px">
+        ${['aprovado','reservado','reprovado'].map(op=>{
+          const labels={aprovado:'✅ Aprovar',reservado:'🔵 Reservar',reprovado:'❌ Reprovar'};
+          const colors={aprovado:'var(--ok)',reservado:'var(--warn)',reprovado:'var(--bad)'};
+          const bgs={aprovado:'var(--ok-soft)',reservado:'var(--warn-soft)',reprovado:'var(--bad-soft)'};
+          const sel=cl.status===op;
+          return`<button onclick="setAfilhadoClaimDecision('${cl.id}','${op}')" style="flex:1;padding:7px 4px;border-radius:8px;border:2px solid ${sel?colors[op]:'var(--line)'};background:${sel?bgs[op]:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:10.5px;color:${sel?colors[op]:'var(--text2)'}">${labels[op]}</button>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+function setAfilhadoClaimDecision(claimId,decision){
+  const cl=S.afilhadoClaims.find(c=>c.id===claimId);
+  if(!cl)return;
+  if(decision==='reprovado'){
+    S.afilhadoClaims=S.afilhadoClaims.filter(c=>c.id!==claimId);
+    save();
+    toast(`❌ Solicitação de ${cl.padrinhoNome} por ${cl.testerNome} reprovada.`);
+    renderAfilhadoClaims();
+    return;
+  }
+  cl.status=decision;
+  cl.decisaoData=todayKey();
+  if(decision==='aprovado'){
+    if(!S.chatterFichas[cl.testerId])S.chatterFichas[cl.testerId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    S.chatterFichas[cl.testerId].padrinhoId=cl.padrinhoId;
+    toast(`✅ ${cl.padrinhoNome} aprovado como padrinho de ${cl.testerNome} — o botão de avaliação já libera pra ele no link de tarefas.`);
+  } else {
+    toast(`🔵 Solicitação de ${cl.padrinhoNome} por ${cl.testerNome} colocada em reservado.`);
+  }
+  save();
+  renderAfilhadoClaims();
+}
 function setTesterDecision(chatterId,decision){
   const c=S.chatters.find(ch=>ch.id===chatterId);
   if(!c)return;
@@ -10414,6 +10519,7 @@ function renderTesters(){
   renderMapSlots();
   renderMapTranscricoes();
   renderMapeamentoNovosPool();
+  renderAfilhadoClaims();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
   const testers=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
@@ -10653,6 +10759,42 @@ function copiarLinkAvaliacao(){
     toast('📋 Link copiado — envie pro padrinho responsável.');
   });
 }
+// Link ÚNICO (sem ?id) do quadro MAPEAMENTO DOS NOVOS — ao contrário dos
+// links de avaliação/chatlab (um por pessoa), esse é o MESMO link pra
+// todos os testers e padrinhos; a própria página pública pede o nome.
+function gerarLinkTarefasNovato(){
+  const url=`${location.origin}/tarefas-novato.html`;
+  const input=document.getElementById('tarefas-novato-link-input');
+  if(input)input.value=url;
+  openModal('m-tarefas-novato-link');
+}
+function copiarLinkTarefasNovato(){
+  const input=document.getElementById('tarefas-novato-link-input');
+  if(!input)return;
+  input.select();
+  navigator.clipboard?.writeText(input.value).then(()=>{
+    toast('📋 Link copiado — envie pros testers e padrinhos.');
+  }).catch(()=>{
+    document.execCommand('copy');
+    toast('📋 Link copiado — envie pros testers e padrinhos.');
+  });
+}
+// "Limpar quem não avançou" — mantém no MAPEAMENTO DOS NOVOS só os nomes
+// que viraram tester/chatter de verdade (criados via "➕ Criar tester com
+// esse nome"); quem nunca virou chatter é removido dos lotes de mapeamento.
+function limparMapeamentoNaoSelecionados(){
+  const totalAntes=S.mapeamentoBatches.reduce((s,b)=>s+b.results.length,0);
+  if(!totalAntes){toast('⚠️ Nenhum mapeamento pra limpar.');return;}
+  if(!confirm('Remover do Mapeamento dos Novos todo mundo que ainda não virou tester? Essa ação não pode ser desfeita.'))return;
+  S.mapeamentoBatches=S.mapeamentoBatches.map(b=>({
+    ...b,
+    results:b.results.filter(r=>S.chatters.some(ch=>normalizeName(ch.name)===normalizeName(r.nome)))
+  })).filter(b=>b.results.length);
+  const totalDepois=S.mapeamentoBatches.reduce((s,b)=>s+b.results.length,0);
+  save();
+  toast(`🧹 ${totalAntes-totalDepois} pessoa${totalAntes-totalDepois!==1?'s':''} removida${totalAntes-totalDepois!==1?'s':''} do Mapeamento dos Novos.`);
+  renderMapeamentoNovosPool();
+}
 // Escuta a coleção 'gestorpro' filtrando só os documentos que a página
 // pública avaliacao.html cria (type:'avaliacaoPendente', processado:false).
 // Cada um vira, sozinho, uma Avaliação de Chatter aplicada — sem PDF, sem
@@ -10705,6 +10847,125 @@ function aplicarAvaliacaoPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar avaliação como processada',e));
   }catch(e){
     console.error('Erro ao aplicar avaliação pendente',e);
+  }
+}
+
+/* ===========================================================
+   TAREFAS DE NOVATO — link público único (tarefas-novato.html) onde
+   cada tester preenche as tarefas do dia (Sexta/Sábado/Domingo) e os
+   padrinhos veem tudo junto num "documento" ao vivo. A página pública
+   escreve na mesma coleção 'gestorpro', marcada com
+   type:'tarefaNovatoPendente' e processado:false — igual ao padrão da
+   Avaliação/ChatLab. O nome do tester vem junto (não o id, já que a
+   página não pede login) e é casado por nome normalizado com
+   S.chatters — mesma tolerância a acento/caixa usada em toda a
+   importação do relatório.
+   =========================================================== */
+function listenToTarefasNovatoPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','tarefaNovatoPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarTarefaNovatoPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir tarefas de novato pendentes',err);
+    });
+}
+function aplicarTarefaNovatoPendente(docId,data){
+  try{
+    const c=data.testerId
+      ?S.chatters.find(ch=>ch.id===data.testerId)
+      :S.chatters.find(ch=>normalizeName(ch.name)===normalizeName(data.testerNome));
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    if(!S.chatterFichas[c.id])S.chatterFichas[c.id]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    if(!S.chatterFichas[c.id].tarefasNovato)S.chatterFichas[c.id].tarefasNovato={};
+    const fk=data.fridayKey;
+    const diaN=data.dia;
+    if(!fk||!diaN){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'ciclo/dia ausente'});
+      return;
+    }
+    if(!S.chatterFichas[c.id].tarefasNovato[fk])S.chatterFichas[c.id].tarefasNovato[fk]={};
+    S.chatterFichas[c.id].tarefasNovato[fk]['dia'+diaN]={
+      resumo:data.resumo||'',
+      disponibilidade:data.disponibilidade||'',
+      cincoNotadas:data.cincoNotadas||'', // só usado no Dia 2
+      ppmUrl:data.ppmUrl||'',
+      enviadoEm:new Date().toISOString()
+    };
+    save();
+    toast(`📋 Tarefa do Dia ${diaN} de ${c.name} recebida via link.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar tarefa de novato como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar tarefa de novato pendente',e);
+  }
+}
+
+/* ===========================================================
+   SOLICITAÇÃO DE AFILHADO — no mesmo documento de tarefas, os
+   padrinhos marcam quem querem apadrinhar (visível em tempo real pra
+   todos os padrinhos, já que todos leem/escrevem a mesma coleção). Vira
+   um quadro novo na aba Testers com decisão PRÓPRIA (aprovar/reprovar/
+   reservar), separada da decisão normal de tester (aprovado/reprovado/
+   reservas) — a gestora decide se aquele apadrinhamento específico vale.
+   =========================================================== */
+function listenToAfilhadoClaimsPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','afilhadoClaimPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarAfilhadoClaimPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir solicitações de afilhado pendentes',err);
+    });
+}
+function aplicarAfilhadoClaimPendente(docId,data){
+  try{
+    const tester=data.testerId
+      ?S.chatters.find(ch=>ch.id===data.testerId)
+      :S.chatters.find(ch=>normalizeName(ch.name)===normalizeName(data.testerNome));
+    const padrinho=data.padrinhoId
+      ?S.chatters.find(ch=>ch.id===data.padrinhoId)
+      :S.chatters.find(ch=>ch.level==='padrinho'&&normalizeName(ch.name)===normalizeName(data.padrinhoNome));
+    if(!tester){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    // Um tester só pode ter UMA solicitação em aberto por vez — se já existe
+    // uma pendente/aprovada pra esse tester, não duplica (o padrinho que
+    // reivindicar primeiro é quem aparece; a gestora decide no app).
+    const jaExiste=S.afilhadoClaims.find(cl=>cl.testerId===tester.id&&['pendente','aprovado'].includes(cl.status));
+    if(jaExiste){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'já existe solicitação em aberto pra esse tester'});
+      return;
+    }
+    S.afilhadoClaims.push({
+      id:'afc'+Date.now(),
+      testerId:tester.id,
+      testerNome:tester.name,
+      padrinhoId:padrinho?.id||'',
+      padrinhoNome:padrinho?.name||data.padrinhoNome||'',
+      status:'pendente',
+      criadoEm:new Date().toISOString()
+    });
+    save();
+    toast(`🤝 ${padrinho?.name||data.padrinhoNome||'Um padrinho'} quer apadrinhar ${tester.name} — decida em Testers → Solicitação de Afilhado.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar solicitação de afilhado como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar solicitação de afilhado pendente',e);
   }
 }
 
