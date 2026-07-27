@@ -441,9 +441,9 @@ body{
     <div id="home-smart-alerts"></div>
   </div>
 
-  <!-- MOTIVACIONAL -->
+  <!-- ESTRATÉGIAS DE LIDERANÇA -->
   <div class="panel" id="home-motiv-panel">
-    <div class="panel-head"><div class="panel-title">💡 Motivacional da semana</div><button class="btn btn-ghost btn-xs" onclick="openMotivacionalHome()">editar</button></div>
+    <div class="panel-head"><div class="panel-title">🧭 Estratégias de Liderança</div><button class="btn btn-ghost btn-xs" onclick="navTo('gestao')">ver tudo</button></div>
     <div id="home-motiv-content"></div>
   </div>
 
@@ -913,14 +913,43 @@ body{
     <div id="prize-panel"></div>
   </div>
 
-  <!-- MOTIVACIONAL -->
+  <!-- ESTRATÉGIAS DE LIDERANÇA -->
   <div class="panel" style="border:1.5px solid var(--info)">
-    <div class="panel-head"><div class="panel-title" style="color:var(--info)">💡 Motivacional da semana</div></div>
-    <div class="field"><label class="flabel">Ideia para a equipe</label>
-      <textarea class="ftext" id="motiv-idea-gestao" placeholder="Uma ideia motivacional para a semana..." style="min-height:60px" onblur="saveMotivacionalGestao()"></textarea>
-    </div>
-    <div class="field"><label class="flabel">Análise dos resultados</label>
-      <textarea class="ftext" id="motiv-results-gestao" placeholder="Como a equipe respondeu à ideia..." style="min-height:60px" onblur="saveMotivacionalGestao()"></textarea>
+    <div class="panel-head"><div class="panel-title" style="color:var(--info)">🧭 Estratégias de Liderança</div></div>
+    <div class="view-sub" style="margin:-4px 0 10px">Ações organizadas por prazo — marque como feita, edite o texto (o campo salva sozinho ao clicar fora) ou adicione novas conforme a situação de cada chatter mudar</div>
+    <div id="lideranca-board">
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🔴 Imediato — essa semana</div>
+        <div id="lid-list-imediato"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input class="finput" id="lid-add-imediato" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('imediato')">
+          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('imediato')">+</button>
+        </div>
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟠 Curto prazo — próximas 2 semanas</div>
+        <div id="lid-list-curto"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input class="finput" id="lid-add-curto" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('curto')">
+          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('curto')">+</button>
+        </div>
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟡 Médio prazo — esse mês</div>
+        <div id="lid-list-medio"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input class="finput" id="lid-add-medio" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('medio')">
+          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('medio')">+</button>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟣 Estrutural — sempre</div>
+        <div id="lid-list-estrutural"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input class="finput" id="lid-add-estrutural" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('estrutural')">
+          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('estrutural')">+</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1234,6 +1263,14 @@ body{
   <div class="view-sub">Tabelas comparativas calculadas automaticamente (sem IA) a partir do faturamento, horas e ChatLab já registrados</div>
 
   <div id="metricas-tabelas"></div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📅 Performance Mensal por Chatter</div><div class="panel-note">Visão mensal (não semanal) do faturamento de cada chatter, com interpretação da evolução ou queda — seu termômetro pra avaliar a própria liderança</div></div>
+      <select class="fselect" id="pm-month-select" onchange="renderMetricasPerformanceMensal()" style="flex:0 0 auto;width:120px"></select>
+    </div>
+    <div id="pm-tabela-content"></div>
+  </div>
 
   <div class="panel">
     <div class="panel-head">

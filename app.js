@@ -167,6 +167,22 @@ function migrateState(s){
     obs:''
   }];
   if(!s.analiseMensal)s.analiseMensal=[]; // [{id,modelId,modelName,monthKey,importadoEm,totalFaturamento,totalVendas,htCount,htTotal,htComissao,htPctVendas,htPctFaturamento,porTipo,whales,porChatter,naoAtribuidoTotal,naoAtribuidoCount}] — Análise Mensal de Vendas (planilhas importadas por modelo, só o resumo calculado é guardado)
+  // Estratégias de Liderança — substitui o antigo quadro "Motivacional da
+  // semana" (texto livre) por uma lista de ações de verdade, organizadas por
+  // prazo (imediato/curto/médio/estrutural), cada uma marcável como feita,
+  // editável e removível. Semeia com a primeira análise já levantada, só na
+  // primeira vez que o app roda. IDs FIXOS de propósito (mesmo motivo do
+  // treinamentoMetricas acima): migrateState roda de novo a cada snapshot do
+  // Firestore antes do primeiro save terminar, e o merge de arrays dedupe por
+  // id — id fixo evita duplicar esse seed a cada sincronização.
+  if(!s.liderancaEstrategias)s.liderancaEstrategias=[
+    {id:'lid-seed-1',categoria:'imediato',texto:'Conversa individual e direta com Renan e Guilherme. Não em grupo, não por mensagem — conversa real. Os dois tiveram quedas bruscas que não são de conhecimento. Algo aconteceu. Você precisa saber o que é antes de decidir o que fazer com eles. Sem essa conversa você está gerenciando no escuro.',done:false,criadoEm:new Date().toISOString()},
+    {id:'lid-seed-2',categoria:'curto',texto:'Investe energia concentrada no Felipe e Eduardo. Eles responderam, estão crescendo e merecem atenção proporcional ao retorno que dão. Cria um momento de desenvolvimento específico para os dois — pode ser uma conversa semanal rápida, um feedback mais próximo, um desafio de meta. Quem responde merece mais de você.',done:false,criadoEm:new Date().toISOString()},
+    {id:'lid-seed-3',categoria:'curto',texto:'Para o Charão e José — que têm potencial e tiveram acesso ao Elite — uma cobrança mais direta e específica. Não motivação genérica. Pergunta concreta: "você aprendeu X com o Henrique, por que não está aplicando?" Coloca o espelho na frente.',done:false,criadoEm:new Date().toISOString()},
+    {id:'lid-seed-4',categoria:'medio',texto:'Giovana precisa de acompanhamento próximo mas com prazo. Defina internamente até quando você acompanha sem resultado. Não é crueldade — é respeito pelo tempo de vocês duas.',done:false,criadoEm:new Date().toISOString()},
+    {id:'lid-seed-5',categoria:'medio',texto:'Observa mais uma semana antes de qualquer movimento.',done:false,criadoEm:new Date().toISOString()},
+    {id:'lid-seed-6',categoria:'estrutural',texto:'Para de medir sua liderança pelo resultado de quem não quer crescer. Seu termômetro real são o Felipe e o Eduardo. Eles são o reflexo do que você está construindo.',done:false,criadoEm:new Date().toISOString()}
+  ];
   if(!s.turnoLog)s.turnoLog={};
   if(!s.chatters)s.chatters=[];
   if(!s.shifts)s.shifts=[];
@@ -1946,7 +1962,7 @@ function renderHome(){
   renderUrgentPanel();
   renderSmartAlerts();
   renderAvailWindowsPanel();
-  renderMotivacionalHome();
+  renderLiderancaHome();
   render48hAlerts();
   renderMidnightPreviewHome();
 }
@@ -7336,27 +7352,81 @@ function removeDemanda2(id){
 }
 
 /* ===========================================================
-   MOTIVACIONAL HOME
+   ESTRATÉGIAS DE LIDERANÇA — substitui o antigo "Motivacional da
+   semana" (texto livre por semana) por uma lista de ações reais,
+   organizadas por prazo, marcáveis como feitas, editáveis e com
+   opção de adicionar mais. Não é escopado por semana — é um board
+   vivo que a gestora vai atualizando conforme a situação muda.
    =========================================================== */
-function renderMotivacionalHome(){
+const LIDERANCA_CATS=[
+  {key:'imediato',label:'🔴 Imediato — essa semana'},
+  {key:'curto',label:'🟠 Curto prazo — próximas 2 semanas'},
+  {key:'medio',label:'🟡 Médio prazo — esse mês'},
+  {key:'estrutural',label:'🟣 Estrutural — sempre'}
+];
+function renderLiderancaEstrategica(){
+  LIDERANCA_CATS.forEach(cat=>{
+    const el=document.getElementById('lid-list-'+cat.key);
+    if(!el)return;
+    const items=(S.liderancaEstrategias||[]).filter(t=>t.categoria===cat.key);
+    if(!items.length){
+      el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px 0 8px">Nenhuma ação aqui ainda.</div>';
+      return;
+    }
+    el.innerHTML=items.map(t=>`
+      <div class="lid-row" data-key="${t.id}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);touch-action:pan-y">
+        <button onclick="toggleLiderancaTarefa('${t.id}')" style="width:22px;height:22px;border-radius:5px;border:2px solid ${t.done?'var(--ok)':'var(--line)'};background:${t.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;margin-top:6px;display:flex;align-items:center;justify-content:center">${t.done?'<span style="color:#fff;font-size:11px">✓</span>':''}</button>
+        <textarea class="ftext" style="flex:1;min-height:44px;font-size:13px;line-height:1.45;${t.done?'text-decoration:line-through;color:var(--text3)':''}" onblur="salvarLiderancaTexto('${t.id}',this)">${t.texto}</textarea>
+      </div>`).join('');
+    attachSwipeToDelete(el,'.lid-row',id=>removerLiderancaTarefa(id),renderLiderancaEstrategica);
+  });
+  renderLiderancaHome();
+}
+function toggleLiderancaTarefa(id){
+  const t=(S.liderancaEstrategias||[]).find(x=>x.id===id);
+  if(t){t.done=!t.done;save();renderLiderancaEstrategica();}
+}
+function salvarLiderancaTexto(id,el){
+  const t=(S.liderancaEstrategias||[]).find(x=>x.id===id);
+  if(!t)return;
+  const val=el.value.trim();
+  if(!val){removerLiderancaTarefa(id);return;}
+  if(t.texto===val)return;
+  t.texto=val;save();
+}
+function addLiderancaTarefa(categoria){
+  const inp=document.getElementById('lid-add-'+categoria);
+  const texto=inp?.value.trim();
+  if(!texto)return;
+  if(!S.liderancaEstrategias)S.liderancaEstrategias=[];
+  S.liderancaEstrategias.push({id:'lid'+Date.now()+Math.random().toString(36).slice(2,6),categoria,texto,done:false,criadoEm:new Date().toISOString()});
+  inp.value='';
+  save();renderLiderancaEstrategica();
+}
+function removerLiderancaTarefa(id){
+  S.liderancaEstrategias=(S.liderancaEstrategias||[]).filter(t=>t.id!==id);
+  save();renderLiderancaEstrategica();
+}
+function renderLiderancaHome(){
   const el=document.getElementById('home-motiv-content');
   if(!el)return;
-  const wkey=getWeekKey();
-  const data=S.motivacionalHome[wkey]||{};
-  if(!data.idea){
-    el.innerHTML=`<div style="color:var(--text3);font-size:13px">Nenhuma ideia motivacional esta semana.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="navTo('gestao')">Adicionar na Gestão →</button></div>`;
+  const items=S.liderancaEstrategias||[];
+  const pending=items.filter(t=>!t.done);
+  if(!items.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:13px">Nenhuma estratégia cadastrada ainda.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="navTo(\'gestao\')">Adicionar na Gestão →</button></div>';
     return;
   }
-  el.innerHTML=`<div style="font-size:14px;line-height:1.6;color:var(--text)">${data.idea}</div>
-    ${data.results?`<div style="margin-top:8px;font-size:12px;color:var(--text2);border-top:1px solid var(--line);padding-top:8px"><strong>Resultado:</strong> ${data.results}</div>`:''}`;
-}
-function openMotivacionalHome(){navTo('gestao');}
-function saveMotivacionalGestao(){
-  const wkey=getWeekKey();
-  if(!S.motivacionalHome[wkey])S.motivacionalHome[wkey]={};
-  S.motivacionalHome[wkey].idea=document.getElementById('motiv-idea-gestao')?.value||'';
-  S.motivacionalHome[wkey].results=document.getElementById('motiv-results-gestao')?.value||'';
-  save();renderMotivacionalHome();
+  if(!pending.length){
+    el.innerHTML='<div style="color:var(--ok);font-size:13px">✅ Tudo em dia — nenhuma ação pendente.</div>';
+    return;
+  }
+  const imediatos=pending.filter(t=>t.categoria==='imediato');
+  const destaque=imediatos.length?imediatos:pending;
+  el.innerHTML=`
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${pending.length} ação${pending.length!==1?'ões':''} pendente${pending.length!==1?'s':''}${imediatos.length?` · ${imediatos.length} urgente${imediatos.length!==1?'s':''}`:''}</div>
+    ${destaque.slice(0,2).map(t=>`<div style="font-size:13px;line-height:1.5;margin-bottom:8px;padding-left:8px;border-left:2px solid ${t.categoria==='imediato'?'var(--bad)':'var(--info)'}">${t.texto.length>150?t.texto.slice(0,150)+'…':t.texto}</div>`).join('')}
+    <button class="btn btn-ghost btn-xs" onclick="navTo('gestao')">Ver tudo →</button>
+  `;
 }
 
 /* ===========================================================
@@ -8544,12 +8614,7 @@ function renderGestao(){
   renderEventActionList();
   renderTrainings();
   renderPrizePanel();
-  const wkey=getWeekKey();
-  const motiv=S.motivacionalHome[wkey]||{};
-  const ideaEl=document.getElementById('motiv-idea-gestao');
-  const resEl=document.getElementById('motiv-results-gestao');
-  if(ideaEl&&!ideaEl.value)ideaEl.value=motiv.idea||'';
-  if(resEl&&!resEl.value)resEl.value=motiv.results||'';
+  renderLiderancaEstrategica();
   renderModelRequestsSplit();
   renderScheduleRequests();
   renderWeeklyChatAnalysisBoard();
@@ -11697,8 +11762,88 @@ function renderMetricas(){
   const data=buildMetricasData(weekOffset);
   _metricasDataCache=data;
   el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
+  renderMetricasPerformanceMensal();
   renderMetricasTreinamento();
   renderMetricasAnaliseMensal();
+}
+
+/* ===========================================================
+   PERFORMANCE MENSAL POR CHATTER — visão de calendário (não de
+   semana) do faturamento de cada chatter, comparando com o mês
+   anterior e traduzindo a variação numa interpretação em texto —
+   serve pra gestora avaliar a própria liderança olhando quem está
+   evoluindo e quem está caindo, mês a mês.
+   =========================================================== */
+function getChatterMonthRevenue(chatterId,monthKey){
+  let t=0;
+  const prefix=chatterId+'_';
+  Object.keys(S.revenues||{}).forEach(key=>{
+    if(!key.startsWith(prefix))return;
+    const parts=key.split('_');
+    if(parts.length<3)return;
+    const dateKey=parts.slice(2).join('_');
+    if(!dateKey.startsWith(monthKey))return;
+    t+=parseFloat(S.revenues[key])||0;
+  });
+  return t;
+}
+function getChatterMonthExtraRevenue(chatterId,monthKey){
+  let t=0;
+  Object.values(S.horaExtraSlots||{}).forEach(arr=>{
+    (arr||[]).forEach(slot=>{
+      if(slot.chatterId===chatterId&&slot.shiftId==='parsed'&&(slot.dateKey||'').startsWith(monthKey))t+=parseFloat(slot.revenue)||0;
+    });
+  });
+  return t;
+}
+function pmMonthOptions(){
+  const opts=[];
+  const now=new Date();
+  for(let i=0;i<12;i++){
+    const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    opts.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+  }
+  return opts;
+}
+function renderMetricasPerformanceMensal(){
+  const sel=document.getElementById('pm-month-select');
+  if(!sel)return;
+  if(!sel.options.length)sel.innerHTML=pmMonthOptions().map(mk=>`<option value="${mk}">${amMonthLabel(mk)}</option>`).join('');
+  const monthKey=sel.value||pmMonthOptions()[0];
+  const prevKey=amPrevMonthKey(monthKey);
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
+  const rows=chatters.map(c=>{
+    const atual=getChatterMonthRevenue(c.id,monthKey)+getChatterMonthExtraRevenue(c.id,monthKey);
+    const anterior=getChatterMonthRevenue(c.id,prevKey)+getChatterMonthExtraRevenue(c.id,prevKey);
+    const variacao=anterior>0?Math.round(((atual-anterior)/anterior)*100):(atual>0?100:null);
+    return{c,atual,anterior,variacao};
+  }).sort((a,b)=>b.atual-a.atual);
+
+  function interpretar(v,atual){
+    if(v==null)return atual>0?{txt:'🆕 Sem mês anterior pra comparar',color:'var(--text3)'}:{txt:'— sem faturamento registrado',color:'var(--text3)'};
+    if(v>=20)return{txt:'📈 Crescimento forte',color:'var(--ok)'};
+    if(v>=5)return{txt:'📈 Em crescimento',color:'var(--ok)'};
+    if(v>-5)return{txt:'➡️ Estável',color:'var(--text2)'};
+    if(v>-20)return{txt:'📉 Queda moderada — vale atenção',color:'var(--warn)'};
+    return{txt:'📉 Queda acentuada — merece conversa direta',color:'var(--bad)'};
+  }
+
+  const el=document.getElementById('pm-tabela-content');
+  if(!el)return;
+  if(!rows.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre chatters pra ver a performance mensal.</div>';return;}
+  el.innerHTML=`<div style="overflow-x:auto"><table class="rtable">
+    <thead><tr><th>Chatter</th><th style="text-align:right">${amMonthLabel(monthKey)}</th><th style="text-align:right">${amMonthLabel(prevKey)}</th><th style="text-align:right">Variação</th><th>Interpretação</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const interp=interpretar(r.variacao,r.atual);
+      return`<tr>
+        <td>${r.c.name}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${money(r.atual)}</td>
+        <td style="text-align:right;font-family:var(--font-mono);color:var(--text3)">${money(r.anterior)}</td>
+        <td style="text-align:right;font-weight:700;color:${r.variacao==null?'var(--text3)':r.variacao>=0?'var(--ok)':'var(--bad)'}">${r.variacao==null?'—':(r.variacao>=0?'+':'')+r.variacao+'%'}</td>
+        <td style="color:${interp.color};font-size:12.5px">${interp.txt}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
 }
 
 /* ===========================================================
