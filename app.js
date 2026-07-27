@@ -166,6 +166,7 @@ function migrateState(s){
     selecionadosTeste:2,
     obs:''
   }];
+  if(!s.analiseMensal)s.analiseMensal=[]; // [{id,modelId,modelName,monthKey,importadoEm,totalFaturamento,totalVendas,htCount,htTotal,htComissao,htPctVendas,htPctFaturamento,porTipo,whales,porChatter,naoAtribuidoTotal,naoAtribuidoCount}] — Análise Mensal de Vendas (planilhas importadas por modelo, só o resumo calculado é guardado)
   if(!s.turnoLog)s.turnoLog={};
   if(!s.chatters)s.chatters=[];
   if(!s.shifts)s.shifts=[];
@@ -11697,6 +11698,7 @@ function renderMetricas(){
   _metricasDataCache=data;
   el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
   renderMetricasTreinamento();
+  renderMetricasAnaliseMensal();
 }
 
 /* ===========================================================
@@ -11768,6 +11770,271 @@ function renderMetricasTreinamento(){
     </div>`;
   }).join('');
   attachSwipeToDelete(el,'.tm-row',id=>removerTreinamentoMetrica(id),renderMetricasTreinamento);
+}
+
+/* ===========================================================
+   ANÁLISE MENSAL DE VENDAS — importa o extrato de vendas (xlsx) de
+   cada modelo e calcula: total de vendas, high ticket (qtd/valor/%
+   das vendas/% do faturamento/comissão), breakdown por tipo de
+   entrada, ranking de whales (maiores compradores), breakdown por
+   chatter (cruzando o horário de cada venda com a escala de Turno
+   atual + swaps daquele dia específico) e comparativo % vs o mês
+   anterior da mesma modelo. Só guarda o RESUMO calculado por
+   modelo+mês (não as linhas cruas da planilha), pra não pesar o
+   documento do Firestore. Reaproveita gerToMins/gerInIvs (já usados
+   no Gerador) pra bater horário de venda contra intervalo de turno.
+   =========================================================== */
+const AM_HT_MIN=300; // mesmo limiar usado no resto do app pra high ticket
+const AM_TIPOS_CHATTER=['Chat','Mimo - Chat']; // tipos de venda atribuíveis a quem estava conversando (mesma regra do Gerador)
+const AM_DAY_ABBR=['dom','seg','ter','qua','qui','sex','sab'];
+
+function amParseDataCell(val){
+  if(val instanceof Date)return val;
+  if(typeof val==='number')return new Date(Math.round((val-25569)*86400*1000));
+  if(typeof val==='string'){
+    const m=val.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(m)return new Date(+m[3],+m[2]-1,+m[1]);
+  }
+  return null;
+}
+function amParseHoraCell(val){
+  if(val instanceof Date)return String(val.getHours()).padStart(2,'0')+':'+String(val.getMinutes()).padStart(2,'0');
+  if(typeof val==='number'){
+    const totalMin=Math.round(val*24*60);
+    return String(Math.floor(totalMin/60)%24).padStart(2,'0')+':'+String(totalMin%60).padStart(2,'0');
+  }
+  if(typeof val==='string')return val.trim().substring(0,5);
+  return '00:00';
+}
+function amShiftsPorDia(modelId,dateKey){
+  const [y,mo,d]=dateKey.split('-').map(Number);
+  const dow=new Date(y,mo-1,d).getDay();
+  const dayAbbr=AM_DAY_ABBR[dow];
+  const shifts=(S.shifts||[]).filter(s=>(s.modelIds||[]).includes(modelId)&&(s.days||[]).includes(dayAbbr));
+  const swapsForDay=(S.swaps||[]).filter(sw=>sw.date===dateKey);
+  const byChatter={};
+  shifts.forEach(s=>{
+    const gaveAway=swapsForDay.some(sw=>sw.originalId===s.chatterId&&sw.shiftId===s.id);
+    if(gaveAway)return;
+    if(!byChatter[s.chatterId])byChatter[s.chatterId]=[];
+    byChatter[s.chatterId].push(s);
+  });
+  swapsForDay.forEach(sw=>{
+    const orig=(S.shifts||[]).find(s=>s.id===sw.shiftId);
+    if(!(orig&&(orig.modelIds||[]).includes(modelId)))return;
+    if(!byChatter[sw.covererId])byChatter[sw.covererId]=[];
+    byChatter[sw.covererId].push({start:sw.start,end:sw.end,start2:sw.start2||'',end2:sw.end2||''});
+  });
+  return byChatter;
+}
+function amAcharChatter(mins,byChatter){
+  for(const cid in byChatter){
+    const ivs=[];
+    byChatter[cid].forEach(s=>{
+      if(s.start&&s.end)ivs.push({s:s.start,e:s.end});
+      if(s.start2&&s.end2)ivs.push({s:s.start2,e:s.end2});
+    });
+    if(gerInIvs(mins,ivs))return cid;
+  }
+  return null;
+}
+function amMonthLabel(monthKey){
+  const [y,mo]=(monthKey||'').split('-').map(Number);
+  if(!y||!mo)return monthKey||'';
+  const MESES=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  return MESES[mo-1]+'/'+y;
+}
+function amPrevMonthKey(monthKey){
+  const [y,mo]=monthKey.split('-').map(Number);
+  const d=new Date(y,mo-2,1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+
+function importarAnaliseMensal(e){
+  const modelId=document.getElementById('am-model-select')?.value;
+  if(!modelId){toast('⚠️ Selecione a modelo antes de importar.');e.target.value='';return;}
+  const f=e.target.files[0];if(!f)return;
+  if(typeof XLSX==='undefined'){toast('❌ Biblioteca XLSX não carregou — recarregue a página');return;}
+  const r=new FileReader();
+  r.onload=ev=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      processarAnaliseMensal(modelId,rows);
+    }catch(err){console.error(err);toast('❌ Erro ao ler planilha: '+err.message);}
+    e.target.value='';
+  };
+  r.readAsArrayBuffer(f);
+}
+
+function processarAnaliseMensal(modelId,rows){
+  const model=(S.models||[]).find(m=>m.id===modelId);
+  if(!model){toast('⚠️ Modelo não encontrada.');return;}
+  if(!rows.length){toast('⚠️ Planilha vazia.');return;}
+
+  const monthCount={};
+  const parsed=[];
+  rows.forEach(row=>{
+    const situacao=(row['Situação']||row['Situacao']||'').toString().trim();
+    if(situacao&&!/confirmad/i.test(situacao))return; // pula pendente/estornado/etc
+    const dt=amParseDataCell(row['Data']);
+    if(!dt)return;
+    const valor=parseFloat(row['Valor da venda'])||0;
+    if(valor<=0)return;
+    const comissao=parseFloat(row['Sua comissão'])||0;
+    const hora=amParseHoraCell(row['Hora']);
+    const tipo=(row['Tipo de entrada']||'—').toString().trim();
+    const compradorId=(row['ID usuário comprador']||row['Comprador']||'').toString().trim();
+    const compradorNome=(row['Comprador']||compradorId||'—').toString().trim();
+    const dateKey=fmt(dt);
+    const mk=dateKey.slice(0,7);
+    monthCount[mk]=(monthCount[mk]||0)+1;
+    parsed.push({dateKey,hora,valor,comissao,tipo,compradorId,compradorNome});
+  });
+  if(!parsed.length){toast('⚠️ Não encontrei vendas confirmadas nessa planilha.');return;}
+  const monthKey=Object.entries(monthCount).sort((a,b)=>b[1]-a[1])[0][0];
+
+  const totalFaturamento=parsed.reduce((s,v)=>s+v.valor,0);
+  const totalVendas=parsed.length;
+
+  const htSales=parsed.filter(v=>v.valor>=AM_HT_MIN);
+  const htCount=htSales.length;
+  const htTotal=htSales.reduce((s,v)=>s+v.valor,0);
+  const htComissao=htSales.reduce((s,v)=>s+v.comissao,0);
+  const htPctVendas=totalVendas>0?Math.round(htCount/totalVendas*100):0;
+  const htPctFaturamento=totalFaturamento>0?Math.round(htTotal/totalFaturamento*100):0;
+
+  const porTipoMap={};
+  parsed.forEach(v=>{
+    if(!porTipoMap[v.tipo])porTipoMap[v.tipo]={total:0,count:0};
+    porTipoMap[v.tipo].total+=v.valor;porTipoMap[v.tipo].count++;
+  });
+  const porTipo=Object.entries(porTipoMap).map(([tipo,d])=>({tipo,total:d.total,count:d.count,pct:totalFaturamento>0?Math.round(d.total/totalFaturamento*100):0})).sort((a,b)=>b.total-a.total);
+
+  const porCompradorMap={};
+  parsed.forEach(v=>{
+    const key=v.compradorId||v.compradorNome;
+    if(!porCompradorMap[key])porCompradorMap[key]={nome:v.compradorNome,total:0,count:0};
+    porCompradorMap[key].total+=v.valor;porCompradorMap[key].count++;
+    if(v.compradorNome)porCompradorMap[key].nome=v.compradorNome;
+  });
+  const whales=Object.values(porCompradorMap).sort((a,b)=>b.total-a.total).slice(0,8).map(w=>({...w,pct:totalFaturamento>0?Math.round(w.total/totalFaturamento*100):0}));
+
+  const porChatterMap={};
+  let naoAtribuidoTotal=0,naoAtribuidoCount=0;
+  parsed.forEach(v=>{
+    if(!AM_TIPOS_CHATTER.includes(v.tipo))return;
+    const byChatter=amShiftsPorDia(modelId,v.dateKey);
+    const cid=amAcharChatter(gerToMins(v.hora),byChatter);
+    if(!cid){naoAtribuidoTotal+=v.valor;naoAtribuidoCount++;return;}
+    if(!porChatterMap[cid])porChatterMap[cid]={total:0,count:0};
+    porChatterMap[cid].total+=v.valor;porChatterMap[cid].count++;
+  });
+  const porChatter=Object.entries(porChatterMap).map(([cid,d])=>{
+    const c=(S.chatters||[]).find(ch=>ch.id===cid);
+    return{chatterId:cid,chatterName:c?c.name:'(removido)',total:d.total,count:d.count,pctModelo:totalFaturamento>0?Math.round(d.total/totalFaturamento*100):0};
+  }).sort((a,b)=>b.total-a.total);
+
+  const entry={
+    id:'am_'+modelId+'_'+monthKey,
+    modelId,modelName:model.name,monthKey,
+    importadoEm:new Date().toISOString(),
+    totalFaturamento,totalVendas,
+    htCount,htTotal,htComissao,htPctVendas,htPctFaturamento,
+    porTipo,whales,porChatter,
+    naoAtribuidoTotal,naoAtribuidoCount
+  };
+
+  if(!S.analiseMensal)S.analiseMensal=[];
+  const existingIdx=S.analiseMensal.findIndex(a=>a.id===entry.id);
+  if(existingIdx>=0)S.analiseMensal[existingIdx]=entry;
+  else S.analiseMensal.push(entry);
+  save();
+  toast(`✅ ${model.name} — ${amMonthLabel(monthKey)}: ${totalVendas} vendas, ${money(totalFaturamento)}`);
+  window._amModelId=modelId;
+  window._amMonthKey=monthKey;
+  renderMetricasAnaliseMensal();
+}
+
+function renderMetricasAnaliseMensal(){
+  const sel=document.getElementById('am-model-select');
+  if(!sel)return;
+  const cur=window._amModelId||sel.value;
+  sel.innerHTML=(S.models||[]).map(m=>`<option value="${m.id}" ${cur===m.id?'selected':''}>${m.emoji||'🧩'} ${m.name}</option>`).join('')||'<option value="">Cadastre modelos primeiro</option>';
+  if(!cur&&S.models&&S.models.length)window._amModelId=S.models[0].id;
+  onAnaliseMensalModelChange();
+}
+function onAnaliseMensalModelChange(){
+  const sel=document.getElementById('am-model-select');
+  const modelId=sel?.value;
+  window._amModelId=modelId;
+  const monthSel=document.getElementById('am-month-select');
+  const entries=(S.analiseMensal||[]).filter(a=>a.modelId===modelId).sort((a,b)=>b.monthKey.localeCompare(a.monthKey));
+  if(monthSel){
+    monthSel.innerHTML=entries.length?entries.map(a=>`<option value="${a.monthKey}">${amMonthLabel(a.monthKey)}</option>`).join(''):'<option value="">Nenhuma importação ainda</option>';
+    if(window._amMonthKey&&entries.some(a=>a.monthKey===window._amMonthKey))monthSel.value=window._amMonthKey;
+    window._amMonthKey=monthSel.value;
+  }
+  renderAnaliseMensalContent();
+}
+function renderAnaliseMensalContent(){
+  const monthSel=document.getElementById('am-month-select');
+  window._amMonthKey=monthSel?.value;
+  const el=document.getElementById('am-content');
+  if(!el)return;
+  const entry=(S.analiseMensal||[]).find(a=>a.modelId===window._amModelId&&a.monthKey===window._amMonthKey);
+  if(!entry){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:8px 0">Nenhuma planilha importada ainda pra essa modelo — importe o extrato (.xlsx) acima.</div>';
+    return;
+  }
+  const prevEntry=(S.analiseMensal||[]).find(a=>a.modelId===entry.modelId&&a.monthKey===amPrevMonthKey(entry.monthKey));
+  const variacao=prevEntry&&prevEntry.totalFaturamento>0?Math.round(((entry.totalFaturamento-prevEntry.totalFaturamento)/prevEntry.totalFaturamento)*100):null;
+  const totalGeralMes=(S.analiseMensal||[]).filter(a=>a.monthKey===entry.monthKey).reduce((s,a)=>s+a.totalFaturamento,0);
+
+  const statBox=(label,val,sub)=>`<div style="background:var(--bg-soft);border-radius:10px;padding:10px 12px">
+    <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase;letter-spacing:.03em">${label}</div>
+    <div style="font-weight:800;font-family:var(--font-mono);font-size:15px">${val}</div>
+    ${sub?`<div style="font-size:10.5px;color:var(--text3);margin-top:2px">${sub}</div>`:''}
+  </div>`;
+
+  el.innerHTML=`
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Importado em ${new Date(entry.importadoEm).toLocaleDateString('pt-BR')} · atribuição por chatter usa a escala de Turno atual (pode não refletir trocas manuais fora do sistema, ou mudanças de escala desde então)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      ${statBox('Faturamento total',money(entry.totalFaturamento), variacao!=null?`${variacao>=0?'📈':'📉'} ${variacao>=0?'+':''}${variacao}% vs ${amMonthLabel(amPrevMonthKey(entry.monthKey))}`:'sem mês anterior pra comparar')}
+      ${statBox('Total de vendas',entry.totalVendas)}
+      ${statBox('High Ticket (≥ '+money(AM_HT_MIN)+')',entry.htCount+' vendas', `${entry.htPctVendas}% das vendas · ${entry.htPctFaturamento}% do faturamento`)}
+      ${statBox('Comissão em HT',money(entry.htComissao))}
+    </div>
+
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Por tipo de entrada</div>
+    <div style="overflow-x:auto;margin-bottom:14px"><table class="rtable">
+      <thead><tr><th>Tipo</th><th style="text-align:right">Total</th><th style="text-align:right">% faturamento</th><th style="text-align:right">Qtd</th></tr></thead>
+      <tbody>${entry.porTipo.map(t=>`<tr><td>${t.tipo}</td><td style="text-align:right;font-family:var(--font-mono)">${money(t.total)}</td><td style="text-align:right">${t.pct}%</td><td style="text-align:right">${t.count}</td></tr>`).join('')}</tbody>
+    </table></div>
+
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Por chatter (Chat/Mimo-Chat, cruzado com a escala)</div>
+    <div style="overflow-x:auto;margin-bottom:14px"><table class="rtable">
+      <thead><tr><th>Chatter</th><th style="text-align:right">Total</th><th style="text-align:right">% da modelo</th><th style="text-align:right">% do total</th><th style="text-align:right">Qtd</th></tr></thead>
+      <tbody>
+        ${entry.porChatter.map(c=>`<tr><td>${c.chatterName}</td><td style="text-align:right;font-family:var(--font-mono)">${money(c.total)}</td><td style="text-align:right">${c.pctModelo}%</td><td style="text-align:right">${totalGeralMes>0?Math.round(c.total/totalGeralMes*100):0}%</td><td style="text-align:right">${c.count}</td></tr>`).join('')}
+        ${entry.naoAtribuidoCount?`<tr style="color:var(--text3)"><td>Não atribuído (sem turno correspondente)</td><td style="text-align:right;font-family:var(--font-mono)">${money(entry.naoAtribuidoTotal)}</td><td style="text-align:right">${entry.totalFaturamento>0?Math.round(entry.naoAtribuidoTotal/entry.totalFaturamento*100):0}%</td><td style="text-align:right">—</td><td style="text-align:right">${entry.naoAtribuidoCount}</td></tr>`:''}
+      </tbody>
+    </table></div>
+
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🐋 Maiores whales</div>
+    <div style="overflow-x:auto;margin-bottom:10px"><table class="rtable">
+      <thead><tr><th>Comprador</th><th style="text-align:right">Total</th><th style="text-align:right">% faturamento</th><th style="text-align:right">Qtd compras</th></tr></thead>
+      <tbody>${entry.whales.map(w=>`<tr><td>${w.nome}</td><td style="text-align:right;font-family:var(--font-mono)">${money(w.total)}</td><td style="text-align:right">${w.pct}%</td><td style="text-align:right">${w.count}</td></tr>`).join('')}</tbody>
+    </table></div>
+
+    <button class="btn btn-ghost btn-xs" style="color:var(--bad)" onclick="removerAnaliseMensal('${entry.id}')">✕ Remover essa importação</button>
+  `;
+}
+function removerAnaliseMensal(id){
+  if(!confirm('Remover essa análise mensal importada? Essa ação não pode ser desfeita.'))return;
+  S.analiseMensal=(S.analiseMensal||[]).filter(a=>a.id!==id);
+  save();
+  onAnaliseMensalModelChange();
 }
 
 // ---- Perguntar à IA sobre os dados já calculados (opcional, sob demanda) ----

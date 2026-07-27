@@ -1244,6 +1244,24 @@ body{
   </div>
 
   <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📊 Análise Mensal de Vendas</div><div class="panel-note">Importe o extrato de vendas (.xlsx) de cada modelo pra calcular HT, whales, % por chatter e comparar com o mês anterior — usa a escala de Turno atual pra saber quem estava trabalhando em cada horário</div></div>
+    </div>
+    <div class="field">
+      <label class="flabel">Modelo</label>
+      <select class="fselect" id="am-model-select" onchange="onAnaliseMensalModelChange()" style="width:100%"></select>
+    </div>
+    <div class="field">
+      <label class="flabel">Mês importado</label>
+      <select class="fselect" id="am-month-select" onchange="renderAnaliseMensalContent()" style="width:100%"></select>
+    </div>
+    <label class="btn btn-ghost btn-sm" style="cursor:pointer;display:block;text-align:center;margin-top:6px">📂 Importar planilha (.xlsx)
+      <input type="file" accept=".xlsx,.xls" style="display:none" onchange="importarAnaliseMensal(event)">
+    </label>
+    <div id="am-content" style="margin-top:12px"></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-head"><div class="panel-title">🤖 Perguntar à IA sobre esses dados</div></div>
     <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Opcional — a IA só roda quando você pergunta algo, e responde só com base nas tabelas já calculadas acima (não recalcula nada sozinha).</div>
     <textarea id="metricas-ia-input" rows="2" placeholder="Ex: quem está mais dependente de um só chatter essa semana?" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-soft);color:var(--text);font-size:13px;resize:vertical;box-sizing:border-box"></textarea>
