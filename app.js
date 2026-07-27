@@ -151,9 +151,13 @@ function migrateState(s){
   // de recrutamento (não é calculado automaticamente como o resto de
   // Métricas). Semeia o primeiro registro histórico com os números já
   // levantados por ela, só na primeira vez que o app roda (se apagar depois,
-  // não volta sozinho).
+  // não volta sozinho). ID FIXO (não Date.now()) de propósito: migrateState
+  // roda de novo a cada snapshot do Firestore antes do primeiro save
+  // terminar, e o merge de arrays (mergeArraysSafe) dedupe por id — com id
+  // fixo, tentativas repetidas de semear viram o MESMO item em vez de
+  // duplicar o registro a cada sincronização.
   if(!s.treinamentoMetricas)s.treinamentoMetricas=[{
-    id:'tm'+Date.now(),
+    id:'tm-seed-inicial',
     criadoEm:new Date().toISOString(),
     totalInscritos:11,
     enviaramMensagem:4,
