@@ -44,10 +44,12 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 .btn-primary:disabled{opacity:.55;}
 .progress{font-size:11.5px;color:var(--text3);text-align:center;margin-bottom:10px;}
 .error-box{background:var(--bad-soft);color:var(--bad);border-radius:9px;padding:12px;font-size:13px;margin-bottom:14px;}
-.done-box{text-align:center;padding:50px 20px;}
+.done-box{text-align:center;padding:36px 20px 14px;}
 .done-box .emoji{font-size:44px;margin-bottom:14px;}
 .done-box h2{font-size:19px;font-weight:800;margin-bottom:8px;}
 .done-box p{font-size:13.5px;color:var(--text2);}
+.report-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px;}
+.report-box{width:100%;min-height:280px;border:1px solid var(--line-strong);border-radius:var(--r-md);padding:12px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:12px;line-height:1.6;color:var(--text);background:var(--bg-soft);white-space:pre-wrap;resize:vertical;}
 </style>
 </head>
 <body>
@@ -180,6 +182,52 @@ window.setNota=function(critId,val){
   if(!respostas[critId])respostas[critId]={status:'',nota:''};
   respostas[critId].nota=val;
 };
+
+// Monta o relatório "Análise-Padrinhos" formatado pra colar no Discord,
+// a partir das respostas do formulário que o padrinho acabou de preencher.
+function buildAnalisePadrinhos(padrinhoNome,obsGerais){
+  const statusLabel={atende:'✅ Atende',parcial:'⚠️ Parcial',nao:'❌ Não atende'};
+  let atende=0,parcial=0,nao=0;
+  const linhasCriterios=CRITERIOS.map((c,idx)=>{
+    const r=respostas[c.id]||{};
+    if(r.status==='atende')atende++;
+    else if(r.status==='parcial')parcial++;
+    else if(r.status==='nao')nao++;
+    const lab=r.status?statusLabel[r.status]:'— não avaliado';
+    let linha=`${idx+1}. ${c.titulo}: ${lab}`;
+    if(r.nota&&r.nota.trim())linha+=`\n   Obs: ${r.nota.trim()}`;
+    return linha;
+  }).join('\n');
+  const total=CRITERIOS.length;
+  const avaliados=atende+parcial+nao;
+  const dataStr=new Date().toLocaleDateString('pt-BR');
+  const lines=[
+    `📊 ANÁLISE-PADRINHOS — ${chatterNome||'Chatter'}`,
+    `Avaliado por: ${padrinhoNome}`,
+    `Data: ${dataStr}`,
+    '',
+    `Resumo: ✅ ${atende} atende · ⚠️ ${parcial} parcial · ❌ ${nao} não atende  (${avaliados}/${total} critérios avaliados)`,
+    '',
+    linhasCriterios
+  ];
+  if(obsGerais)lines.push('','✍️ Observações gerais:',obsGerais);
+  return lines.join('\n');
+}
+window.copiarAnalise=function(){
+  const ta=document.getElementById('analise-report');
+  const txt=(window._analiseReport||ta?.value||'').trim();
+  if(!txt)return;
+  const btn=document.getElementById('btn-copiar-analise');
+  const marcarCopiado=()=>{ if(btn){btn.textContent='✅ Copiado!';setTimeout(()=>{btn.textContent='📋 Copiar Análise';},1800);} };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(marcarCopiado).catch(()=>{
+      if(!ta)return;
+      ta.removeAttribute('readonly');ta.select();document.execCommand('copy');ta.setAttribute('readonly','');marcarCopiado();
+    });
+  } else if(ta){
+    ta.removeAttribute('readonly');ta.select();document.execCommand('copy');ta.setAttribute('readonly','');marcarCopiado();
+  }
+};
 window.enviarAvaliacao=async function(){
   const btn=document.getElementById('btn-enviar');
   const padrinhoNome=(document.getElementById('padrinho-nome')?.value||'').trim();
@@ -205,10 +253,17 @@ window.enviarAvaliacao=async function(){
       observacoesGerais:obsGerais,
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
+    const relatorio=buildAnalisePadrinhos(padrinhoNome,obsGerais);
+    window._analiseReport=relatorio;
     content.innerHTML=`<div class="done-box">
       <div class="emoji">✅</div>
       <h2>Avaliação enviada!</h2>
       <p>Já foi aplicada automaticamente na página de ${chatterNome||'quem você avaliou'} no Gestor. Obrigado!</p>
+    </div>
+    <div class="card">
+      <div class="report-title">📊 Análise-Padrinhos — cole no canal certo do Discord</div>
+      <textarea class="report-box" id="analise-report" readonly>${relatorio}</textarea>
+      <button class="btn btn-primary" id="btn-copiar-analise" style="margin-top:10px" onclick="copiarAnalise()">📋 Copiar Análise</button>
     </div>`;
   }catch(e){
     console.error(e);

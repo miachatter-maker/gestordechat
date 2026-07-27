@@ -155,8 +155,10 @@ function migrateState(s){
   if(!s.studies)s.studies=[];
   s.chatters=s.chatters.map(c=>({
     level:'junior',discord:'',notes:'',watchtime:'',createdAt:new Date().toISOString(),
-    time:'basico', // 'basico' | 'elite'
-    ...c
+    time:'basico', // 'basico' | 'tester' — 'elite' foi descontinuado (Time Elite só existe hoje dentro do Gerador Elite, em Relatórios, sem precisar marcar o chatter)
+    ...c,
+    // migração: quem ainda estava marcado 'elite' volta pro Time Base — não existe mais botão/tela pra esse status fora de Relatórios
+    ...(c.time==='elite'?{time:'basico'}:{})
   }));
   pruneHeavyData(s);
   return s;
@@ -1105,8 +1107,6 @@ function updateClock(){
   document.getElementById('hd-date').textContent=`${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]}`;
   updateAlarmCountdown();
   checkMidnightGeneration();
-  checkLoginWatch();
-  updateNavDots();
   // Refresh escritório every minute — schedule-based status changes on the minute
   if(now.getSeconds()===0){
     renderEscritorioPanel();
@@ -1114,86 +1114,6 @@ function updateClock(){
   }
 }
 
-// ---------- NAV DOTS (pending indicators) ----------
-function updateNavDots(){
-  const yest=new Date();yest.setDate(yest.getDate()-1);
-  const ykey=fmt(yest);
-  const watchPending=Object.values(S.watchAlerts[todayKey()]||{}).filter(s=>s==='pending').length;
-  const dot=document.getElementById('nav-dot-turno');
-  if(dot)dot.style.display=(watchPending>0)?'block':'none';
-}
-
-/* ===========================================================
-   FEATURE 1 — LOGIN WATCH ALARM (per-chatter)
-   For each chatter with a configured watchtime, fires an
-   internal alarm at that time reminding the manager to check
-   whether the chatter actually logged in.
-   =========================================================== */
-let watchFiredToday=new Set(); // chatterIds already alerted today (in-memory, resets on reload but date-keyed below avoids dup via state)
-
-function checkLoginWatch(){
-  const today=todayKey();
-  const now=new Date();
-  const nowMinutes=now.getHours()*60+now.getMinutes();
-  if(!S.watchAlerts[today])S.watchAlerts[today]={};
-  S.chatters.forEach(c=>{
-    if(!c.watchtime)return;
-    const[wh,wm]=c.watchtime.split(':').map(Number);
-    const watchMinutes=wh*60+wm;
-    // Fire if we're at or up to 10 minutes past the configured time — covers
-    // the case where the app wasn't open at the exact minute the alarm was due.
-    const withinWindow=nowMinutes>=watchMinutes&&nowMinutes<=watchMinutes+10;
-    if(withinWindow){
-      const already=S.watchAlerts[today][c.id];
-      if(!already){
-        S.watchAlerts[today][c.id]='pending';
-        save();
-        toast(`⏰ Checar entrada de ${c.name} (esperado ${c.watchtime})`,6000);
-        renderHome();
-      }
-    }
-  });
-}
-
-function getWatchAlertsToday(){
-  const today=todayKey();
-  const map=S.watchAlerts[today]||{};
-  return Object.entries(map).filter(([id,status])=>status==='pending').map(([id])=>S.chatters.find(c=>c.id===id)).filter(Boolean);
-}
-
-function confirmWatch(chatterId,status){
-  const today=todayKey();
-  if(!S.watchAlerts[today])S.watchAlerts[today]={};
-  S.watchAlerts[today][chatterId]=status;
-  save();
-  renderHome();
-  const c=S.chatters.find(ch=>ch.id===chatterId);
-  toast(status==='confirmed'?`✅ ${c?c.name:'?'} confirmado online`:`⚠️ ${c?c.name:'?'} marcado como atraso`);
-  if(status==='missed'){
-    // also helpful: prefill absence quick log as atraso
-  }
-}
-
-function renderWatchBanner(){
-  const wrap=document.getElementById('home-watch-wrap');
-  if(!wrap)return;
-  const pending=getWatchAlertsToday();
-  if(!pending.length){wrap.innerHTML='';return;}
-  wrap.innerHTML=`<div class="watchbanner">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
-      <span style="font-size:16px">⏰</span><span style="font-weight:700;font-size:13.5px;color:var(--bad)">Checagem de entrada</span>
-    </div>
-    ${pending.map(c=>{
-      const color=getComputedLevelColor(c.level);
-      return`<div class="watchitem">
-        <div style="flex:1"><span style="font-weight:700;font-size:13px">${c.name}</span>
-        <span style="font-family:var(--font-mono);font-size:11px;color:var(--text2);margin-left:6px">esperado ${c.watchtime}</span></div>
-        <button class="btn btn-primary btn-xs" onclick="confirmWatch('${c.id}','confirmed')">✓ Entrou</button>
-        <button class="btn btn-danger btn-xs" onclick="confirmWatch('${c.id}','missed')">✕ Não entrou</button>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
 function getComputedLevelColor(level){
   const map={treinamento:'#6E6AF0',teste:'#8A8A93',junior:'#2F8FE0',pleno:'#C98A1F',senior:'#1F9E6E',padrinho:'#B8860B'};
   return map[level]||'#8A8A93';
@@ -1999,7 +1919,6 @@ function attachSwipeToDelete(container,selector,deleteFn,renderFn){
 }
 
 function renderHome(){
-  renderWatchBanner();
   renderCriticalMetaNotice();
   renderEscritorioPanel();
   renderUrgentPanel();
@@ -3152,7 +3071,6 @@ function renderTeam(filter){
   if(filter!=='all')chatters=chatters.filter(c=>c.level===filter);
   if(!chatters.length){list.innerHTML='<div class="empty"><div class="empty-ic">▦</div><div class="empty-tx">Nenhum chatter encontrado</div></div>';return;}
 
-  const eliteGroup=chatters.filter(c=>c.time==='elite');
   const basicoGroup=chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
 
   const renderCard=c=>{
@@ -3164,25 +3082,21 @@ function renderTeam(filter){
     const status=getChatterStatus(c.id,todayKey());
     const otMins=getChatterOvertimeOn(c.id,todayKey());
     const dotColor=status==='online'?'var(--ok)':status==='overtime'?'var(--warn)':'var(--text3)';
-    const timeBadge=c.time==='elite'?`<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>`:c.time==='tester'?`<span class="pill ${isReserva?'pill-bad':'pill-bad'}" style="font-size:9px">${isReserva?'🔵 Reserva':'🧪 Novatos'}</span>`:`<span class="pill pill-flat" style="font-size:9px">Base</span>`;
+    const timeBadge=c.time==='tester'?`<span class="pill pill-bad" style="font-size:9px">${isReserva?'🔵 Reserva':'🧪 Novatos'}</span>`:`<span class="pill pill-flat" style="font-size:9px">Base</span>`;
     return`<div class="teamcard" onclick="openChatterDetail('${c.id}')" style="${isReserva?'border-left:3px solid var(--bad)':''}">
       <div class="ravatar" style="width:42px;height:42px;background:${color}22;color:${color}">${c.name.slice(0,2).toUpperCase()}</div>
       <div class="rinfo">
         <div style="display:flex;align-items:center;gap:6px"><span class="rname" style="${isReserva?'color:var(--bad)':''}">${c.name}</span><div class="tc-status" style="background:${dotColor}"></div></div>
         <div class="rmeta">${c.discord||''} · ${moneyShort(revWeek)} semana${extraWeek>0?` · ⚡${moneyShort(extraWeek)} extra`:''}${htTotal>0?` · 🎯${avgHtPct}% HT (${moneyShort(htTotal)})`:''}</div>
-        <div class="tmeta-row">${timeBadge}<span class="pill ${LVLCLASS[c.level]}" style="border:1px solid">${c.level}</span>${otMins>0?`<span class="pill pill-warn">+${otMins}min`:''}${c.watchtime?`<span class="pill pill-info">⏰ ${c.watchtime}</span>`:''}</div>
+        <div class="tmeta-row">${timeBadge}<span class="pill ${LVLCLASS[c.level]}" style="border:1px solid">${c.level}</span>${otMins>0?`<span class="pill pill-warn">+${otMins}min`:''}</div>
       </div>
       <span style="color:var(--text3);font-size:18px">›</span>
     </div>`;
   };
 
   let html='';
-  if(eliteGroup.length){
-    html+=`<div style="font-size:11px;font-weight:800;color:var(--warn);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 8px">⭐ Time Elite (${eliteGroup.length})</div>`;
-    html+=eliteGroup.map(renderCard).join('');
-  }
   if(basicoGroup.length){
-    html+=`<div style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:${eliteGroup.length?'16px':'4px'} 0 8px">Time Base (${basicoGroup.length})</div>`;
+    html+=`<div style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 8px">Time Base (${basicoGroup.length})</div>`;
     html+=basicoGroup.map(renderCard).join('');
   }
   list.innerHTML=html;
@@ -3376,12 +3290,8 @@ function openChatterDetail(id){
     <div class="field"><label class="flabel">Time</label>
       <div style="display:flex;gap:8px">
         <button id="dl-time-basico-${id}" onclick="setChatterTime('${id}','basico')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${(c.time||'basico')==='basico'?'var(--info)':'var(--line)'};background:${(c.time||'basico')==='basico'?'var(--info-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${(c.time||'basico')==='basico'?'var(--info)':'var(--text2)'}">Time Base</button>
-        <button id="dl-time-elite-${id}" onclick="setChatterTime('${id}','elite')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${c.time==='elite'?'var(--warn)':'var(--line)'};background:${c.time==='elite'?'var(--warn-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${c.time==='elite'?'var(--warn)':'var(--text2)'}">⭐ Elite</button>
         <button id="dl-time-tester-${id}" onclick="setChatterTime('${id}','tester')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${c.time==='tester'?'var(--bad)':'var(--line)'};background:${c.time==='tester'?'var(--bad-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${c.time==='tester'?'var(--bad)':'var(--text2)'}">🧪 Novatos</button>
       </div>
-    </div>
-    <div class="field"><label class="flabel">⏰ Alarme de checagem de login</label>
-      <input type="time" class="finput" id="dl-watch-${id}" value="${c.watchtime||''}">
     </div>
     <div class="field"><label class="flabel">Mapeamento / notas</label><textarea class="ftext" id="dl-notes-${id}">${c.notes||''}</textarea></div>
     <button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="saveChatterDetail('${id}')">Salvar alterações</button>
@@ -3478,10 +3388,8 @@ function saveChatterDetail(id){
   const c=S.chatters.find(ch=>ch.id===id);if(!c)return;
   const levelEl=document.getElementById('dl-level-'+id);
   const notesEl=document.getElementById('dl-notes-'+id);
-  const watchEl=document.getElementById('dl-watch-'+id);
   if(levelEl)c.level=levelEl.value||c.level;
   if(notesEl)c.notes=notesEl.value; // intentional: allow clearing notes
-  if(watchEl)c.watchtime=watchEl.value; // intentional: allow clearing alarm
   save();toast('✅ Atualizado!');renderTeam(teamFilter);
 }
 function deleteChatter(id){
@@ -4544,8 +4452,8 @@ function saveModel(){
 function deleteModel(id){if(!confirm('Remover modelo?'))return;S.models=S.models.filter(m=>m.id!==id);save();toast('Removido');renderFat();}
 function saveChatter(){
   const name=document.getElementById('ch-name').value.trim();if(!name){toast('⚠️ Nome obrigatório');return;}
-  S.chatters.push({id:'c'+Date.now(),name,discord:document.getElementById('ch-discord').value.trim(),level:document.getElementById('ch-level').value,notes:document.getElementById('ch-notes').value.trim(),watchtime:document.getElementById('ch-watchtime').value,createdAt:new Date().toISOString()});
-  save();closeModal('m-chatter');['ch-name','ch-discord','ch-notes','ch-watchtime'].forEach(id=>document.getElementById(id).value='');
+  S.chatters.push({id:'c'+Date.now(),name,discord:document.getElementById('ch-discord').value.trim(),level:document.getElementById('ch-level').value,notes:document.getElementById('ch-notes').value.trim(),createdAt:new Date().toISOString()});
+  save();closeModal('m-chatter');['ch-name','ch-discord','ch-notes'].forEach(id=>document.getElementById(id).value='');
   toast('✅ Chatter adicionado!');renderTeam(teamFilter);renderHome();
 }
 function saveShift(){
@@ -5414,12 +5322,10 @@ function setChatterTime(chatterId,time){
   c.time=time;
   save();
   const basicoBtn=document.getElementById('dl-time-basico-'+chatterId);
-  const eliteBtn=document.getElementById('dl-time-elite-'+chatterId);
   const testerBtn=document.getElementById('dl-time-tester-'+chatterId);
   if(basicoBtn){basicoBtn.style.borderColor=time==='basico'?'var(--info)':'var(--line)';basicoBtn.style.background=time==='basico'?'var(--info-soft)':'transparent';basicoBtn.style.color=time==='basico'?'var(--info)':'var(--text2)';}
-  if(eliteBtn){eliteBtn.style.borderColor=time==='elite'?'var(--warn)':'var(--line)';eliteBtn.style.background=time==='elite'?'var(--warn-soft)':'transparent';eliteBtn.style.color=time==='elite'?'var(--warn)':'var(--text2)';}
   if(testerBtn){testerBtn.style.borderColor=time==='tester'?'var(--bad)':'var(--line)';testerBtn.style.background=time==='tester'?'var(--bad-soft)':'transparent';testerBtn.style.color=time==='tester'?'var(--bad)':'var(--text2)';}
-  toast(`✅ ${c.name} → ${time==='elite'?'⭐ Elite':time==='tester'?'🧪 Novatos':'Time Base'}`);
+  toast(`✅ ${c.name} → ${time==='tester'?'🧪 Novatos':'Time Base'}`);
   renderTeam(teamFilter);
 }
 
@@ -8324,7 +8230,7 @@ function suggestTrainingText(chatterId){
     // Cruza com a ficha e o diagnóstico do ChatLab pra não depender só de números
     getFichaAndDiagnosisInsights(c.id).forEach(ins=>recs.push(ins));
 
-    const timeLabel=c.time==='elite'?'<span class="pill pill-warn" style="font-size:9px">⭐ Elite</span>':c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>':'';
+    const timeLabel=c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>':'';
 
     html+=`<div class="panel" style="margin-bottom:10px;border-left:3px solid ${pct===null?'var(--line)':pct>=80?'var(--ok)':pct>=50?'var(--warn)':'var(--bad)'}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -9656,14 +9562,6 @@ function relSwitchTab(tab){
 /* ===========================================================
    GERADOR — Discord-paste approach for meu time
    =========================================================== */
-function gerAddChatterMeu(){
-  S.geradorMeu.push({name:'',model:S.models[0]?.name.toUpperCase()||'',intervals:[]});
-  save();renderGerMeuCards();
-}
-function gerAddMeu(){
-  gerAddChatterMeu();
-}
-
 // Interpret entire Discord log at once → populate meu time cards
 function gerInterpretar(){
   const txt=document.getElementById('ger-discord')?.value.trim();
@@ -9760,90 +9658,38 @@ function renderGerador(){
   renderGerMeuCards();
 }
 
+// Total de horas trabalhadas (soma dos intervalos, cuidando de virada de meia-noite)
+function gerCalcTotalMinutos(intervals){
+  return (intervals||[]).reduce((sum,iv)=>{
+    if(!iv.s||!iv.e)return sum;
+    const s=gerToMins(iv.s),e=gerToMins(iv.e);
+    return sum+((e-s+1440)%1440);
+  },0);
+}
+function gerFormatHoras(mins){
+  const h=Math.floor(mins/60),m=mins%60;
+  return h+'h'+(m?' '+String(m).padStart(2,'0')+'min':'');
+}
+
 function renderGerMeuCards(){
   const el=document.getElementById('ger-meu-cards');
   if(!el)return;
   const list=S.geradorMeu||[];
-  if(!list.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:4px 0">Clique em + chatter para adicionar</div>';return;}
-  el.innerHTML=list.map((c,ci)=>`
-    <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px">
-      <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
-        <input class="finput" style="flex:2" placeholder="Nome" value="${c.name||''}" list="ger-namelist"
-          onblur="S.geradorMeu[${ci}].name=this.value;save();">
-        <select class="fselect" style="flex:1"
-          onchange="S.geradorMeu[${ci}].model=this.value;save();">
-          ${S.models.map(m=>`<option value="${m.name.toUpperCase()}" ${(c.model||'')===(m.name.toUpperCase())?'selected':''}>${m.name}</option>`).join('')}
-        </select>
-        <button onclick="S.geradorMeu.splice(${ci},1);save();renderGerMeuCards();"
-          style="background:none;border:none;color:var(--bad);cursor:pointer;font-size:16px;flex-shrink:0">✕</button>
+  if(!list.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:4px 0">Cole o log do Discord acima e clique em Interpretar</div>';return;}
+  el.innerHTML=list.map((c,ci)=>{
+    const mins=gerCalcTotalMinutos(c.intervals);
+    const extraMins=gerCalcTotalMinutos((c.intervals||[]).filter(iv=>iv.extra));
+    return `
+    <div style="background:var(--bg-soft);border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13.5px">${c.name||'(sem nome)'}</div>
+        <div style="font-size:11px;color:var(--text3)">${c.model||''}${extraMins?' · ⚡ '+gerFormatHoras(extraMins)+' extra':''}</div>
       </div>
-      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:4px">📋 Entradas/saídas do Discord</div>
-      <textarea class="ftext" style="min-height:80px;font-size:12px;font-family:var(--font-mono)"
-        placeholder="Cole aqui as entradas/saídas do Discord para ${c.name||'este chatter'}&#10;Ex:&#10;Guilherme — Ontem às 23:00&#10;ON (Momoi)&#10;Guilherme — Ontem às 07:02&#10;OFF (Momoi)"
-        onblur="S.geradorMeu[${ci}].discordRaw=this.value;save();">${c.discordRaw||''}</textarea>
-      <button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="gerInterpretarDiscord(${ci})">🔄 Interpretar entradas</button>
-      ${(c.intervals&&c.intervals.length)?`<div style="margin-top:8px">`+c.intervals.map((iv,ii)=>`
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
-          <input class="finput" style="width:82px;font-family:var(--font-mono)" placeholder="início" value="${iv.s||''}"
-            onblur="S.geradorMeu[${ci}].intervals[${ii}].s=this.value;save();">
-          <span style="color:var(--text3);font-size:12px">às</span>
-          <input class="finput" style="width:82px;font-family:var(--font-mono)" placeholder="fim" value="${iv.e||''}"
-            onblur="S.geradorMeu[${ci}].intervals[${ii}].e=this.value;save();">
-          <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text2);cursor:pointer;flex-shrink:0">
-            <input type="checkbox" style="width:auto" ${iv.extra?'checked':''}
-              onchange="S.geradorMeu[${ci}].intervals[${ii}].extra=this.checked;save();">⚡extra
-          </label>
-          <button onclick="S.geradorMeu[${ci}].intervals.splice(${ii},1);save();renderGerMeuCards();"
-            style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
-        </div>`).join('')+`
-        <button class="btn btn-ghost btn-xs" onclick="S.geradorMeu[${ci}].intervals.push({s:'',e:'',extra:false});save();renderGerMeuCards();">+ intervalo</button>
-        </div>`:
-        '<div style="font-size:11.5px;color:var(--text3);margin-top:6px">Cole o Discord acima e clique Interpretar — ou adicione os horários manualmente</div>'}
-    </div>`).join('')+`<datalist id="ger-namelist">${S.chatters.map(c=>`<option value="${c.name}">`).join('')}</datalist>`;
-}
-
-function gerInterpretarDiscord(ci){
-  const c=S.geradorMeu[ci];
-  if(!c||!c.discordRaw?.trim()){toast('⚠️ Cole o texto do Discord primeiro');return;}
-  const parsed=gerParseDiscord(c.discordRaw);
-  // Merge intervals (keep existing manual entries)
-  if(parsed.length){
-    c.intervals=parsed;
-    save();renderGerMeuCards();
-    toast('✅ '+parsed.length+' intervalo(s) interpretado(s)');
-  } else {
-    toast('⚠️ Não encontrei entradas/saídas no texto');
-  }
-}
-
-function gerParseDiscord(txt){
-  const lines=txt.split('\n').map(l=>l.trim()).filter(Boolean);
-  const events=[];
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-    const next=lines[i+1]||'';
-    const timeM=line.match(/(\d{1,2}:\d{2})/);
-    if(!timeM)continue;
-    const time=timeM[1].padStart(5,'0');
-    const onOffLine=(/\bON\b/i.test(next)||/\bOFF\b/i.test(next))?next:line;
-    const isOn=/\bON\b/i.test(onOffLine);
-    const isOff=/\bOFF\b/i.test(onOffLine);
-    const extra=/hora\s*extra|extra/i.test(onOffLine);
-    if(isOn||isOff) events.push({time,isOn,isOff,extra});
-  }
-  const intervals=[];
-  let pending=null;
-  for(const e of events){
-    if(e.isOn){
-      pending={s:e.time,e:'',extra:e.extra};
-    } else if(e.isOff&&pending){
-      pending.e=e.time;
-      intervals.push(pending);
-      pending=null;
-    }
-  }
-  if(pending)intervals.push(pending); // open-ended
-  return intervals;
+      <div style="font-family:var(--font-mono);font-weight:800;color:var(--ok);font-size:13.5px;flex-shrink:0">${mins?gerFormatHoras(mins):'—'}</div>
+      <button onclick="S.geradorMeu.splice(${ci},1);save();renderGerMeuCards();"
+        style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;flex-shrink:0">✕</button>
+    </div>`;
+  }).join('');
 }
 
 /* ===========================================================
@@ -10488,7 +10334,15 @@ function setAfilhadoClaimDecision(claimId,decision){
   if(decision==='aprovado'){
     if(!S.chatterFichas[cl.testerId])S.chatterFichas[cl.testerId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
     S.chatterFichas[cl.testerId].padrinhoId=cl.padrinhoId;
-    toast(`✅ ${cl.padrinhoNome} aprovado como padrinho de ${cl.testerNome} — o botão de avaliação já libera pra ele no link de tarefas.`);
+    const testerChatter=S.chatters.find(ch=>ch.id===cl.testerId);
+    if(testerChatter)testerChatter.time='tester'; // confirma/promove pra área de Tester
+    // aprovado: sai do quadro de solicitações (mesmo comportamento de reprovado)
+    S.afilhadoClaims=S.afilhadoClaims.filter(c=>c.id!==claimId);
+    save();
+    toast(`✅ ${cl.padrinhoNome} aprovado como padrinho de ${cl.testerNome} — ele foi pra área de Tester e a solicitação saiu da lista.`);
+    renderAfilhadoClaims();
+    renderTeam(teamFilter);
+    return;
   } else {
     toast(`🔵 Solicitação de ${cl.padrinhoNome} por ${cl.testerNome} colocada em reservado.`);
   }

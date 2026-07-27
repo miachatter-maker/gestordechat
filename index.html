@@ -441,9 +441,6 @@ body{
     <div id="home-smart-alerts"></div>
   </div>
 
-  <!-- WATCH -->
-  <div id="home-watch-wrap"></div>
-
   <!-- MOTIVACIONAL -->
   <div class="panel" id="home-motiv-panel">
     <div class="panel-head"><div class="panel-title">💡 Motivacional da semana</div><button class="btn btn-ghost btn-xs" onclick="openMotivacionalHome()">editar</button></div>
@@ -781,7 +778,6 @@ body{
     <div class="panel">
       <div class="panel-head">
         <div><div class="panel-title">👥 Meu time</div><div class="panel-note">Cole o log do Discord e clique em Interpretar</div></div>
-        <button class="btn btn-ghost btn-xs" onclick="gerAddMeu()">+ manual</button>
       </div>
       <div class="field">
         <label class="flabel">Log do Discord</label>
@@ -1308,7 +1304,7 @@ body{
   <button class="navbtn active" data-go="home"><span class="navbtn-ic">⌂</span><span class="navbtn-lb">Painel</span></button>
   <button class="navbtn" data-go="gestao"><span class="navbtn-ic">🗓</span><span class="navbtn-lb">Agenda</span></button>
   <button class="navbtn" data-go="fat"><span class="navbtn-ic">¤</span><span class="navbtn-lb">Fat.</span></button>
-  <button class="navbtn" data-go="turno"><span class="navbtn-ic">⇄</span><span class="navbtn-lb">Turno</span><span class="navbtn-dot" id="nav-dot-turno" style="display:none"></span></button>
+  <button class="navbtn" data-go="turno"><span class="navbtn-ic">⇄</span><span class="navbtn-lb">Turno</span></button>
   <button class="navbtn" data-go="time"><span class="navbtn-ic">▦</span><span class="navbtn-lb">Equipe</span></button>
   <button class="navbtn" data-go="fichas"><span class="navbtn-ic">👤</span><span class="navbtn-lb">Fichas</span></button>
   <button class="navbtn" data-go="extra"><span class="navbtn-ic">⚡</span><span class="navbtn-lb">H.Extra</span></button>
@@ -1429,10 +1425,6 @@ body{
     </select>
   </div>
   <div class="field"><label class="flabel">Notas</label><textarea class="ftext" id="ch-notes" placeholder="Observações..."></textarea></div>
-  <div class="field"><label class="flabel">Alarme de checagem de login</label>
-    <input type="time" class="finput" id="ch-watchtime" placeholder="Horário esperado de entrada">
-    <div style="font-size:11px;color:var(--text3);margin-top:6px">Você será avisado neste horário para verificar se ele entrou</div>
-  </div>
   <div class="modalbtns"><button class="btn btn-ghost btn-block" onclick="closeModal('m-chatter')">Cancelar</button><button class="btn btn-primary btn-block" onclick="saveChatter()">Adicionar</button></div>
 </div></div>
 
