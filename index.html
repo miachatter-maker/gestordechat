@@ -918,37 +918,41 @@ body{
     <div class="panel-head"><div class="panel-title" style="color:var(--info)">🧭 Estratégias de Liderança</div></div>
     <div class="view-sub" style="margin:-4px 0 10px">Ações organizadas por prazo — marque como feita, edite o texto (o campo salva sozinho ao clicar fora) ou adicione novas conforme a situação de cada chatter mudar</div>
     <div id="lideranca-board">
-      <div style="margin-bottom:16px">
+      <div style="margin-bottom:18px">
         <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🔴 Imediato — essa semana</div>
         <div id="lid-list-imediato"></div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <input class="finput" id="lid-add-imediato" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('imediato')">
-          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('imediato')">+</button>
+        <div id="lid-addrow-imediato" style="display:none;gap:6px;margin-top:8px">
+          <input class="finput" id="lid-add-imediato" placeholder="Nova ação..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addLiderancaTarefa('imediato');}">
+          <button class="btn btn-primary btn-sm" onclick="addLiderancaTarefa('imediato')">Adicionar</button>
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%" onclick="toggleLidAddForm('imediato')">+ adicionar ação</button>
       </div>
-      <div style="margin-bottom:16px">
+      <div style="margin-bottom:18px">
         <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟠 Curto prazo — próximas 2 semanas</div>
         <div id="lid-list-curto"></div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <input class="finput" id="lid-add-curto" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('curto')">
-          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('curto')">+</button>
+        <div id="lid-addrow-curto" style="display:none;gap:6px;margin-top:8px">
+          <input class="finput" id="lid-add-curto" placeholder="Nova ação..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addLiderancaTarefa('curto');}">
+          <button class="btn btn-primary btn-sm" onclick="addLiderancaTarefa('curto')">Adicionar</button>
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%" onclick="toggleLidAddForm('curto')">+ adicionar ação</button>
       </div>
-      <div style="margin-bottom:16px">
+      <div style="margin-bottom:18px">
         <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟡 Médio prazo — esse mês</div>
         <div id="lid-list-medio"></div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <input class="finput" id="lid-add-medio" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('medio')">
-          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('medio')">+</button>
+        <div id="lid-addrow-medio" style="display:none;gap:6px;margin-top:8px">
+          <input class="finput" id="lid-add-medio" placeholder="Nova ação..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addLiderancaTarefa('medio');}">
+          <button class="btn btn-primary btn-sm" onclick="addLiderancaTarefa('medio')">Adicionar</button>
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%" onclick="toggleLidAddForm('medio')">+ adicionar ação</button>
       </div>
       <div>
         <div style="font-size:12px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟣 Estrutural — sempre</div>
         <div id="lid-list-estrutural"></div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <input class="finput" id="lid-add-estrutural" placeholder="Adicionar ação..." style="flex:1" onkeydown="if(event.key==='Enter')addLiderancaTarefa('estrutural')">
-          <button class="btn btn-soft btn-sm" onclick="addLiderancaTarefa('estrutural')">+</button>
+        <div id="lid-addrow-estrutural" style="display:none;gap:6px;margin-top:8px">
+          <input class="finput" id="lid-add-estrutural" placeholder="Nova ação..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addLiderancaTarefa('estrutural');}">
+          <button class="btn btn-primary btn-sm" onclick="addLiderancaTarefa('estrutural')">Adicionar</button>
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%" onclick="toggleLidAddForm('estrutural')">+ adicionar ação</button>
       </div>
     </div>
   </div>

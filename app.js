@@ -7374,13 +7374,18 @@ function renderLiderancaEstrategica(){
       return;
     }
     el.innerHTML=items.map(t=>`
-      <div class="lid-row" data-key="${t.id}" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);touch-action:pan-y">
+      <div class="lid-row" data-key="${t.id}" style="display:flex;align-items:flex-start;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);touch-action:pan-y">
         <button onclick="toggleLiderancaTarefa('${t.id}')" style="width:22px;height:22px;border-radius:5px;border:2px solid ${t.done?'var(--ok)':'var(--line)'};background:${t.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;margin-top:6px;display:flex;align-items:center;justify-content:center">${t.done?'<span style="color:#fff;font-size:11px">✓</span>':''}</button>
-        <textarea class="ftext" style="flex:1;min-height:44px;font-size:13px;line-height:1.45;${t.done?'text-decoration:line-through;color:var(--text3)':''}" onblur="salvarLiderancaTexto('${t.id}',this)">${t.texto}</textarea>
+        <textarea class="ftext lid-textarea" style="flex:1;font-size:13.5px;line-height:1.5;resize:none;overflow:hidden;${t.done?'text-decoration:line-through;color:var(--text3)':''}" onblur="salvarLiderancaTexto('${t.id}',this)" oninput="lidAutoGrow(this)">${t.texto}</textarea>
       </div>`).join('');
     attachSwipeToDelete(el,'.lid-row',id=>removerLiderancaTarefa(id),renderLiderancaEstrategica);
+    el.querySelectorAll('.lid-textarea').forEach(ta=>lidAutoGrow(ta));
   });
   renderLiderancaHome();
+}
+function lidAutoGrow(el){
+  el.style.height='auto';
+  el.style.height=(el.scrollHeight+2)+'px';
 }
 function toggleLiderancaTarefa(id){
   const t=(S.liderancaEstrategias||[]).find(x=>x.id===id);
@@ -7394,6 +7399,16 @@ function salvarLiderancaTexto(id,el){
   if(t.texto===val)return;
   t.texto=val;save();
 }
+function toggleLidAddForm(categoria){
+  const row=document.getElementById('lid-addrow-'+categoria);
+  if(!row)return;
+  const showing=row.style.display==='flex';
+  row.style.display=showing?'none':'flex';
+  if(!showing){
+    const inp=document.getElementById('lid-add-'+categoria);
+    if(inp)inp.focus();
+  }
+}
 function addLiderancaTarefa(categoria){
   const inp=document.getElementById('lid-add-'+categoria);
   const texto=inp?.value.trim();
@@ -7401,6 +7416,8 @@ function addLiderancaTarefa(categoria){
   if(!S.liderancaEstrategias)S.liderancaEstrategias=[];
   S.liderancaEstrategias.push({id:'lid'+Date.now()+Math.random().toString(36).slice(2,6),categoria,texto,done:false,criadoEm:new Date().toISOString()});
   inp.value='';
+  const row=document.getElementById('lid-addrow-'+categoria);
+  if(row)row.style.display='none';
   save();renderLiderancaEstrategica();
 }
 function removerLiderancaTarefa(id){
