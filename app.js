@@ -147,6 +147,21 @@ function migrateState(s){
   if(!s.revenues)s.revenues={};
   if(!s.models)s.models=[];
   if(!s.quickNotes)s.quickNotes=[];
+  // Métricas de Treinamento — preenchidas manualmente pela gestora por turma
+  // de recrutamento (não é calculado automaticamente como o resto de
+  // Métricas). Semeia o primeiro registro histórico com os números já
+  // levantados por ela, só na primeira vez que o app roda (se apagar depois,
+  // não volta sozinho).
+  if(!s.treinamentoMetricas)s.treinamentoMetricas=[{
+    id:'tm'+Date.now(),
+    criadoEm:new Date().toISOString(),
+    totalInscritos:11,
+    enviaramMensagem:4,
+    confirmaram:3,
+    apareceram:7,
+    selecionadosTeste:2,
+    obs:''
+  }];
   if(!s.turnoLog)s.turnoLog={};
   if(!s.chatters)s.chatters=[];
   if(!s.shifts)s.shifts=[];
@@ -156,6 +171,7 @@ function migrateState(s){
   s.chatters=s.chatters.map(c=>({
     level:'junior',discord:'',notes:'',watchtime:'',createdAt:new Date().toISOString(),
     time:'basico', // 'basico' | 'tester' — 'elite' foi descontinuado (Time Elite só existe hoje dentro do Gerador Elite, em Relatórios, sem precisar marcar o chatter)
+    pendenteAprovacao:false, // true = virou Tester mas ainda não teve a solicitação de Afilhado aprovada (só aparece nas Tarefas, não em Testers/Equipe)
     ...c,
     // migração: quem ainda estava marcado 'elite' volta pro Time Base — não existe mais botão/tela pra esse status fora de Relatórios
     ...(c.time==='elite'?{time:'basico'}:{})
@@ -953,6 +969,7 @@ function setWeekOffset(o){
   if(v==='semana')renderSemana();
   if(v==='report')renderReport_Weekly();
   if(v==='evolucao')renderEvolucao();
+  if(v==='metricas')renderMetricas();
   if(v==='fichas'){const sel=document.getElementById('ficha-chatter-select');if(sel&&sel.value)renderFichaChatter(sel.value);}
   renderWeekNav();
 }
@@ -3082,7 +3099,7 @@ function renderTeam(filter){
     const status=getChatterStatus(c.id,todayKey());
     const otMins=getChatterOvertimeOn(c.id,todayKey());
     const dotColor=status==='online'?'var(--ok)':status==='overtime'?'var(--warn)':'var(--text3)';
-    const timeBadge=c.time==='tester'?`<span class="pill pill-bad" style="font-size:9px">${isReserva?'🔵 Reserva':'🧪 Novatos'}</span>`:`<span class="pill pill-flat" style="font-size:9px">Base</span>`;
+    const timeBadge=c.time==='tester'?`<span class="pill pill-bad" style="font-size:9px">${isReserva?'🔵 Reserva':'🧪 Tester'}</span>`:`<span class="pill pill-flat" style="font-size:9px">Base</span>`;
     return`<div class="teamcard" onclick="openChatterDetail('${c.id}')" style="${isReserva?'border-left:3px solid var(--bad)':''}">
       <div class="ravatar" style="width:42px;height:42px;background:${color}22;color:${color}">${c.name.slice(0,2).toUpperCase()}</div>
       <div class="rinfo">
@@ -3290,7 +3307,7 @@ function openChatterDetail(id){
     <div class="field"><label class="flabel">Time</label>
       <div style="display:flex;gap:8px">
         <button id="dl-time-basico-${id}" onclick="setChatterTime('${id}','basico')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${(c.time||'basico')==='basico'?'var(--info)':'var(--line)'};background:${(c.time||'basico')==='basico'?'var(--info-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${(c.time||'basico')==='basico'?'var(--info)':'var(--text2)'}">Time Base</button>
-        <button id="dl-time-tester-${id}" onclick="setChatterTime('${id}','tester')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${c.time==='tester'?'var(--bad)':'var(--line)'};background:${c.time==='tester'?'var(--bad-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${c.time==='tester'?'var(--bad)':'var(--text2)'}">🧪 Novatos</button>
+        <button id="dl-time-tester-${id}" onclick="setChatterTime('${id}','tester')" style="flex:1;padding:8px;border-radius:8px;border:2px solid ${c.time==='tester'?'var(--bad)':'var(--line)'};background:${c.time==='tester'?'var(--bad-soft)':'transparent'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:12.5px;color:${c.time==='tester'?'var(--bad)':'var(--text2)'}">🧪 Tester</button>
       </div>
     </div>
     <div class="field"><label class="flabel">Mapeamento / notas</label><textarea class="ftext" id="dl-notes-${id}">${c.notes||''}</textarea></div>
@@ -5320,13 +5337,19 @@ function setChatterTime(chatterId,time){
   const c=S.chatters.find(ch=>ch.id===chatterId);
   if(!c)return;
   c.time=time;
+  // Virar Tester manualmente também exige aprovação da solicitação de
+  // Afilhado antes de contar como Tester de fato (mesma regra do botão de
+  // criar tester no Mapeamento) — só sai do quadro de pendente quando a
+  // gestora aprovar em Solicitação de Afilhado.
+  c.pendenteAprovacao=time==='tester';
   save();
   const basicoBtn=document.getElementById('dl-time-basico-'+chatterId);
   const testerBtn=document.getElementById('dl-time-tester-'+chatterId);
   if(basicoBtn){basicoBtn.style.borderColor=time==='basico'?'var(--info)':'var(--line)';basicoBtn.style.background=time==='basico'?'var(--info-soft)':'transparent';basicoBtn.style.color=time==='basico'?'var(--info)':'var(--text2)';}
   if(testerBtn){testerBtn.style.borderColor=time==='tester'?'var(--bad)':'var(--line)';testerBtn.style.background=time==='tester'?'var(--bad-soft)':'transparent';testerBtn.style.color=time==='tester'?'var(--bad)':'var(--text2)';}
-  toast(`✅ ${c.name} → ${time==='tester'?'🧪 Novatos':'Time Base'}`);
+  toast(`✅ ${c.name} → ${time==='tester'?'🧪 Tester (aguardando aprovação do padrinho)':'Time Base'}`);
   renderTeam(teamFilter);
+  renderTesters();
 }
 
 
@@ -6543,7 +6566,10 @@ function renderMapeamentoNovosPool(){
             ${Array.isArray(r.motivadores)&&r.motivadores.length?`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">🎯 Motivadores: ${r.motivadores.join(', ')}</div>`:''}
             ${r.riscoDetectado?`<div style="font-size:12.5px;color:var(--bad);font-weight:700;margin-top:6px">⚠️ RISCO: ${r.motivoRisco||''}</div>`:''}
             <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">${r.resumo||''}</div>
-            <button class="btn btn-primary btn-xs" style="margin-top:9px" onclick="criarTesterDoMapeamentoNovo('${r.nome.replace(/'/g,"\\'")}')">➕ Criar tester com esse nome</button>
+            <div style="display:flex;gap:8px;margin-top:9px">
+              <button class="btn btn-primary btn-xs" style="flex:1" onclick="criarTesterDoMapeamentoNovo('${r.nome.replace(/'/g,"\\'")}')">➕ Criar tester com esse nome</button>
+              <button class="btn btn-ghost btn-xs" title="Eliminar esse candidato do mapeamento" onclick="event.stopPropagation();removerMapeamentoNovoResultado('${b.id}','${r.id}')" style="color:var(--bad);flex-shrink:0">✕</button>
+            </div>
           </div>`;
         }).join('')}
       </div>
@@ -6559,10 +6585,23 @@ function toggleMapeamentoNovosBatch(id){
 }
 function criarTesterDoMapeamentoNovo(nome){
   const chatterId='c'+Date.now();
-  S.chatters.push({id:chatterId,name:nome||'Novo candidato',discord:'',level:'teste',time:'tester',notes:'',watchtime:'',createdAt:new Date().toISOString()});
+  // Ainda não é Tester "oficial" — só aparece nas Tarefas (tarefas-novato.html,
+  // que filtra por time==='tester') pra começar a fazer Sexta/Sábado/Domingo e
+  // ser reivindicado por um padrinho. Só vira Tester de fato (aparece aqui em
+  // Testers/Equipe) quando a gestora aprovar a solicitação de Afilhado.
+  S.chatters.push({id:chatterId,name:nome||'Novo candidato',discord:'',level:'teste',time:'tester',pendenteAprovacao:true,notes:'',watchtime:'',createdAt:new Date().toISOString()});
   save();
-  toast('✅ '+(nome||'Candidato')+' criado como tester!');
+  toast('✅ '+(nome||'Candidato')+' adicionado às Tarefas — vira Tester quando o padrinho for aprovado!');
   renderTesters();
+}
+function removerMapeamentoNovoResultado(batchId,resultId){
+  const batch=S.mapeamentoBatches.find(b=>b.id===batchId);
+  if(!batch)return;
+  if(!confirm('Eliminar esse candidato do mapeamento? Essa ação não pode ser desfeita.'))return;
+  batch.results=(batch.results||[]).filter(r=>r.id!==resultId);
+  if(!batch.results.length)S.mapeamentoBatches=S.mapeamentoBatches.filter(b=>b.id!==batchId);
+  save();
+  renderMapeamentoNovosPool();
 }
 
 function renderTriagemPool(){
@@ -8230,7 +8269,7 @@ function suggestTrainingText(chatterId){
     // Cruza com a ficha e o diagnóstico do ChatLab pra não depender só de números
     getFichaAndDiagnosisInsights(c.id).forEach(ins=>recs.push(ins));
 
-    const timeLabel=c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Novatos</span>':'';
+    const timeLabel=c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Tester</span>':'';
 
     html+=`<div class="panel" style="margin-bottom:10px;border-left:3px solid ${pct===null?'var(--line)':pct>=80?'var(--ok)':pct>=50?'var(--warn)':'var(--bad)'}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -9115,8 +9154,8 @@ async function refazerAnaliseInvertida(analysisId,btnEl){
    pelo próprio chatter (link público chatlab-chatter.html) — os dois
    lados enxergam o mesmo relatório assim que qualquer um gera.
    =========================================================== */
-function coletarAnalisesDaSemana(cid){
-  const wd=getWeekDates(0); // sempre a semana ATUAL (segunda a domingo), não a que estiver navegando na tela
+function coletarAnalisesDaSemana(cid,offset){
+  const wd=getWeekDates(offset!==undefined?offset:0); // por padrão sempre a semana ATUAL — só Métricas passa offset explícito pra seguir a navegação de semana da tela
   const start=wd[0];
   const end=new Date(wd[6]);end.setHours(23,59,59,999);
   return(S.chatlabAnalyses||[])
@@ -10335,13 +10374,17 @@ function setAfilhadoClaimDecision(claimId,decision){
     if(!S.chatterFichas[cl.testerId])S.chatterFichas[cl.testerId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
     S.chatterFichas[cl.testerId].padrinhoId=cl.padrinhoId;
     const testerChatter=S.chatters.find(ch=>ch.id===cl.testerId);
-    if(testerChatter)testerChatter.time='tester'; // confirma/promove pra área de Tester
+    if(testerChatter){
+      testerChatter.time='tester'; // confirma/promove pra área de Tester
+      testerChatter.pendenteAprovacao=false; // sai do limbo — agora conta como Tester de verdade
+    }
     // aprovado: sai do quadro de solicitações (mesmo comportamento de reprovado)
     S.afilhadoClaims=S.afilhadoClaims.filter(c=>c.id!==claimId);
     save();
     toast(`✅ ${cl.padrinhoNome} aprovado como padrinho de ${cl.testerNome} — ele foi pra área de Tester e a solicitação saiu da lista.`);
     renderAfilhadoClaims();
     renderTeam(teamFilter);
+    renderTesters();
     return;
   } else {
     toast(`🔵 Solicitação de ${cl.padrinhoNome} por ${cl.testerNome} colocada em reservado.`);
@@ -10378,8 +10421,13 @@ function renderTesters(){
   renderMapeamentoNovosPool();
   renderAfilhadoClaims();
   const sel=document.getElementById('tester-select');
-  // Pool: quem está marcado Novatos AGORA, + quem já teve alguma decisão registrada (mantém histórico mesmo após aprovar)
-  const testers=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
+  // Pool: quem está marcado Tester AGORA e já foi aprovado (não é mais só
+  // pendente de aprovação da solicitação de Afilhado), + quem já teve
+  // alguma decisão registrada (mantém histórico mesmo após aprovar).
+  // Enquanto pendenteAprovacao=true, a pessoa só aparece nas Tarefas
+  // (tarefas-novato.html) — vira Tester aqui só quando a gestora aprovar
+  // a solicitação do padrinho em Solicitação de Afilhado.
+  const testers=S.chatters.filter(c=>(c.time==='tester'&&!c.pendenteAprovacao)||S.chatterFichas?.[c.id]?.testerDecision);
   if(sel){
     const cur=sel.value;
     sel.innerHTML='<option value="">— ver todos —</option>'+
@@ -10396,7 +10444,7 @@ function renderTesters(){
   }
 
   if(!testers.length){
-    el.innerHTML=`<div class="empty"><div class="empty-ic">🧪</div><div class="empty-ttl">Sem novatos em teste</div><div class="empty-sub">Vá em Equipe e marque chatters como 🧪 Novatos</div></div>`;
+    el.innerHTML=`<div class="empty"><div class="empty-ic">🧪</div><div class="empty-ttl">Sem testers em avaliação</div><div class="empty-sub">Crie um tester em Mapeamento dos Novos ou marque um chatter como 🧪 Tester em Equipe — ele aparece aqui depois que a solicitação de Afilhado for aprovada</div></div>`;
     return;
   }
 
@@ -11478,20 +11526,21 @@ function fmtPctSigned(v){return v==null?'—':`${v>0?'+':''}${Math.round(v)}%`;}
 
 // Monta TODOS os dados derivados de uma vez (matemática pura, sem IA) — as
 // funções de render só formatam o que já está aqui.
-function buildMetricasData(){
-  const wkey=getWeekKey(0);
+function buildMetricasData(offset){
+  const o=offset!==undefined?offset:weekOffset;
+  const wkey=getWeekKey(o);
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
 
   const perChatter=chatters.map(c=>{
-    const fat=getChatterWeekRevenue(c.id,0);
-    const extraFat=getChatterExtraRevenue(c.id,0);
+    const fat=getChatterWeekRevenue(c.id,o);
+    const extraFat=getChatterExtraRevenue(c.id,o);
     const fatAtual=fat+extraFat;
-    const fatAnterior=getChatterWeekRevenue(c.id,-1)+getChatterExtraRevenue(c.id,-1);
+    const fatAnterior=getChatterWeekRevenue(c.id,o-1)+getChatterExtraRevenue(c.id,o-1);
     const variacao=fatAnterior>0?Math.round(((fatAtual-fatAnterior)/fatAnterior)*100):(fatAtual>0?100:null);
-    const {horas}=getChatterWeekWorkStats(c.id,0);
+    const {horas}=getChatterWeekWorkStats(c.id,o);
     const receitaPorHora=horas>0?fatAtual/horas:null;
-    const ticketMedio=getChatterWeekTicketMedio(c.id,0);
-    const clAnalises=coletarAnalisesDaSemana(c.id);
+    const ticketMedio=getChatterWeekTicketMedio(c.id,o);
+    const clAnalises=coletarAnalisesDaSemana(c.id,o);
     const clMetrics=calcMetricasSemana(clAnalises);
     const catAvgs=getChatLabCategoryAverages(clAnalises);
     const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
@@ -11499,13 +11548,14 @@ function buildMetricasData(){
     const metaManual=parseFloat((S.chatterWeekGoals[wkey]||{})[c.id])||0;
     const metaAlvo=metaManual>0?metaManual:catInfo.n100;
     const perfPct=metaAlvo>0?Math.round(fat/metaAlvo*100):null;
-    const models=getChatterModelsWorkedWeek(c.id,0).map(m=>m.name);
+    const models=getChatterModelsWorkedWeek(c.id,o).map(m=>m.name);
     const cargo=PAG_LEVEL_LABEL[c.level]||c.level;
     // Consistência: variação (desvio padrão) do % de meta batido nas últimas
-    // 4 semanas — mesmo método já usado na aba Projeção, só convertido pra
-    // "quanto maior, mais estável" (100 - desvio).
-    const weekPcts=[-3,-2,-1,0].map(o=>{
-      const r=getChatterWeekRevenue(c.id,o);
+    // 4 semanas relativas à semana selecionada — mesmo método já usado na
+    // aba Projeção, só convertido pra "quanto maior, mais estável" (100 -
+    // desvio).
+    const weekPcts=[-3,-2,-1,0].map(rel=>{
+      const r=getChatterWeekRevenue(c.id,o+rel);
       return catInfo.n100>0?Math.round(r/catInfo.n100*100):0;
     });
     const validPcts=weekPcts.filter(p=>p>0);
@@ -11548,13 +11598,13 @@ function buildMetricasData(){
     return{...cat,melhor:candidatos[0]||null,candidatos};
   });
 
-  return{wkey,perChatter,porModelo,leaderboard,totalOperacao};
+  return{wkey,offset:o,perChatter,porModelo,leaderboard,totalOperacao};
 }
 
 function renderMetricasTabelaChatters(data){
   const rows=[...data.perChatter].sort((a,b)=>b.fatAtual-a.fatAtual);
   return`<div class="panel">
-    <div class="panel-head"><div><div class="panel-title">📋 Chatters — ${weekLabel(0)}</div><div class="panel-note">Calculado automaticamente do faturamento, horas e ChatLab já registrados — atualiza sozinho, sem IA</div></div></div>
+    <div class="panel-head"><div><div class="panel-title">📋 Chatters — ${weekLabel(data.offset)}</div><div class="panel-note">Calculado automaticamente do faturamento, horas e ChatLab já registrados — atualiza sozinho, sem IA</div></div></div>
     <div style="overflow-x:auto"><table class="rtable">
       <thead><tr>
         <th>Chatter</th>
@@ -11636,18 +11686,91 @@ function renderMetricasLeaderboard(data){
 }
 
 function renderMetricas(){
+  renderWeekNav();
   const el=document.getElementById('metricas-tabelas');
   if(!el)return;
-  const data=buildMetricasData();
+  const data=buildMetricasData(weekOffset);
   _metricasDataCache=data;
   el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
+  renderMetricasTreinamento();
+}
+
+/* ===========================================================
+   MÉTRICAS DE TREINAMENTO — dados manuais por turma de
+   recrutamento/treinamento (total inscritos, quantos mandaram
+   mensagem, confirmaram, apareceram, foram selecionados pra teste).
+   Diferente do resto de Métricas, não é calculado automaticamente
+   nem segue a navegação de semana — cada registro é uma turma.
+   =========================================================== */
+function abrirModalTreinamentoMetrica(){
+  ['tm-total','tm-enviaram','tm-confirmaram','tm-apareceram','tm-selecionados','tm-obs'].forEach(id=>{
+    const elIn=document.getElementById(id);
+    if(elIn)elIn.value='';
+  });
+  openModal('m-treinamento-metrica');
+}
+function salvarTreinamentoMetrica(){
+  const total=parseInt(document.getElementById('tm-total')?.value)||0;
+  if(total<=0){toast('⚠️ Informe o total de pessoas inscritas.');return;}
+  const entry={
+    id:'tm'+Date.now(),
+    criadoEm:new Date().toISOString(),
+    totalInscritos:total,
+    enviaramMensagem:parseInt(document.getElementById('tm-enviaram')?.value)||0,
+    confirmaram:parseInt(document.getElementById('tm-confirmaram')?.value)||0,
+    apareceram:parseInt(document.getElementById('tm-apareceram')?.value)||0,
+    selecionadosTeste:parseInt(document.getElementById('tm-selecionados')?.value)||0,
+    obs:(document.getElementById('tm-obs')?.value||'').trim()
+  };
+  if(!S.treinamentoMetricas)S.treinamentoMetricas=[];
+  S.treinamentoMetricas.push(entry);
+  save();
+  closeModal('m-treinamento-metrica');
+  toast('✅ Registro de Treinamento adicionado!');
+  renderMetricasTreinamento();
+}
+function removerTreinamentoMetrica(id){
+  S.treinamentoMetricas=(S.treinamentoMetricas||[]).filter(t=>t.id!==id);
+  save();
+  renderMetricasTreinamento();
+}
+function renderMetricasTreinamento(){
+  const el=document.getElementById('metricas-treinamento-content');
+  if(!el)return;
+  const list=[...(S.treinamentoMetricas||[])].reverse();
+  if(!list.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:4px 0">Nenhum registro ainda — clique em + registro pra adicionar os números da turma.</div>';
+    return;
+  }
+  const pct=(n,total)=>total>0?Math.round(n/total*100):0;
+  const metricBox=(label,n,total)=>`<div style="background:var(--bg-soft);border-radius:8px;padding:8px 10px">
+    <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase;letter-spacing:.03em">${label}</div>
+    <div style="font-weight:800;font-family:var(--font-mono);font-size:14px">${n} <span style="font-size:11px;color:var(--text3);font-weight:600">(${pct(n,total)}%)</span></div>
+  </div>`;
+  el.innerHTML=list.map(t=>{
+    const dataBR=new Date(t.criadoEm).toLocaleDateString('pt-BR');
+    return`<div class="tm-row" data-key="${t.id}" style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;touch-action:pan-y">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-weight:700;font-size:13px">${dataBR}</div>
+        <div style="font-size:11px;color:var(--text3)">${t.totalInscritos} inscrito${t.totalInscritos!==1?'s':''}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${metricBox('Mandaram mensagem',t.enviaramMensagem,t.totalInscritos)}
+        ${metricBox('Confirmaram',t.confirmaram,t.totalInscritos)}
+        ${metricBox('Apareceram',t.apareceram,t.totalInscritos)}
+        ${metricBox('Selecionados p/ teste',t.selecionadosTeste,t.totalInscritos)}
+      </div>
+      ${t.obs?`<div style="font-size:11.5px;color:var(--text2);margin-top:8px">${t.obs}</div>`:''}
+    </div>`;
+  }).join('');
+  attachSwipeToDelete(el,'.tm-row',id=>removerTreinamentoMetrica(id),renderMetricasTreinamento);
 }
 
 // ---- Perguntar à IA sobre os dados já calculados (opcional, sob demanda) ----
 let _metricasDataCache=null;
 function buildMetricasContextoParaIA(data){
   const lines=[];
-  lines.push(`Semana: ${weekLabel(0)} (${data.wkey}). Faturamento total da operação: ${money(data.totalOperacao)}.`);
+  lines.push(`Semana: ${weekLabel(data.offset)} (${data.wkey}). Faturamento total da operação: ${money(data.totalOperacao)}.`);
   data.perChatter.forEach(p=>{
     lines.push(`- ${p.c.name} (${p.cargo}, modelo(s): ${p.models.join(', ')||'sem escala'}): receita semana ${money(p.fatAtual)} (variação ${fmtPctSigned(p.variacao)}), receita/hora ${p.receitaPorHora!=null?money(p.receitaPorHora):'—'}, conversão ChatLab ${p.clMetrics.taxaConversao!=null?p.clMetrics.taxaConversao+'%':'—'}, ticket médio ${p.ticketMedio>0?money(p.ticketMedio):'—'}, dependência da operação ${p.dependencia}%, ID geral ${p.idGeral!=null?p.idGeral+'%':'—'} (performance ${fmtPct(p.idComponentes.performance)}, crescimento ${fmtPctSigned(p.idComponentes.crescimento)}, qualidade ${p.idComponentes.qualidade!=null?p.idComponentes.qualidade+'%':'—'}, consistência ${fmtPct(p.idComponentes.consistencia)}).`);
   });
@@ -11672,7 +11795,7 @@ async function perguntarIAMetricas(){
   if(btn){btn.disabled=true;btn.textContent='🤖 Analisando...';}
   if(out)out.innerHTML='<div style="color:var(--text3);font-size:12.5px">Consultando os dados já calculados...</div>';
   try{
-    const data=_metricasDataCache||buildMetricasData();
+    const data=_metricasDataCache||buildMetricasData(weekOffset);
     const contexto=buildMetricasContextoParaIA(data);
     const prompt=`DADOS JÁ CALCULADOS PELO SISTEMA (semana atual):\n\n${contexto}\n\nPERGUNTA DA GESTORA:\n${question}`;
     const text=await clFetchAI(METRICAS_IA_SYSTEM,prompt,2000);

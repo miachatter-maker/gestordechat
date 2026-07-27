@@ -1227,10 +1227,21 @@ body{
 <!-- ===================== MÉTRICAS (tabelas comparativas automáticas) ===================== -->
 <section class="view" id="v-metricas">
   <div class="eyebrow">faturamento</div>
-  <div class="view-title">Métricas</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+    <div class="view-title" style="margin:0">Métricas</div>
+    <div class="week-nav" id="week-nav-metricas"></div>
+  </div>
   <div class="view-sub">Tabelas comparativas calculadas automaticamente (sem IA) a partir do faturamento, horas e ChatLab já registrados</div>
 
   <div id="metricas-tabelas"></div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📚 Métricas de Treinamento</div><div class="panel-note">Dados preenchidos manualmente por turma de recrutamento — não segue a navegação de semana acima</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="abrirModalTreinamentoMetrica()">+ registro</button>
+    </div>
+    <div id="metricas-treinamento-content"></div>
+  </div>
 
   <div class="panel">
     <div class="panel-head"><div class="panel-title">🤖 Perguntar à IA sobre esses dados</div></div>
@@ -1735,6 +1746,22 @@ body{
   <button class="btn btn-primary btn-block" onclick="copiarLinkTarefasNovato()">📋 Copiar link</button>
   <div class="modalbtns" style="margin-top:10px">
     <button class="btn btn-ghost btn-block" onclick="closeModal('m-tarefas-novato-link')">Fechar</button>
+  </div>
+</div></div>
+
+<div class="modalbg" id="m-treinamento-metrica"><div class="modal">
+  <div class="modal-handle"></div>
+  <div class="modal-title">📚 Registro de Treinamento</div>
+  <div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Preencha os números dessa turma de recrutamento/treinamento — os % são calculados automaticamente sobre o total de inscritos.</div>
+  <div class="field"><label class="flabel">Total de pessoas inscritas</label><input class="finput" id="tm-total" type="number" min="0" inputmode="numeric" placeholder="Ex: 11"></div>
+  <div class="field"><label class="flabel">Enviaram pelo menos 1 mensagem no servidor da Seduct</label><input class="finput" id="tm-enviaram" type="number" min="0" inputmode="numeric" placeholder="Ex: 4"></div>
+  <div class="field"><label class="flabel">Confirmaram presença pelos avisos</label><input class="finput" id="tm-confirmaram" type="number" min="0" inputmode="numeric" placeholder="Ex: 3"></div>
+  <div class="field"><label class="flabel">Apareceram</label><input class="finput" id="tm-apareceram" type="number" min="0" inputmode="numeric" placeholder="Ex: 7"></div>
+  <div class="field"><label class="flabel">Selecionados pra teste</label><input class="finput" id="tm-selecionados" type="number" min="0" inputmode="numeric" placeholder="Ex: 2"></div>
+  <div class="field"><label class="flabel">Observações (opcional)</label><textarea class="ftext" id="tm-obs" placeholder="Ex: turma de julho..."></textarea></div>
+  <button class="btn btn-primary btn-block" onclick="salvarTreinamentoMetrica()">💾 Salvar registro</button>
+  <div class="modalbtns" style="margin-top:10px">
+    <button class="btn btn-ghost btn-block" onclick="closeModal('m-treinamento-metrica')">Cancelar</button>
   </div>
 </div></div>
 
