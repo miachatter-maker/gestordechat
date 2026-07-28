@@ -26,7 +26,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root{
-  --bg:#FFFFFF;
+  --bg:#FCFAFB;
   --bg-soft:#FBF6F7;
   --surface:#FFFFFF;
   --line:#F0E2E5;
@@ -222,23 +222,55 @@ body{
 @media (min-width:1400px){
   .view.active>div:has(>.panel):has(>.panel~.panel){column-count:3;}
 }
-/* Turno, ChatLab e Testers têm só 2 cards no topo e um deles é bem mais
-   alto que o outro (ex: a escala da semana inteira vs um aviso curto de
-   presença). O modo "balance" do CSS multi-column, quando um card já é
+/* ChatLab e Testers têm só 2 cards no topo e um deles é bem mais alto que
+   o outro. O modo "balance" do CSS multi-column, quando um card já é
    maior que a altura ideal calculada pra 2 colunas, às vezes empilha os
    2 cards na mesma coluna e deixa a coluna do lado inteira vazia — o
    mesmo tipo de buraco vazio que a gente já corrigiu antes, só que agora
    causado pelo navegador, não pelo nosso CSS. Testado com JS (inclusive
    forçando column-fill:auto com altura calculada) e o comportamento do
    Chrome continua imprevisível nesses casos — mais seguro simplesmente
-   deixar essas 3 abas em coluna única no desktop: sem buraco vazio, cada
-   card ocupa a largura toda, um embaixo do outro (como já ficam boas
-   assim, sem precisar dividir em colunas). */
+   deixar essas 2 abas em coluna única no desktop: sem buraco vazio, cada
+   card ocupa a largura toda, um embaixo do outro. */
 @media (min-width:900px){
-  #v-turno.view.active,
   #v-chatlab.view.active,
   #v-testers.view.active{
     column-count:1;
+  }
+}
+/* Turno: mesmo problema de balance (só 2 cards, alturas bem diferentes),
+   mas aqui esticar o card "Escala da semana" borda a borda ficava
+   estranho (uma tabela de horários não precisa da tela toda). Em vez de
+   coluna única full-width, os cards ficam com largura limitada — estilo
+   mais parecido com o celular, só que num PC. */
+@media (min-width:900px){
+  #v-turno.view.active{
+    column-count:1;
+  }
+  #v-turno.view.active>.panel{
+    max-width:560px;
+  }
+}
+/* Agenda: em vez do encaixe automático em colunas (que mistura tudo por
+   altura), aqui a Mia pediu uma divisão fixa e lógica — tudo que é
+   "agenda" (tarefas, financeiro, requisições) de um lado, o resto
+   (treinamento, análise, orientação, ocorrências) do outro. A view em si
+   fica em coluna única (o título/subtítulo continuam empilhados
+   normalmente); só o wrapper .agenda-cols-wrap (que fica logo abaixo do
+   subtítulo) vira flex com 2 colunas — cada .agenda-col dentro dele
+   empilha seus próprios .panel normalmente. */
+@media (min-width:900px){
+  #v-gestao.view.active{
+    column-count:1;
+  }
+  #v-gestao .agenda-cols-wrap{
+    display:flex;
+    align-items:flex-start;
+    gap:16px;
+  }
+  #v-gestao .agenda-col{
+    flex:1;
+    min-width:0;
   }
 }
 
@@ -667,12 +699,6 @@ body{
     <div id="home-smart-alerts"></div>
   </div>
 
-  <!-- ESTRATÉGIAS DE LIDERANÇA -->
-  <div class="panel" id="home-motiv-panel">
-    <div class="panel-head"><div class="panel-title">🧭 Estratégias de Liderança</div><button class="btn btn-ghost btn-xs" onclick="navTo('estrategia')">ver tudo</button></div>
-    <div id="home-motiv-content"></div>
-  </div>
-
   <!-- RELATÓRIOS FALTANTES NO PAINEL -->
 
   <!-- DEMANDAS URGENTES -->
@@ -1074,6 +1100,11 @@ body{
   <div class="view-title">Agenda</div>
   <div style="font-size:12.5px;font-weight:600;color:var(--accent);font-style:italic;margin:-6px 0 14px">Supervisionar. Gerenciar. Resolver e relatar. Sempre leve soluções.</div>
 
+  <!-- AGENDA (tarefas, financeiro e requisições) DE UM LADO — OUTRAS COISAS
+       (treinamento, análise, orientação, ocorrências) DO OUTRO. -->
+  <div class="agenda-cols-wrap">
+  <div class="agenda-col agenda-col-tasks">
+
   <!-- PERFIL DO GESTOR -->
   <div class="panel" id="manager-profile-panel" style="background:var(--accent-soft);border:none;position:relative">
     <button onclick="openModal('m-manager-profile')" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:13px;color:var(--accent);opacity:.5;padding:4px" title="Editar perfil">✏️</button>
@@ -1127,30 +1158,6 @@ body{
     </div>
   </div>
 
-  <!-- TREINAMENTO -->
-  <div class="panel" style="border:2px solid var(--warn)">
-    <div class="panel-head"><div><div class="panel-title" style="color:var(--warn)">🎓 TREINAMENTO</div></div><button class="btn btn-soft btn-xs" onclick="openModal('m-add-training')">+ novo</button></div>
-    <div id="training-list"></div>
-  </div>
-
-  <!-- TREINAMENTO FIXO: SEXTA / SÁBADO / DOMINGO -->
-  <div class="panel" style="border:2px solid var(--warn)">
-    <div class="panel-head"><div><div class="panel-title" style="color:var(--warn)">🎓 Treinamento — Sexta, Sábado e Domingo</div><div class="panel-note">Acontece toda semana nesses 3 dias — o quadro fica sempre aqui, só edite o roteiro</div></div></div>
-    <div id="treinamento-fixo-content"></div>
-  </div>
-
-  <!-- AQUECIMENTO POR DIA DA SEMANA -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">🔥 Aquecimento</div><div class="panel-note">Toque no dia pra ver o roteiro e, se quiser, agendar o horário na Agenda</div></div></div>
-    <div id="aquecimento-content"></div>
-  </div>
-
-  <!-- PREMIAÇÃO SEMANAL -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">🏆 Premiação semanal</div></div>
-    <div id="prize-panel"></div>
-  </div>
-
   <!-- REQUISIÇÕES POR MODELO -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">📝 Requisições para modelos</div></div>
@@ -1171,6 +1178,30 @@ body{
       <input class="finput" id="sched-req-text" placeholder="Pedido..." style="flex:1">
       <button class="btn btn-primary btn-sm" onclick="addScheduleRequest()">+</button>
     </div>
+  </div>
+
+  </div>
+  <div class="agenda-col agenda-col-other">
+
+  <!-- TREINAMENTO -->
+  <div class="panel" style="border:2px solid var(--warn)">
+    <div class="panel-head"><div><div class="panel-title" style="color:var(--warn)">🎓 TREINAMENTO</div></div><button class="btn btn-soft btn-xs" onclick="openModal('m-add-training')">+ novo</button></div>
+    <div id="training-list"></div>
+  </div>
+
+  <!-- TREINAMENTO FIXO (Sex/Sáb/Dom) + AQUECIMENTO (Seg-Sex) — um quadro só -->
+  <div class="panel" style="border:2px solid var(--warn)">
+    <div class="panel-head"><div><div class="panel-title" style="color:var(--warn)">🎓 Treinamento — Sexta, Sábado e Domingo</div><div class="panel-note">Acontece toda semana nesses 3 dias — o quadro fica sempre aqui, só edite o roteiro</div></div></div>
+    <div id="treinamento-fixo-content"></div>
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 10px;border-top:1px solid var(--line);padding-top:14px">🔥 Aquecimento — Segunda a Sexta</div>
+    <div class="panel-note" style="margin:-6px 0 10px">Toque no dia pra ver o roteiro e, se quiser, agendar o horário na Agenda</div>
+    <div id="aquecimento-content"></div>
+  </div>
+
+  <!-- PREMIAÇÃO SEMANAL -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🏆 Premiação semanal</div></div>
+    <div id="prize-panel"></div>
   </div>
 
   <!-- ANÁLISE SEMANAL DE CHATTER (baseada nas fichas, dividida pelos dias da semana) -->
@@ -1203,6 +1234,9 @@ body{
       <input class="finput" id="action-input" placeholder="Ação tomada..." onkeydown="if(event.key==='Enter')addEventAction()">
       <button class="btn btn-primary btn-sm" onclick="addEventAction()">+ registrar</button>
     </div>
+  </div>
+
+  </div>
   </div>
 
 </section>
@@ -1353,12 +1387,12 @@ body{
   </div>
 
   <!-- PERGUNTAS DE APOIO (colapsável) -->
-  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
-    <button onclick="toggleCreativityQuestions()" style="width:100%;padding:11px 14px;background:var(--bg-soft);border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text2)">
+  <div class="panel" style="padding:0;overflow:hidden">
+    <button onclick="toggleCreativityQuestions()" style="width:100%;padding:14px 16px;background:none;border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13.5px;font-weight:600;color:var(--text)">
       <span>❓ Perguntas para usar durante a semana</span>
       <span id="creativity-questions-ic" style="font-size:11px;color:var(--text3)">▸</span>
     </button>
-    <div id="creativity-questions-body" style="display:none;padding:14px"></div>
+    <div id="creativity-questions-body" style="display:none;padding:0 16px 16px"></div>
   </div>
 
   <!-- REVISÃO SEMANAL -->

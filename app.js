@@ -1429,6 +1429,14 @@ function renderWeeklyRanking(){
     if(!sorted.length)return null;
     return{name:sorted[0].c.name,val:fmtFn(sorted[0][key])};
   };
+  // Diferente dos outros cards do ranking, "Criou mais whales" sempre
+  // aparece — mesmo em 0 — porque é um indicador que a Mia quer acompanhar
+  // toda semana, não só quando alguém já criou algum.
+  const topWhales=(()=>{
+    const sorted=[...rows].sort((a,b)=>b.whaleCount-a.whaleCount);
+    if(!sorted.length||!sorted[0].whaleCount)return{name:'—',val:'0 essa semana'};
+    return{name:sorted[0].c.name,val:`${sorted[0].whaleCount} whale${sorted[0].whaleCount>1?'s':''}`};
+  })();
   const topMelhora=(()=>{
     // Só entra quem estava "mal" (abaixo de 70% da meta na semana anterior)
     // — a ideia é destacar quem vinha com dificuldade e deu um salto, não
@@ -1444,7 +1452,7 @@ function renderWeeklyRanking(){
     {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
     {label:'💎 Mais high ticket',data:top('htTotal',v=>money(v))},
-    {label:'🐋 Criou mais whales',data:top('whaleCount',v=>`${v} whale${v>1?'s':''}`)},
+    {label:'🐋 Criou mais whales',data:topWhales},
     {label:'🏆 Produto mais vendido',data:produtoMaisVendido},
     {label:'📈 Melhora da semana',data:topMelhora},
   ].filter(x=>x.data);
@@ -1653,6 +1661,54 @@ function getWeekAvailableWindows(){
   });
   return windows.sort((a,b)=>a.date!==b.date?a.date.localeCompare(b.date):turnoBlockSortVal(a.startSort)-turnoBlockSortVal(b.startSort));
 }
+/* ===========================================================
+   SEM COBERTURA — diferente da "janela livre" acima (que é quando
+   alguém que JÁ TEM turno cadastrado falta ou tira folga hoje), isso
+   aqui detecta buracos permanentes na escala: horários de uma modelo
+   em que NENHUM chatter tem turno cadastrado, nem uma vez — a modelo
+   fica sem ninguém previsto naquele horário toda vez que esse dia da
+   semana se repetir. Olha só as datas da semana atual (mesmo recorte
+   do painel de Janelas Livres).
+   =========================================================== */
+function timeToMin(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+(m||0);}
+function minToTimeLabel(m){if(m>=1440)return'24:00';m=((m%1440)+1440)%1440;const h=Math.floor(m/60),mm=m%60;return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0');}
+function getModelCoverageGaps(){
+  const wd=getWeekDates(0);
+  const gaps=[];
+  wd.forEach(day=>{
+    const dayKey=DAY_KEYS[day.getDay()];
+    const dateStr=fmt(day);
+    S.models.forEach(m=>{
+      const covered=[];
+      S.shifts.forEach(s=>{
+        if(!(s.days||[]).includes(dayKey))return;
+        if(!(s.modelIds||[]).includes(m.id))return;
+        const c=S.chatters.find(ch=>ch.id===s.chatterId);
+        if(!c||c.time==='elite')return;
+        [[s.start,s.end],[s.start2,s.end2]].forEach(([st,en])=>{
+          if(!st||!en)return;
+          const a=timeToMin(st),b=timeToMin(en);
+          if(b<=a){covered.push([a,1440]);covered.push([0,b]);} // vira o dia — cobre as duas pontas
+          else covered.push([a,b]);
+        });
+      });
+      covered.sort((x,y)=>x[0]-y[0]);
+      const merged=[];
+      covered.forEach(([a,b])=>{
+        const last=merged[merged.length-1];
+        if(last&&a<=last[1])last[1]=Math.max(last[1],b);
+        else merged.push([a,b]);
+      });
+      let cursor=0;
+      merged.forEach(([a,b])=>{
+        if(a>cursor+15)gaps.push({dateStr,dayName:DAYS[day.getDay()],modelId:m.id,modelName:m.name,modelEmoji:m.emoji||'🧩',start:minToTimeLabel(cursor),end:minToTimeLabel(a)});
+        cursor=Math.max(cursor,Math.min(b,1440));
+      });
+      if(cursor<1440-15)gaps.push({dateStr,dayName:DAYS[day.getDay()],modelId:m.id,modelName:m.name,modelEmoji:m.emoji||'🧩',start:minToTimeLabel(cursor),end:'24:00'});
+    });
+  });
+  return gaps;
+}
 function assignWindowCover(shiftId,date,originalId,covererId,startTime,endTime){
   S.swaps=S.swaps.filter(sw=>!(sw.date===date&&sw.shiftId===shiftId&&sw.originalId===originalId&&sw.start===startTime&&sw.end===endTime));
   if(covererId){
@@ -1680,11 +1736,12 @@ function renderAvailWindowsPanel(){
   const windows=getWeekAvailableWindows()
     .filter(w=>!w.covererId)
     .filter(w=>!windowsDismissed.has(`${w.date}_${w.shiftId}_${w.startSort}`));
-  if(!windows.length){panel.style.display='none';return;}
+  const gaps=getModelCoverageGaps();
+  if(!windows.length&&!gaps.length){panel.style.display='none';return;}
   panel.style.display='block';
   el.innerHTML=`
-    <div style="font-weight:700;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">🗓️ <span>Janelas livres</span></div>
-    <div style="display:flex;flex-direction:column;gap:7px">
+    ${windows.length?`<div style="font-weight:700;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">🗓️ <span>Janelas livres</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px${gaps.length?';margin-bottom:16px':''}">
     ${windows.map(w=>{
       const key=`${w.date}_${w.shiftId}_${w.startSort}`;
       const dayShort=w.dayName.slice(0,3).toUpperCase();
@@ -1699,7 +1756,21 @@ function renderAvailWindowsPanel(){
         <button onclick="openWindowQuickAssign('${w.shiftId}','${w.date}','${w.originalId}','${w.startSort}','${w.timeStr.split('–')[1]}')" class="btn btn-primary btn-xs" style="flex-shrink:0">cobrir</button>
       </div>`;
     }).join('')}
-    </div>
+    </div>`:''}
+    ${gaps.length?`<div style="font-weight:700;font-size:13.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">🕳️ <span>Sem cobertura</span></div>
+    <div style="display:flex;flex-direction:column;gap:7px">
+    ${gaps.slice(0,8).map(g=>{
+      const dayShort=g.dayName.slice(0,3).toUpperCase();
+      return`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-soft);border:1px dashed var(--line-strong);border-radius:10px">
+        <div style="font-size:10px;font-weight:800;color:var(--text3);background:var(--bg);border-radius:6px;padding:4px 7px;flex-shrink:0;letter-spacing:.03em">${dayShort}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:700">${g.modelEmoji} ${g.modelName}</div>
+          <div style="font-size:11.5px;color:var(--text2);font-family:var(--font-mono)">${g.start}–${g.end} · ninguém escalado</div>
+        </div>
+      </div>`;
+    }).join('')}
+    ${gaps.length>8?`<div style="font-size:11px;color:var(--text3);text-align:center">+ ${gaps.length-8} outro(s)</div>`:''}
+    </div>`:''}
   `;
   attachSwipeDismiss(el,'.window-row',key=>{windowsDismissed.add(key);renderAvailWindowsPanel();});
 }
@@ -2123,7 +2194,6 @@ function renderHome(){
   renderUrgentPanel();
   renderSmartAlerts();
   renderAvailWindowsPanel();
-  renderLiderancaHome();
   render48hAlerts();
   renderMidnightPreviewHome();
 }
@@ -4333,9 +4403,11 @@ function renderRevenueTable(){
     </tr>`;
   });
 
-  // Total row
-  html+=`<tr class="rtotalrow"><td colspan="2"><strong>TOTAL DIA</strong></td>
-    <td style="text-align:right;font-family:var(--font-mono);font-weight:800;color:var(--ok)">${dayTotal>0?money(dayTotal):'—'}</td></tr>`;
+  // Total row — resultado do dia é o número mais importante da tela, então
+  // fica bem maior e destacado (fundo suave) em vez de se misturar com as
+  // linhas normais da tabela.
+  html+=`<tr class="rtotalrow" style="background:var(--ok-soft)"><td colspan="2" style="font-size:14px"><strong>TOTAL DIA</strong></td>
+    <td style="text-align:right;font-family:var(--font-mono);font-weight:800;font-size:22px;color:var(--ok);padding:10px 8px">${dayTotal>0?money(dayTotal):'—'}</td></tr>`;
   html+='</tbody></table></div>';
   html+='<div style="font-size:10.5px;color:var(--text3);margin-top:6px">Arraste o nome de alguém pro lado pra demitir (some do faturamento a partir de hoje). A modelo é detectada automaticamente pela escala do dia — só aparece pra escolher quando não tem escala ou tem mais de uma no mesmo dia.</div>';
 
@@ -5381,7 +5453,7 @@ function renderTrainings(){
     // que era um compromisso de dia único, então pra essa entrada específica
     // mostra a cadência em vez da data.
     const subtitle=t.autoRetention
-      ?`Toda semana: Segunda a Quinta (Treinamento na Sexta)${currentDay?` · Dia ${currentDay}`:' · não iniciado'}`
+      ?`Toda semana: Segunda a Sexta${currentDay?` · Dia ${currentDay}`:' · não iniciado'}`
       :`${t.date}${currentDay?` · Dia ${currentDay}`:' · não iniciado'}`;
     return`<div class="training-swipe-row" data-key="${t.id}" style="background:var(--warn-soft);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid var(--warn);touch-action:pan-y">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleTrainingDetail('${t.id}')">
@@ -5842,8 +5914,6 @@ function renderFichaChatter(chatterId){
 
     ${renderChatObsPanel(chatterId)}
 
-    <button class="btn btn-primary btn-block" style="margin-bottom:12px" onclick="saveFichaSnapshot('${chatterId}')">💾 Salvar snapshot semanal</button>
-
     ${fichaAccordion('relatorio-'+chatterId,'','<div><div class="panel-title">📊 Desempenho da semana</div><div class="panel-note">Gráfico gerado automaticamente</div></div>',
       renderWeeklyPerformanceChart(chatterId)
     )}
@@ -5853,6 +5923,8 @@ function renderFichaChatter(chatterId){
     ${chatlabResumoFichaHtml(chatterId)}
 
     ${renderFichaCruzamento(chatterId)}
+
+    <button class="btn btn-primary btn-block" style="margin-top:4px" onclick="saveFichaSnapshot('${chatterId}')">💾 Salvar</button>
   `;
   attachMapeamentoSwipe(chatterId);
   attachOrientacaoSwipe(chatterId);
@@ -8017,7 +8089,7 @@ const SCORE_WORD={1:'Fraco',2:'Regular',3:'Bom',4:'Ótimo',5:'Excelente'};
    =========================================================== */
 const DAY_LABELS_FULL={dom:'Domingo',seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta',sex:'Sexta',sab:'Sábado'};
 function getWeeklyAnalysisAssignment(){
-  const chatters=S.chatters.filter(c=>c.time!=='elite');
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&!isChatterTerminated(c));
   const byDay={};
   DAY_KEYS.forEach(dk=>byDay[dk]=[]);
   chatters.forEach((c,i)=>{byDay[DAY_KEYS[i%7]].push(c);});
@@ -8310,6 +8382,8 @@ const RETENTION_AGENDA_DAYS=[
     texto:'Em avisos-oficiais: "Estamos observando quem está aqui, quem está interagindo e quem já demonstra o perfil que buscamos. O treinamento começa em X dias — mas nossa avaliação já começou." No bate-papo-geral, cite pelo nome 2 ou 3 candidatos que interagiram bem: "Fulano, Ciclano — boa postura aqui. É exatamente isso."'},
   {dk:'qui',dia:4,titulo:'Antecipação e comprometimento final',
     texto:'Em avisos-oficiais: "Amanhã começa. Confirme sua presença reagindo com ✅ nessa mensagem. Quem não confirmar até as 22h de hoje será removido da lista — a vaga vai para o próximo da fila." Pergunta do dia no bate-papo: "O que você vai fazer diferente amanhã para já entrar no treinamento no seu melhor nível?"'},
+  {dk:'sex',dia:5,titulo:'Recepção e último empurrão — hoje é o dia',
+    texto:'Em avisos-oficiais: "É hoje! Treinamento às [horário] — chega 5 minutos antes." No bate-papo-geral, recepcione quem já confirmou presença e reforce o clima de expectativa: "Bora, hoje é o dia de mostrar serviço." Aproveite pra reforçar o link/local do treinamento uma última vez.'},
 ];
 let aquecimentoDiaAberto=null;
 function toggleAquecimentoDia(dk){
@@ -8338,7 +8412,7 @@ function agendarAquecimentoDia(dk){
 function renderAquecimento(){
   const el=document.getElementById('aquecimento-content');
   if(!el)return;
-  const labels={seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta'};
+  const labels={seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta',sex:'Sexta'};
   el.innerHTML=RETENTION_AGENDA_DAYS.map(d=>{
     const aberto=aquecimentoDiaAberto===d.dk;
     return`<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden">
