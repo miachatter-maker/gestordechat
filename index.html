@@ -156,6 +156,33 @@ body{
 .view.active{display:block;animation:viewIn .3s cubic-bezier(.25,.9,.35,1);}
 @keyframes viewIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
+/* ---------- LAYOUT DESKTOP (PC) ---------- */
+/* No celular fica exatamente como está (coluna única). A partir de telas
+   largas (PC), os painéis de cada aba se encaixam lado a lado em grid —
+   cabeçalho, filtros e avisos continuam ocupando a linha inteira. */
+@media (min-width:900px){
+  .main{max-width:1240px;padding-top:64px;}
+  .view.active{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(360px,1fr));
+    align-items:start;gap:16px;
+  }
+  .view.active>.eyebrow,
+  .view.active>.view-title,
+  .view.active>.view-sub,
+  .view.active>.view-header-row,
+  .view.active>.segtabs,
+  .view.active>.watchbanner,
+  .view.active>.alarmhero,
+  .view.active>[id$="-range"]{
+    grid-column:1/-1;
+  }
+  .view.active>.panel,.view.active>.statgrid{margin-bottom:0;}
+}
+@media (min-width:1400px){
+  .view.active{grid-template-columns:repeat(auto-fit,minmax(380px,1fr));}
+}
+
 .eyebrow{font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--accent-strong);text-transform:uppercase;margin-bottom:6px;}
 .view-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:3px;color:var(--text);}
 .view-sub{font-size:13px;color:var(--text2);margin-bottom:20px;}
@@ -223,13 +250,24 @@ body{
 /* ---------- INPUTS ---------- */
 .field{margin-bottom:13px;}
 .flabel{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:.01em;margin-bottom:6px;display:block;}
-.finput,.fselect,.ftext{
+.finput,.fselect{
   width:100%;padding:10px 12px;background:var(--bg-soft);border:1px solid var(--line);
   border-radius:var(--r-sm);color:var(--text);font-family:var(--font-display);font-size:14px;
   outline:none;transition:border-color .15s,box-shadow .15s,background-color .15s;-webkit-appearance:none;
 }
-.finput:focus,.fselect:focus,.ftext:focus{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px rgba(232,119,155,.14);}
-.ftext{resize:vertical;min-height:74px;line-height:1.5;}
+.finput:focus,.fselect:focus{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px rgba(232,119,155,.14);}
+/* .ftext — texto livre (notas, relatório, mapeamento): sem caixinha, fica
+   como escrita normal e só mostra que é editável quando você clica nela
+   (mesmo padrão usado na Agenda/Estratégias de Liderança, classe .lid-text). */
+.ftext{
+  width:100%;resize:vertical;min-height:3em;line-height:1.55;
+  background:transparent;border:none;border-radius:6px;
+  color:var(--text);font-family:var(--font-display);font-size:14px;
+  outline:none;padding:6px 2px;transition:background-color .15s,box-shadow .15s;
+}
+.ftext:hover{background:var(--bg-soft);}
+.ftext:focus{background:var(--surface);box-shadow:0 0 0 3px rgba(232,119,155,.14);border-radius:8px;padding:6px 8px;margin:0 -6px;}
+.ftext::placeholder{color:var(--text3);}
 .fselect{
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B6B76' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;cursor:pointer;
@@ -515,11 +553,12 @@ body{
     <nav class="appmenu-list" id="toptabs">
       <button class="toptab active" data-go="home">⌂ Painel</button>
       <button class="toptab" data-go="gestao">🗓 Agenda</button>
+      <button class="toptab" data-go="estrategia">🧭 Estratégia</button>
       <button class="toptab" data-go="fat">¤ Faturamento</button>
       <button class="toptab" data-go="turno">⇄ Turno</button>
       <button class="toptab" data-go="time">▦ Equipe</button>
       <button class="toptab" data-go="fichas">👤 Fichas</button>
-      <button class="toptab" data-go="report">📋 Relatório</button>
+      <button class="toptab" data-go="report">📋 Relatório Semanal</button>
       <button class="toptab" data-go="extra">⚡ H. Extra</button>
       <button class="toptab" data-go="gerador">📄 Relatórios</button>
       <button class="toptab" data-go="semana">📆 Semana</button>
@@ -564,13 +603,14 @@ body{
       <div><div class="panel-title">🔔 Atenção necessária</div></div>
       <span id="smart-alerts-badge" class="pill pill-bad" style="font-size:10px"></span>
     </div>
+    <div id="home-medal-notice"></div>
     <div id="home-critical-meta"></div>
     <div id="home-smart-alerts"></div>
   </div>
 
   <!-- ESTRATÉGIAS DE LIDERANÇA -->
   <div class="panel" id="home-motiv-panel">
-    <div class="panel-head"><div class="panel-title">🧭 Estratégias de Liderança</div><button class="btn btn-ghost btn-xs" onclick="navTo('gestao')">ver tudo</button></div>
+    <div class="panel-head"><div class="panel-title">🧭 Estratégias de Liderança</div><button class="btn btn-ghost btn-xs" onclick="navTo('estrategia')">ver tudo</button></div>
     <div id="home-motiv-content"></div>
   </div>
 
@@ -634,7 +674,7 @@ body{
 <!-- ===================== SEMANA ===================== -->
 <section class="view" id="v-semana">
   <div class="eyebrow">planejamento</div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+  <div class="view-header-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
     <div class="view-title" style="margin:0">Semana</div>
     <div class="week-nav" id="week-nav-semana"></div>
   </div>
@@ -776,8 +816,8 @@ body{
 <!-- ===================== RELATÓRIO SEMANAL ===================== -->
 <section class="view" id="v-report">
   <div class="eyebrow">gestão</div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
-    <div class="view-title" style="margin:0">Relatório</div>
+  <div class="view-header-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+    <div class="view-title" style="margin:0">Relatório Semanal</div>
     <div class="week-nav" id="week-nav-report"></div>
   </div>
   <div class="view-sub" id="report-wk-range">—</div>
@@ -809,31 +849,31 @@ body{
   <!-- Seção 5: Seus erros — manual -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">5. Seus Principais Erros da Semana</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
-    <div class="field"><label class="flabel">Erro 1</label><input class="finput" id="rpt-erro1" placeholder="Descreva o erro..."></div>
-    <div class="field"><label class="flabel">Erro 2</label><input class="finput" id="rpt-erro2" placeholder="Descreva o erro..."></div>
-    <div class="field"><label class="flabel">Erro 3</label><input class="finput" id="rpt-erro3" placeholder="Descreva o erro..."></div>
+    <div class="field"><label class="flabel">Erro 1</label><input class="finput" id="rpt-erro1" placeholder="Descreva o erro..." onblur="saveReportDraftField('erro1',this.value)"></div>
+    <div class="field"><label class="flabel">Erro 2</label><input class="finput" id="rpt-erro2" placeholder="Descreva o erro..." onblur="saveReportDraftField('erro2',this.value)"></div>
+    <div class="field"><label class="flabel">Erro 3</label><input class="finput" id="rpt-erro3" placeholder="Descreva o erro..." onblur="saveReportDraftField('erro3',this.value)"></div>
   </div>
 
   <!-- Seção 6: Ações realizadas — semi-automático -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">6. Ações Realizadas</div><span class="pill pill-ok" style="font-size:10px">automático (editável)</span></div>
     <div id="rpt-acoes"></div>
-    <div class="field" style="margin-top:10px"><label class="flabel">Ajustes na operação</label><input class="finput" id="rpt-ajustes" placeholder="Ex: mudei horário do turno da tarde..."></div>
+    <div class="field" style="margin-top:10px"><label class="flabel">Ajustes na operação</label><input class="finput" id="rpt-ajustes" placeholder="Ex: mudei horário do turno da tarde..." onblur="saveReportDraftField('ajustes',this.value)"></div>
   </div>
 
   <!-- Seção 7: Problemas — manual -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">7. Problemas Encontrados</div><span class="pill pill-ok" style="font-size:10px">sugestão automática</span></div>
-    <div class="field"><label class="flabel">Problema 1</label><input class="finput" id="rpt-prob1" placeholder="Descreva o problema..."></div>
-    <div class="field"><label class="flabel">Problema 2</label><input class="finput" id="rpt-prob2" placeholder="Descreva o problema..."></div>
+    <div class="field"><label class="flabel">Problema 1</label><input class="finput" id="rpt-prob1" placeholder="Descreva o problema..." onblur="saveReportDraftField('prob1',this.value)"></div>
+    <div class="field"><label class="flabel">Problema 2</label><input class="finput" id="rpt-prob2" placeholder="Descreva o problema..." onblur="saveReportDraftField('prob2',this.value)"></div>
   </div>
 
   <!-- Seção 8: Plano próxima semana — manual -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">8. Plano para Próxima Semana</div><span class="pill pill-flat" style="font-size:10px">manual</span></div>
-    <div class="field"><label class="flabel">Ação 1</label><input class="finput" id="rpt-plano1" placeholder="Ex: focar em chatter X..."></div>
-    <div class="field"><label class="flabel">Ação 2</label><input class="finput" id="rpt-plano2" placeholder=""></div>
-    <div class="field"><label class="flabel">Ação 3</label><input class="finput" id="rpt-plano3" placeholder=""></div>
+    <div class="field"><label class="flabel">Ação 1</label><input class="finput" id="rpt-plano1" placeholder="Ex: focar em chatter X..." onblur="saveReportDraftField('plano1',this.value)"></div>
+    <div class="field"><label class="flabel">Ação 2</label><input class="finput" id="rpt-plano2" placeholder="" onblur="saveReportDraftField('plano2',this.value)"></div>
+    <div class="field"><label class="flabel">Ação 3</label><input class="finput" id="rpt-plano3" placeholder="" onblur="saveReportDraftField('plano3',this.value)"></div>
   </div>
 
   <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="generateFullReport()">📋 Gerar relatório completo</button>
@@ -1052,6 +1092,88 @@ body{
     <div id="prize-panel"></div>
   </div>
 
+  <!-- REQUISIÇÕES POR MODELO -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📝 Requisições para modelos</div></div>
+    <div id="model-requests-split-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <select class="fselect" id="model-req-model" style="flex:0 0 auto;width:140px"></select>
+      <input class="finput" id="model-req-text" placeholder="Pedido..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addModelRequest()">+</button>
+    </div>
+  </div>
+
+  <!-- REQUISIÇÕES DE HORÁRIOS -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">🗓 Requisições de horários</div></div>
+    <div id="schedule-requests-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <select class="fselect" id="sched-req-chatter" style="flex:0 0 auto;width:140px"></select>
+      <input class="finput" id="sched-req-text" placeholder="Pedido..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addScheduleRequest()">+</button>
+    </div>
+  </div>
+
+  <!-- ANÁLISE SEMANAL DE CHATTER (baseada nas fichas, dividida pelos dias da semana) -->
+  <div class="panel" style="padding:10px 14px">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🔍 Análise de hoje</div>
+    <div id="weekly-analysis-board" style="font-size:12.5px"></div>
+  </div>
+
+  <!-- NECESSIDADE DE ORIENTAÇÃO — foco em 1 chatter por vez -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🎯 Necessidade de orientação</div><div class="panel-note">Ao marcar como feito, passa pro próximo</div></div></div>
+    <div id="orient-need-board"></div>
+  </div>
+
+  <!-- ORIENTAÇÕES -->
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">Orientações</div></div>
+      <button class="btn btn-ghost btn-xs" onclick="openModal('m-orient')">+ nova</button>
+    </div>
+    <div id="orient-list"></div>
+  </div>
+
+  <!-- PROBLEMAS DIÁRIOS -->
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">📋 Acontecimento e ação tomada</div></div>
+    <div id="daily-problems-list"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+      <input class="finput" id="event-input" placeholder="O que aconteceu...">
+      <input class="finput" id="action-input" placeholder="Ação tomada..." onkeydown="if(event.key==='Enter')addEventAction()">
+      <button class="btn btn-primary btn-sm" onclick="addEventAction()">+ registrar</button>
+    </div>
+  </div>
+
+</section>
+
+<!-- ===================== ESTRATÉGIA (LIDERANÇA) ===================== -->
+<section class="view" id="v-estrategia">
+  <div class="eyebrow">copiloto do gestor</div>
+  <div class="view-title">Estratégia</div>
+  <div style="font-size:12.5px;font-weight:600;color:var(--accent);font-style:italic;margin:-6px 0 14px">O que eu deveria fazer hoje?</div>
+
+  <div id="estrategia-medal-notice"></div>
+
+  <!-- PRIORIDADES DO DIA -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🎯 Prioridades de hoje</div><div class="panel-note">Gerado automaticamente a partir do ChatLab, Métricas e metas da semana</div></div></div>
+    <div id="estrategia-prioridades"></div>
+  </div>
+
+  <!-- DIAGNÓSTICO DA EQUIPE -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🩺 Diagnóstico da equipe</div><div class="panel-note">🟢 Em evolução · 🟡 Estagnado · 🔴 Em queda · ⚫ Alto risco de sair</div></div></div>
+    <div id="estrategia-diagnostico"></div>
+  </div>
+
+  <!-- GARGALOS -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🚧 Gargalos identificados</div><div class="panel-note">Com base nos dados disponíveis — alguns gargalos exigem observação manual</div></div></div>
+    <div id="estrategia-gargalos"></div>
+  </div>
+
   <!-- ESTRATÉGIAS DE LIDERANÇA -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">🧭 Estratégias de Liderança</div></div>
@@ -1112,60 +1234,37 @@ body{
     </div>
   </div>
 
-  <!-- REQUISIÇÕES POR MODELO -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">📝 Requisições para modelos</div></div>
-    <div id="model-requests-split-list"></div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <select class="fselect" id="model-req-model" style="flex:0 0 auto;width:140px"></select>
-      <input class="finput" id="model-req-text" placeholder="Pedido..." style="flex:1">
-      <button class="btn btn-primary btn-sm" onclick="addModelRequest()">+</button>
+  <!-- CONSELHEIRO EXECUTIVO (discreto, collapsible) -->
+  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
+    <button onclick="toggleConselheiro()" style="width:100%;padding:11px 14px;background:var(--bg-soft);border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text2)">
+      <span>🧠 Conselheiro Executivo</span>
+      <span id="conselheiro-ic" style="font-size:11px;color:var(--text3)">▸</span>
+    </button>
+    <div id="conselheiro-body" style="display:none;padding:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase">📊 Leitura da semana</div>
+        <button class="btn btn-ghost btn-xs" onclick="gerarConselheiroSemanal(true)">🔄 Gerar de novo</button>
+      </div>
+      <div id="conselheiro-semanal" style="font-size:12.5px;margin-bottom:18px"></div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">💬 Perguntar sobre a operação</div>
+      <div class="field">
+        <textarea class="ftext" id="conselheiro-input" style="min-height:100px" placeholder="Descreva a situação — ex: um chatter com queda de performance, conflito na equipe, decisão difícil..."></textarea>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="conselheiro-btn" onclick="rodarConselheiro()">💬 Consultar</button>
+      <div id="conselheiro-out" style="margin-top:12px"></div>
+
+      <div style="border-top:1px solid var(--line);margin:22px 0 16px"></div>
+      <div style="font-size:11px;font-weight:700;color:var(--pink);text-transform:uppercase;margin-bottom:4px">💙 Como você está</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Um espaço separado, só pra você — não é terapia, não usa nenhum dado da operação, e o que você escrever aqui fica só aqui.</div>
+      <div class="field">
+        <textarea class="ftext" id="conselheiro-pessoal-input" style="min-height:90px" placeholder="Como você está de verdade hoje?"></textarea>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="conselheiro-pessoal-btn" onclick="conversarConselheiroPessoal()">💙 Conversar</button>
+      <div id="conselheiro-pessoal-out" style="margin-top:12px"></div>
+      <div id="conselheiro-pessoal-historico"></div>
     </div>
   </div>
-
-  <!-- REQUISIÇÕES DE HORÁRIOS -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">🗓 Requisições de horários</div></div>
-    <div id="schedule-requests-list"></div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <select class="fselect" id="sched-req-chatter" style="flex:0 0 auto;width:140px"></select>
-      <input class="finput" id="sched-req-text" placeholder="Pedido..." style="flex:1">
-      <button class="btn btn-primary btn-sm" onclick="addScheduleRequest()">+</button>
-    </div>
-  </div>
-
-  <!-- ANÁLISE SEMANAL DE CHATTER (baseada nas fichas, dividida pelos dias da semana) -->
-  <div class="panel" style="padding:10px 14px">
-    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🔍 Análise de hoje</div>
-    <div id="weekly-analysis-board" style="font-size:12.5px"></div>
-  </div>
-
-  <!-- NECESSIDADE DE ORIENTAÇÃO — foco em 1 chatter por vez -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">🎯 Necessidade de orientação</div><div class="panel-note">Ao marcar como feito, passa pro próximo</div></div></div>
-    <div id="orient-need-board"></div>
-  </div>
-
-  <!-- ORIENTAÇÕES -->
-  <div class="panel">
-    <div class="panel-head">
-      <div><div class="panel-title">Orientações</div></div>
-      <button class="btn btn-ghost btn-xs" onclick="openModal('m-orient')">+ nova</button>
-    </div>
-    <div id="orient-list"></div>
-  </div>
-
-  <!-- PROBLEMAS DIÁRIOS -->
-  <div class="panel">
-    <div class="panel-head"><div class="panel-title">📋 Acontecimento e ação tomada</div></div>
-    <div id="daily-problems-list"></div>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
-      <input class="finput" id="event-input" placeholder="O que aconteceu...">
-      <input class="finput" id="action-input" placeholder="Ação tomada..." onkeydown="if(event.key==='Enter')addEventAction()">
-      <button class="btn btn-primary btn-sm" onclick="addEventAction()">+ registrar</button>
-    </div>
-  </div>
-
 </section>
 
 <!-- ===================== FICHAS ===================== -->
@@ -1246,44 +1345,13 @@ body{
     <div id="estudos-historico"></div>
   </div>
 
-  <!-- CONSELHEIRO EXECUTIVO (discreto, collapsible) -->
-  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
-    <button onclick="toggleConselheiro()" style="width:100%;padding:11px 14px;background:var(--bg-soft);border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text2)">
-      <span>🧠 Conselheiro Executivo</span>
-      <span id="conselheiro-ic" style="font-size:11px;color:var(--text3)">▸</span>
-    </button>
-    <div id="conselheiro-body" style="display:none;padding:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase">📊 Leitura da semana</div>
-        <button class="btn btn-ghost btn-xs" onclick="gerarConselheiroSemanal(true)">🔄 Gerar de novo</button>
-      </div>
-      <div id="conselheiro-semanal" style="font-size:12.5px;margin-bottom:18px"></div>
-
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">💬 Perguntar sobre a operação</div>
-      <div class="field">
-        <textarea class="ftext" id="conselheiro-input" style="min-height:100px" placeholder="Descreva a situação — ex: um chatter com queda de performance, conflito na equipe, decisão difícil..."></textarea>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="conselheiro-btn" onclick="rodarConselheiro()">💬 Consultar</button>
-      <div id="conselheiro-out" style="margin-top:12px"></div>
-
-      <div style="border-top:1px solid var(--line);margin:22px 0 16px"></div>
-      <div style="font-size:11px;font-weight:700;color:var(--pink);text-transform:uppercase;margin-bottom:4px">💙 Como você está</div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Um espaço separado, só pra você — não é terapia, não usa nenhum dado da operação, e o que você escrever aqui fica só aqui.</div>
-      <div class="field">
-        <textarea class="ftext" id="conselheiro-pessoal-input" style="min-height:90px" placeholder="Como você está de verdade hoje?"></textarea>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="conselheiro-pessoal-btn" onclick="conversarConselheiroPessoal()">💙 Conversar</button>
-      <div id="conselheiro-pessoal-out" style="margin-top:12px"></div>
-      <div id="conselheiro-pessoal-historico"></div>
-    </div>
-  </div>
 </section>
 
 
 <!-- ===================== EVOLUÇÃO ===================== -->
 <section class="view" id="v-evolucao">
   <div class="eyebrow">desenvolvimento</div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+  <div class="view-header-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
     <div class="view-title" style="margin:0">Evolução</div>
     <div class="week-nav" id="week-nav-evolucao"></div>
   </div>
@@ -1432,7 +1500,7 @@ body{
 <!-- ===================== MÉTRICAS (tabelas comparativas automáticas) ===================== -->
 <section class="view" id="v-metricas">
   <div class="eyebrow">faturamento</div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+  <div class="view-header-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
     <div class="view-title" style="margin:0">Métricas</div>
     <div class="week-nav" id="week-nav-metricas"></div>
   </div>
@@ -1487,7 +1555,12 @@ body{
 <section class="view" id="v-projecao">
   <div class="eyebrow">desenvolvimento</div>
   <div class="view-title">Projeção</div>
-  <div class="view-sub">Melhora por semana do mês — quem é mais constante, quem melhorou, quem caiu</div>
+  <div class="view-sub" style="margin-bottom:0">Se continuar assim, onde a gente vai chegar?</div>
+
+  <!-- PROJEÇÃO DA EMPRESA -->
+  <div id="proj-empresa"></div>
+
+  <div class="view-sub" style="margin:18px 0 12px">Melhora por semana do mês — quem é mais constante, quem melhorou, quem caiu</div>
   <div style="margin-bottom:12px">
     <select class="fselect" id="proj-chatter" onchange="renderProjecaoChatter(this.value)">
       <option value="">— selecionar chatter —</option>

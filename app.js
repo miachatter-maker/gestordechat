@@ -206,6 +206,11 @@ function migrateState(s){
   // gerarConselheiroSemanal / conversarConselheiroPessoal).
   if(!s.conselheiroSemanal)s.conselheiroSemanal={wkey:'',text:'',generatedAt:''};
   if(!s.conselheiroPessoal)s.conselheiroPessoal=[];
+  // Detecção de medalha alcançada — guarda a última medalha vista de cada
+  // chatter pra saber quando ela SOBE (não avisa em queda), e a lista de
+  // avisos gerados (mostrados na Estratégia + Painel até serem marcados como vistos).
+  if(!s.chatterLastMedal)s.chatterLastMedal={};
+  if(!s.medalAchievements)s.medalAchievements=[];
   if(!s.turnoLog)s.turnoLog={};
   if(!s.chatters)s.chatters=[];
   if(!s.shifts)s.shifts=[];
@@ -1055,7 +1060,7 @@ function money(n){return 'R$ '+ (n||0).toLocaleString('pt-BR',{minimumFractionDi
 function moneyShort(n){return 'R$'+(n||0).toLocaleString('pt-BR',{maximumFractionDigits:0});}
 
 // ---------- NAV ----------
-const VIEWS=['home','turno','semana','time','fat','report','extra','gerador','gestao','fichas','estudos','evolucao','chatlab','testers','reservas','pagamento','metricas','projecao'];
+const VIEWS=['home','turno','semana','time','fat','report','extra','gerador','gestao','estrategia','fichas','estudos','evolucao','chatlab','testers','reservas','pagamento','metricas','projecao'];
 // Render timestamp cache — debounce rapid re-renders (Firebase sync spam)
 const _rts={};
 
@@ -1193,6 +1198,7 @@ function renderView(v){
   else if(v==='extra')renderExtra();
   else if(v==='gerador')renderGerador();
   else if(v==='gestao')renderGestao();
+  else if(v==='estrategia')renderEstrategia();
   else if(v==='fichas')renderFichas();
   else if(v==='estudos')renderEstudos();
   else if(v==='evolucao')renderEvolucao();
@@ -1397,7 +1403,9 @@ function renderWeeklyRanking(){
     const prevPct=prevMeta>0?(prevRev/prevMeta*100):0;
     const melhora=prevPct>0?pct-prevPct:null;
     const htTotal=getChatterWeekHighTicket(c.id,weekOffset).htTotal;
-    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal};
+    // Whales criados essa semana, segundo o diagnóstico do ChatLab (tags.sinalDeWhale).
+    const whaleCount=calcMetricasSemana(coletarAnalisesDaSemana(c.id,weekOffset)).whaleCount||0;
+    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal,whaleCount};
   });
   // Produto mais vendido da semana (time inteiro): tally por tipo de high
   // ticket (Personalizado/Foto/Vídeo/Mimo) detectado nos relatórios colados.
@@ -1436,6 +1444,7 @@ function renderWeeklyRanking(){
     {label:'🎯 Mais perto da meta',data:top('pct',v=>Math.round(v)+'%')},
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
     {label:'💎 Mais high ticket',data:top('htTotal',v=>money(v))},
+    {label:'🐋 Criou mais whales',data:top('whaleCount',v=>`${v} whale${v>1?'s':''}`)},
     {label:'🏆 Produto mais vendido',data:produtoMaisVendido},
     {label:'📈 Melhora da semana',data:topMelhora},
   ].filter(x=>x.data);
@@ -2107,6 +2116,8 @@ function attachSwipeToDelete(container,selector,deleteFn,renderFn){
 }
 
 function renderHome(){
+  checkMedalAchievements();
+  renderMedalNotice('home-medal-notice');
   renderCriticalMetaNotice();
   renderEscritorioPanel();
   renderUrgentPanel();
@@ -3256,7 +3267,10 @@ function renderTeam(filter){
   teamFilter=filter;
   const list=document.getElementById('team-list');
   let chatters=S.chatters;
-  if(filter!=='all')chatters=chatters.filter(c=>c.level===filter);
+  // 'padrinho' também pega quem acumula o 2º cargo (isPadrinho) mesmo se o
+  // nível principal for outro (ex: Sênior + Padrinho).
+  if(filter==='padrinho')chatters=chatters.filter(c=>c.level==='padrinho'||c.isPadrinho);
+  else if(filter!=='all')chatters=chatters.filter(c=>c.level===filter);
   if(!chatters.length){list.innerHTML='<div class="empty"><div class="empty-ic">▦</div><div class="empty-tx">Nenhum chatter encontrado</div></div>';return;}
 
   const basicoGroup=chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
@@ -3276,7 +3290,7 @@ function renderTeam(filter){
       <div class="rinfo">
         <div style="display:flex;align-items:center;gap:6px"><span class="rname" style="${isReserva?'color:var(--bad)':''}">${c.name}</span><div class="tc-status" style="background:${dotColor}"></div></div>
         <div class="rmeta">${c.discord||''} · ${moneyShort(revWeek)} semana${extraWeek>0?` · ⚡${moneyShort(extraWeek)} extra`:''}${htTotal>0?` · 🎯${avgHtPct}% HT (${moneyShort(htTotal)})`:''}</div>
-        <div class="tmeta-row">${timeBadge}<span class="pill ${LVLCLASS[c.level]}" style="border:1px solid">${c.level}</span>${otMins>0?`<span class="pill pill-warn">+${otMins}min`:''}</div>
+        <div class="tmeta-row">${timeBadge}<span class="pill ${LVLCLASS[c.level]}" style="border:1px solid">${c.level}</span>${c.isPadrinho&&c.level!=='padrinho'?`<span class="pill" style="border:1px solid;color:#B8860B;background:rgba(184,134,11,.16)">👑 Padrinho</span>`:''}${otMins>0?`<span class="pill pill-warn">+${otMins}min`:''}</div>
       </div>
       <span style="color:var(--text3);font-size:18px">›</span>
     </div>`;
@@ -3457,7 +3471,7 @@ function openChatterDetail(id){
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
       <div class="ravatar" style="width:50px;height:50px;font-size:19px;background:${color}22;color:${color}">${c.name.slice(0,2).toUpperCase()}</div>
       <div><div style="font-size:17px;font-weight:700">${c.name}</div><div style="font-size:12px;color:var(--text2)">${c.discord||'sem discord'}</div>
-      <span class="pill ${LVLCLASS[c.level]}" style="border:1px solid;margin-top:4px">${c.level}</span></div>
+      <span class="pill ${LVLCLASS[c.level]}" style="border:1px solid;margin-top:4px">${c.level}</span>${c.isPadrinho&&c.level!=='padrinho'?` <span class="pill" style="border:1px solid;margin-top:4px;color:#B8860B;background:rgba(184,134,11,.16)">👑 Padrinho</span>`:''}</div>
     </div>
     ${mapeamentoSummaryHtml(id)}
     <div class="statgrid">
@@ -3474,6 +3488,12 @@ function openChatterDetail(id){
         <option value="senior" ${c.level==='senior'?'selected':''}>Sênior</option>
         <option value="padrinho" ${c.level==='padrinho'?'selected':''}>👑 Padrinho</option>
       </select>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text2)">
+        <input type="checkbox" id="dl-padrinho-${id}" ${c.isPadrinho?'checked':''} style="width:17px;height:17px;accent-color:var(--accent);cursor:pointer">
+        👑 Também é Padrinho <span style="color:var(--text3);font-size:11px">(acumula com o nível acima — ex: Sênior + Padrinho)</span>
+      </label>
     </div>
     <div class="field"><label class="flabel">Time</label>
       <div style="display:flex;gap:8px">
@@ -3576,8 +3596,10 @@ function saveChatterDetail(id){
   const c=S.chatters.find(ch=>ch.id===id);if(!c)return;
   const levelEl=document.getElementById('dl-level-'+id);
   const notesEl=document.getElementById('dl-notes-'+id);
+  const padrinhoEl=document.getElementById('dl-padrinho-'+id);
   if(levelEl)c.level=levelEl.value||c.level;
   if(notesEl)c.notes=notesEl.value; // intentional: allow clearing notes
+  if(padrinhoEl)c.isPadrinho=!!padrinhoEl.checked; // 2º cargo acumulável (ex: Sênior + Padrinho)
   save();toast('✅ Atualizado!');renderTeam(teamFilter);
 }
 function deleteChatter(id){
@@ -3689,6 +3711,16 @@ function renderReport_Weekly(){
   const goals=S.chatterWeekGoals[wkey]||{};
   const wkStart=fmt(wd[0]),wkEnd=fmt(wd[6]);
 
+  // Sempre sincroniza os campos manuais com o rascunho da semana ATUAL logo de
+  // cara (antes de qualquer outra lógica que confira se estão vazios) — antes
+  // isso só rodava no fim da função e só quando o campo já estava vazio, então
+  // ao trocar de semana o texto da semana anterior ficava "preso" no campo em
+  // vez de mostrar (ou esvaziar para) o rascunho da nova semana.
+  ['erro1','erro2','erro3','prob1','prob2','plano1','plano2','plano3','ajustes'].forEach(key=>{
+    const el=document.getElementById('rpt-'+key);
+    if(el)el.value=getReportDraft(key)||'';
+  });
+
   // Update week range header
   const rangeEl=document.getElementById('report-wk-range');
   if(rangeEl)rangeEl.textContent=`${wd[0].getDate()}/${wd[0].getMonth()+1} a ${wd[6].getDate()}/${wd[6].getMonth()+1}`;
@@ -3756,8 +3788,8 @@ function renderReport_Weekly(){
           ${maxG>0?`<div class="reprow"><div class="replb">Maior gap sem venda</div><div class="repval" style="color:${maxG>60?'var(--bad)':maxG>30?'var(--warn)':'var(--ok)'}">${maxG}min</div></div>`:''}`;
         })()}
         <div class="reprow"><div class="replb">Ocorrências</div><div class="repval">${weekAbs.length?weekAbs.map(a=>({falta:'Falta',atraso:'Atraso',saida_antecipada:'Saída antecip.'})[a.type]||a.type).join(', '):'Nenhuma'}</div></div>
-        <div class="field" style="margin-top:8px"><label class="flabel">Principal erro</label><input class="finput" id="rpt-erro-${c.id}" value="${getReportDraft('erro-'+c.id)}" placeholder="Descreva o erro principal..."></div>
-        <div class="field"><label class="flabel">Ação tomada</label><input class="finput" id="rpt-acao-${c.id}" value="${getReportDraft('acao-'+c.id)}" placeholder="O que você fez a respeito..."></div>
+        <div class="field" style="margin-top:8px"><label class="flabel">Principal erro</label><input class="finput" id="rpt-erro-${c.id}" value="${getReportDraft('erro-'+c.id)}" placeholder="Descreva o erro principal..." onblur="saveReportDraftField('erro-${c.id}',this.value)"></div>
+        <div class="field"><label class="flabel">Ação tomada</label><input class="finput" id="rpt-acao-${c.id}" value="${getReportDraft('acao-'+c.id)}" placeholder="O que você fez a respeito..." onblur="saveReportDraftField('acao-${c.id}',this.value)"></div>
         ${orients.length?`<div style="margin-top:6px;font-size:11.5px;color:var(--text2)">📋 ${orients.length} orientação(ões) esta semana</div>`:''}
       </div>`;
     }).join('');
@@ -3799,7 +3831,7 @@ function renderReport_Weekly(){
               ${['Boa','Média','Ruim'].map(op=>`<button id="rpt-evol-${c.id}-${op}" onclick="setReportToggle('evoltest-${c.id}','${op}','rpt-evol-${c.id}',['Boa','Média','Ruim'])" style="flex:1;padding:6px 4px;border-radius:8px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:11.5px;color:var(--text2)">${op}</button>`).join('')}
             </div>
           </div>
-          <div class="field"><label class="flabel">Principais erros</label><input class="finput" id="rpt-erroteste-${c.id}" value="${getReportDraft('erroteste-'+c.id)}" placeholder="Descreva os principais erros..."></div>
+          <div class="field"><label class="flabel">Principais erros</label><input class="finput" id="rpt-erroteste-${c.id}" value="${getReportDraft('erroteste-'+c.id)}" placeholder="Descreva os principais erros..." onblur="saveReportDraftField('erroteste-${c.id}',this.value)"></div>
           ${decision===''?`<div style="font-size:11px;color:var(--text3);margin-top:4px">Decisão (Aprovar/Continuar/Reprovar) é definida na aba Testers</div>`:''}
           <div style="font-size:10.5px;color:var(--text3);margin-top:6px">⇠ arraste pro lado se ele não estava nessa semana</div>
         </div>`;
@@ -3863,12 +3895,6 @@ function renderReport_Weekly(){
   // ---- Auto-sugestão para Seção 5 (Erros) e Seção 7 (Problemas) ----
   // Só preenche campos vazios — nunca sobrescreve o que o gestor já escreveu.
   autoSuggestReportIssues(wd);
-
-  // Restore saved draft values for manual fields
-  ['erro1','erro2','erro3','prob1','prob2','plano1','plano2','plano3','ajustes'].forEach(key=>{
-    const el=document.getElementById('rpt-'+key);
-    if(el&&!el.value)el.value=getReportDraft(key)||'';
-  });
 }
 
 // Analisa dados reais do app (faltas sem justificativa, metas não batidas,
@@ -4023,14 +4049,18 @@ function buildReportLines(){
   const d=key=>getReportDraft(key);
   const wkStart=fmt(wd[0]),wkEnd=fmt(wd[6]);
 
+  // Mesmo filtro da tela (renderReport_Weekly) — exclui tester/elite/desligado
+  // e só considera quem faturou, senão o PDF e a tela mostram números
+  // diferentes de faturamento total/melhor/pior chatter.
   let totalRev=0;
-  const chatterRevs=S.chatters.map(c=>{
+  const chatterRevs=S.chatters.filter(c=>c.time!=='tester'&&c.time!=='elite'&&!isChatterTerminated(c)).map(c=>{
     let r=0;wd.forEach(wdate=>S.models.forEach(m=>{r+=parseFloat(S.revenues[`${c.id}_${m.id}_${fmt(wdate)}`])||0;}));
-    totalRev+=r;return{c,r};
-  }).sort((a,b)=>b.r-a.r);
-  const avgRev=chatterRevs.filter(x=>x.r>0).length?totalRev/chatterRevs.filter(x=>x.r>0).length:0;
+    return{c,r};
+  }).filter(x=>x.r>0).sort((a,b)=>b.r-a.r);
+  chatterRevs.forEach(x=>totalRev+=x.r);
+  const avgRev=chatterRevs.length?totalRev/chatterRevs.length:0;
   const best=chatterRevs[0];
-  const worst=[...chatterRevs].reverse().find(x=>x.r>0);
+  const worst=chatterRevs[chatterRevs.length-1];
 
   const lines=[];
   lines.push(`📊 RELATÓRIO SEMANAL CHAT`);
@@ -4065,7 +4095,15 @@ function buildReportLines(){
   });
 
   lines.push(`3. CHATTERS EM TESTE`);
-  const testersRep=S.chatters.filter(c=>c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision);
+  // Mesmo filtro da tela: exclui quem foi arrastado pra fora desse relatório
+  // específico e quem ainda nem existia até o fim dessa semana.
+  const hiddenTestersWk=(S.reportTesterHidden&&S.reportTesterHidden[wkey])||[];
+  const testersRep=S.chatters.filter(c=>{
+    if(!(c.time==='tester'||S.chatterFichas?.[c.id]?.testerDecision))return false;
+    if(hiddenTestersWk.includes(c.id))return false;
+    if(c.createdAt&&c.createdAt.slice(0,10)>wkEnd)return false;
+    return true;
+  });
   if(!testersRep.length){
     lines.push(`Nenhum tester em teste esta semana.`);
     lines.push(``);
@@ -5997,6 +6035,8 @@ const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de per
 
 Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real (pra preencher comoMotivar de forma específica, não genérica).
 
+IMPORTANTE — cuidado e sensibilidade na análise: essa pessoa está sendo avaliada de verdade pela liderança, então o mapeamento tem peso real sobre como ela vai ser tratada. Evite julgamentos genéricos, duros ou definitivos com base em pouca informação — uma entrevista curta não define uma pessoa por completo. Brevidade, nervosismo ou respostas mais tímidas NÃO são sinal automático de baixo potencial ou fraqueza — considere que entrevistas são situações de pressão e trate isso com contexto, não como defeito de personalidade. Busque nuance: quase ninguém é só uma coisa. Prefira descrever potencial e condições de sucesso ("funciona bem quando...") a rótulos negativos fechados ("é fraco em..."). Sempre que apontar um ponto de atenção, baseie-se em algo específico que a pessoa realmente disse ou demonstrou na transcrição — nunca em suposição ou estereótipo. O objetivo final é ajudar essa pessoa a crescer, não catalogá-la.
+
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
 {
   "personalidadeUmaFrase": "desafio: descreva a personalidade dessa pessoa em UMA ÚNICA FRASE curta, direta e específica — nada de clichê genérico tipo 'pessoa esforçada e comunicativa', tem que soar como algo que só se diria sobre ELA",
@@ -6701,6 +6741,8 @@ function renderMapTranscricoes(){
 const MAPEAMENTO_NOVOS_SYSTEM=`Você é uma psicóloga organizacional e recrutadora sênior especialista em avaliar candidatos NOVOS pra vaga de chatter/atendimento em redes sociais (OnlyFans), a partir de uma breve auto-apresentação gravada (não é uma entrevista estruturada — pode ser curta e informal). Você recebe uma lista de pessoas diferentes, cada uma com nome e sua transcrição individual.
 
 Pra cada pessoa, analise o CONTEÚDO do que foi dito e também sinais de linguagem (segurança, clareza, hesitação, entusiasmo, tom) — preste atenção especial a: (1) como essa pessoa tende a responder à autoridade/liderança (se posiciona, é dócil, questiona, busca aprovação), (2) traços SUTIS de personalidade que não estão explícitos no conteúdo, só no JEITO de falar, e (3) a experiência profissional que ela relatou (empregos anteriores, tempo de experiência, se já trabalhou com atendimento/vendas/redes sociais, se tem histórico de instabilidade ou passagens curtas) — avalie objetivamente se essa bagagem profissional é BOA, MÉDIA ou FRACA pra essa vaga especificamente, e por quê.
+
+IMPORTANTE — cuidado e sensibilidade: é uma auto-apresentação curta e informal, gravada muitas vezes com nervosismo por ser uma candidata a uma vaga nova — não trate hesitação, timidez ou uma gravação mais curta/desorganizada como sinal automático de fraqueza ou baixo potencial; considere que é uma situação de pressão pra quem está gravando. Evite rótulos duros ou definitivos ("essa pessoa é X") com base em pouquíssima informação — prefira descrições específicas e com nuance, e só marque riscoDetectado=true quando houver um sinal CONCRETO no que foi dito (não um palpite ou estereótipo). O objetivo é dar à liderança uma leitura justa e útil pra decidir, não descartar alguém de forma precipitada.
 
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
 {
@@ -7583,6 +7625,189 @@ function removeDemanda2(id){
 }
 
 /* ===========================================================
+   ESTRATÉGIA — DIAGNÓSTICO AUTOMÁTICO DA EQUIPE
+   Responde "o que eu deveria fazer hoje?": gera prioridades,
+   status por chatter (🟢 evolução / 🟡 estagnado / 🔴 queda /
+   ⚫ risco de sair), uma ação sugerida (a partir do erro mais
+   recorrente no ChatLab) e os gargalos detectáveis com os dados
+   já existentes. Tudo derivado de dados já salvos — sem chamar
+   IA, pra responder na hora e não gastar cota.
+   =========================================================== */
+function getEstrategiaChatters(){
+  return S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
+}
+function calcChatterPctMeta(c,offset){
+  const wkey=getWeekKey(offset);
+  const goals=S.chatterWeekGoals[wkey]||{};
+  const f=S.chatterFichas[c.id];
+  const cat=f?.pagCategoria||'B';
+  const metaManual=parseFloat(goals[c.id])||0;
+  const meta=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
+  const rev=getChatterWeekRevenue(c.id,offset);
+  return meta>0?Math.round(rev/meta*100):null;
+}
+function calcChatterAvgTicket(c,offset){
+  const f=S.chatterFichas[c.id];
+  const wd=getWeekDates(offset);
+  const analytics=f?.analytics?.weeklyData||{};
+  let ticketSum=0,days=0;
+  wd.forEach(d=>{const a=analytics[fmt(d)];if(a&&a.ticketMedio>0){ticketSum+=a.ticketMedio;days++;}});
+  return days>0?ticketSum/days:0;
+}
+function calcChatterDiagnostico(c){
+  const pctNow=calcChatterPctMeta(c,0);
+  const pctPrev=calcChatterPctMeta(c,-1);
+  const delta=(pctNow!=null&&pctPrev!=null)?pctNow-pctPrev:null;
+  const mNow=calcMetricasSemana(coletarAnalisesDaSemana(c.id,0));
+  const mPrev=calcMetricasSemana(coletarAnalisesDaSemana(c.id,-1));
+  const igpDelta=(mNow.avgIGP!=null&&mPrev.avgIGP!=null)?mNow.avgIGP-mPrev.avgIGP:null;
+
+  let status='semdados',label='⚪ Sem dados suficientes',cor='var(--text3)',motivo='Ainda não há faturamento ou ChatLab suficiente essa semana pra avaliar.';
+  if(pctNow!=null){
+    if(pctNow<55&&(delta==null||delta<=0)){
+      status='risco';label='⚫ Alto risco de sair';cor='#3a3a3a';
+      motivo=`Só ${pctNow}% da meta essa semana${delta!=null?(delta<0?`, caindo ${Math.abs(Math.round(delta))}pp em relação à semana passada`:', sem sinal de melhora'):''}${igpDelta!=null&&igpDelta<0?' e o atendimento no ChatLab também piorou':''}.`;
+    } else if(delta!=null&&delta<=-15){
+      status='queda';label='🔴 Em queda';cor='var(--bad)';
+      motivo=`Caiu ${Math.abs(Math.round(delta))}pp em relação à semana passada (de ${Math.round(pctPrev)}% pra ${pctNow}% da meta).`;
+    } else if((delta!=null&&delta>=10)||pctNow>=100){
+      status='evolucao';label='🟢 Em evolução';cor='var(--ok)';
+      motivo=(delta!=null&&delta>=10)?`Subiu ${Math.round(delta)}pp em relação à semana passada (de ${Math.round(pctPrev)}% pra ${pctNow}%).`:`Está batendo ${pctNow}% da meta essa semana.`;
+    } else {
+      status='estagnado';label='🟡 Estagnado';cor='var(--warn)';
+      motivo=`Em ${pctNow}% da meta, sem variação significativa em relação à semana passada${pctPrev!=null?` (${Math.round(pctPrev)}%)`:''}.`;
+    }
+  }
+  // Ação sugerida — a partir do erro mais recorrente no ChatLab (essa semana + anterior)
+  const recentAnalises=[...coletarAnalisesDaSemana(c.id,0),...coletarAnalisesDaSemana(c.id,-1)];
+  const errosTally={};
+  recentAnalises.forEach(a=>{if(a.tags?.principalErro)errosTally[a.tags.principalErro]=(errosTally[a.tags.principalErro]||0)+1;});
+  const maiorErro=Object.entries(errosTally).sort((a,b)=>b[1]-a[1])[0];
+  let acao=null;
+  if(maiorErro){
+    acao=`Foco em "${maiorErro[0]}" — foi o erro mais recorrente no ChatLab recentemente (${maiorErro[1]}x). Sugestão: revisar 2-3 conversas com essa pessoa e fazer um roleplay rápido sobre isso.`;
+  } else if(status==='queda'||status==='risco'){
+    acao='Sem análises recentes do ChatLab pra apontar uma causa específica — vale rodar uma auditoria de conversa dela essa semana.';
+  } else if(status==='estagnado'){
+    acao='Sem um erro técnico se repetindo — pode ser falta de volume/leads mais do que técnica. Vale um 1:1 rápido pra entender o que está travando.';
+  }
+  return{chatter:c,status,label,cor,motivo,acao,pctNow,pctPrev,delta,igpDelta,mNow};
+}
+function calcChatterGargalos(c,diag){
+  const gargalos=[];
+  const avgTicket=calcChatterAvgTicket(c,0);
+  if(avgTicket>0&&avgTicket<130)gargalos.push({tipo:'Ticket baixo',detalhe:`Ticket médio de ${money(avgTicket)} essa semana`});
+  const taxaConv=diag.mNow.taxaConversao;
+  if(taxaConv!=null&&taxaConv<20)gargalos.push({tipo:'Conversão baixa',detalhe:`Só ${taxaConv}% das conversas analisadas no ChatLab converteram essa semana`});
+  if(diag.pctNow!=null&&diag.pctNow<40)gargalos.push({tipo:'Muito abaixo da meta',detalhe:`${diag.pctNow}% da meta — pode ser poucos leads chegando ou tempo demais com clientes sem potencial`});
+  return gargalos;
+}
+function renderEstrategiaDiagnostico(){
+  const chatters=getEstrategiaChatters();
+  const prioridadesEl=document.getElementById('estrategia-prioridades');
+  const diagnosticoEl=document.getElementById('estrategia-diagnostico');
+  const gargalosEl=document.getElementById('estrategia-gargalos');
+  if(!chatters.length){
+    if(prioridadesEl)prioridadesEl.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Sem chatters no time ainda.</div>';
+    if(diagnosticoEl)diagnosticoEl.innerHTML='';
+    if(gargalosEl)gargalosEl.innerHTML='';
+    return;
+  }
+  const diags=chatters.map(c=>calcChatterDiagnostico(c));
+  const ordem={risco:0,queda:1,estagnado:2,semdados:3,evolucao:4};
+  const diagsOrdenados=[...diags].sort((a,b)=>ordem[a.status]-ordem[b.status]);
+
+  const prioritarias=diagsOrdenados.filter(d=>d.status==='risco'||d.status==='queda').slice(0,5);
+  if(prioridadesEl){
+    prioridadesEl.innerHTML=!prioritarias.length
+      ?'<div style="font-size:12.5px;color:var(--ok)">✅ Ninguém em queda ou risco essa semana — time estável.</div>'
+      :prioritarias.map(d=>`
+        <div style="background:var(--bg-soft);border-left:3px solid ${d.cor};border-radius:8px;padding:10px 12px;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:700">${d.label} — ${d.chatter.name}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:3px">${d.motivo}</div>
+          ${d.acao?`<div style="font-size:11.5px;color:var(--accent-strong);margin-top:5px">👉 ${d.acao}</div>`:''}
+        </div>`).join('');
+  }
+
+  if(diagnosticoEl){
+    diagnosticoEl.innerHTML=diagsOrdenados.map(d=>`
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
+        <div style="font-size:16px;line-height:1;margin-top:1px">${d.label.split(' ')[0]}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700">${d.chatter.name} <span style="font-weight:500;color:${d.cor};font-size:11.5px">· ${d.label.replace(/^\S+\s/,'')}</span></div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">${d.motivo}</div>
+          ${d.acao?`<div style="font-size:11.5px;color:var(--text3);margin-top:3px">👉 ${d.acao}</div>`:''}
+        </div>
+      </div>`).join('');
+  }
+
+  if(gargalosEl){
+    const gargalosPorChatter=diags.map(d=>({chatter:d.chatter,itens:calcChatterGargalos(d.chatter,d)})).filter(g=>g.itens.length);
+    const detectaveis=gargalosPorChatter.length?gargalosPorChatter.map(g=>`
+      <div style="margin-bottom:8px">
+        <div style="font-size:12.5px;font-weight:700">${g.chatter.name}</div>
+        ${g.itens.map(it=>`<div style="font-size:12px;color:var(--text2);padding-left:8px">• <strong>${it.tipo}:</strong> ${it.detalhe}</div>`).join('')}
+      </div>`).join(''):'<div style="font-size:12px;color:var(--ok)">✅ Nenhum gargalo automático detectado essa semana.</div>';
+    gargalosEl.innerHTML=`
+      ${detectaveis}
+      <div style="border-top:1px solid var(--line);margin:12px 0 8px"></div>
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">👀 Exigem observação manual (sem dado automático ainda)</div>
+      <div style="font-size:11.5px;color:var(--text3);line-height:1.7">
+        <div>• <strong>Poucos leads</strong> — o app não conta leads recebidos ainda.</div>
+        <div>• <strong>Demora na resposta</strong> — o app mede intervalo entre vendas, não tempo de resposta por mensagem.</div>
+        <div>• <strong>Pouca insistência / abandono de conversa</strong> — dá pra notar auditando conversas no ChatLab.</div>
+        <div>• <strong>Excesso de desconto</strong> — não existe campo de desconto lançado ainda.</div>
+      </div>`;
+  }
+}
+
+/* ===========================================================
+   MEDALHAS — detecta quando um chatter SOBE de medalha (nunca
+   avisa em queda) comparando o cálculo automático de hoje com o
+   último valor visto. O pagamento já reflete a medalha automática
+   sozinho (autoMedalForPct é recalculado ao vivo na aba Pagamento)
+   — isso aqui só cuida do aviso pra gestora ficar sabendo.
+   =========================================================== */
+function checkMedalAchievements(){
+  const chatters=getEstrategiaChatters();
+  let changed=false;
+  chatters.forEach(c=>{
+    const pct=calcChatterPctMeta(c,0);
+    if(pct==null)return;
+    const medalAtual=autoMedalForPct(pct);
+    const anterior=S.chatterLastMedal[c.id]??0;
+    if(medalAtual>anterior){
+      S.medalAchievements.unshift({
+        id:'medal'+Date.now()+Math.random().toString(36).slice(2,6),
+        chatterId:c.id,chatterName:c.name,medal:medalAtual,
+        wkey:getWeekKey(0),date:new Date().toISOString(),seen:false
+      });
+      if(S.medalAchievements.length>30)S.medalAchievements.length=30;
+      changed=true;
+    }
+    S.chatterLastMedal[c.id]=medalAtual;
+  });
+  if(changed)save();
+}
+function dismissMedalAchievement(id){
+  const it=(S.medalAchievements||[]).find(m=>m.id===id);
+  if(it){it.seen=true;save();}
+  renderMedalNotice('home-medal-notice');
+  renderMedalNotice('estrategia-medal-notice');
+}
+function renderMedalNotice(containerId){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const pendentes=(S.medalAchievements||[]).filter(m=>!m.seen);
+  if(!pendentes.length){el.innerHTML='';return;}
+  el.innerHTML=pendentes.map(m=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--accent-soft);border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12.5px">
+      <span>${PAG_MEDAL_LABEL[m.medal]||''} <strong>${m.chatterName}</strong> alcançou uma nova medalha essa semana — já reflete automaticamente no pagamento.</span>
+      <button class="btn btn-ghost btn-xs" onclick="dismissMedalAchievement('${m.id}')" title="Marcar como visto">✕</button>
+    </div>`).join('');
+}
+
+/* ===========================================================
    ESTRATÉGIAS DE LIDERANÇA — substitui o antigo "Motivacional da
    semana" (texto livre por semana) por uma lista de ações reais,
    organizadas por prazo, marcáveis como feitas, editáveis e com
@@ -7663,7 +7888,7 @@ function renderLiderancaHome(){
   const items=S.liderancaEstrategias||[];
   const pending=items.filter(t=>!t.done);
   if(!items.length){
-    el.innerHTML='<div style="color:var(--text3);font-size:13px">Nenhuma estratégia cadastrada ainda.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="navTo(\'gestao\')">Adicionar na Gestão →</button></div>';
+    el.innerHTML='<div style="color:var(--text3);font-size:13px">Nenhuma estratégia cadastrada ainda.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="navTo(\'estrategia\')">Adicionar na Estratégia →</button></div>';
     return;
   }
   if(!pending.length){
@@ -7675,7 +7900,7 @@ function renderLiderancaHome(){
   el.innerHTML=`
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${pending.length} ação${pending.length!==1?'ões':''} pendente${pending.length!==1?'s':''}${imediatos.length?` · ${imediatos.length} urgente${imediatos.length!==1?'s':''}`:''}</div>
     ${destaque.slice(0,2).map(t=>`<div style="font-size:13px;line-height:1.5;margin-bottom:8px;padding-left:8px;border-left:2px solid ${t.categoria==='imediato'?'var(--bad)':'var(--info)'}">${t.texto.length>150?t.texto.slice(0,150)+'…':t.texto}</div>`).join('')}
-    <button class="btn btn-ghost btn-xs" onclick="navTo('gestao')">Ver tudo →</button>
+    <button class="btn btn-ghost btn-xs" onclick="navTo('estrategia')">Ver tudo →</button>
   `;
 }
 
@@ -8607,8 +8832,8 @@ function suggestTrainingText(chatterId){
 
     const timeLabel=c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Tester</span>':'';
 
-    html+=`<div class="panel" style="margin-bottom:10px;border-left:3px solid ${pct===null?'var(--line)':pct>=80?'var(--ok)':pct>=50?'var(--warn)':'var(--bad)'}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    const evoHead=`<div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="display:flex;align-items:center;gap:6px">
           <div style="font-weight:800;font-size:15px">${c.name}</div>${timeLabel}
           <span class="pill pill-flat" style="font-size:9px">${c.level}</span>
@@ -8618,10 +8843,11 @@ function suggestTrainingText(chatterId){
           ${meta>0?`<div style="font-size:11px;color:var(--text3)">${pct}% da meta</div>`:''}
         </div>
       </div>
-      ${meta>0?`<div style="background:var(--line);border-radius:4px;height:5px;overflow:hidden;margin-bottom:10px">
+      ${meta>0?`<div style="background:var(--line);border-radius:4px;height:5px;overflow:hidden;margin-top:8px">
         <div style="height:5px;border-radius:4px;background:${pct>=100?'var(--ok)':pct>=60?'var(--warn)':'var(--bad)'};width:${Math.min(100,pct||0)}%"></div>
       </div>`:''}
-      ${days>0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+    </div>`;
+    const evoBody=`${days>0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
           <div style="font-size:9px;color:var(--text3)">Ticket médio</div>
           <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(avgTicket)}</div>
@@ -8678,8 +8904,8 @@ function suggestTrainingText(chatterId){
           <button class="btn btn-ghost btn-xs" onclick="sendTrainingToWeek('${c.id}')">→ orientações da semana</button>
         </div>
         <textarea class="ftext" style="min-height:52px;font-size:12.5px;background:#fff" placeholder="Escreva como treinar ${c.name} esta semana..." onblur="saveChatterTraining('${c.id}',this.value)">${(S.chatterTraining[c.id]||suggestTrainingText(c.id))}</textarea>
-      </div>
-    </div>`;
+      </div>`;
+    html+=fichaAccordion('evocard-'+c.id,`margin-bottom:10px;border-left:3px solid ${pct===null?'var(--line)':pct>=80?'var(--ok)':pct>=50?'var(--warn)':'var(--bad)'}`,evoHead,evoBody);
   });
 
   // Team summary report
@@ -8877,7 +9103,6 @@ function renderGestao(){
   renderTreinamentoFixo();
   renderAquecimento();
   renderPrizePanel();
-  renderLiderancaEstrategica();
   renderModelRequestsSplit();
   renderScheduleRequests();
   renderWeeklyChatAnalysisBoard();
@@ -9182,7 +9407,7 @@ function renderChatLabHistorico(){
 
   el.innerHTML=grupos.map(g=>{
     const col=g.avgIGP>=70?'var(--ok)':g.avgIGP>=50?'var(--warn)':g.avgIGP?'var(--bad)':'var(--text3)';
-    return`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden">
+    return`<div class="cl-group-row" data-key="${g.cid}" style="border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden;touch-action:pan-y">
       <div style="padding:10px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleClGroup('${g.cid}')">
         <div>
           <div style="font-size:13px;font-weight:700">${g.name}</div>
@@ -9210,6 +9435,17 @@ function renderChatLabHistorico(){
       </div>
     </div>`;
   }).join('');
+  attachSwipeToDelete(el,'.cl-group-row',cid=>excluirChatlabPessoa(cid),renderChatLabHistorico);
+}
+// Arrastar pro lado remove TODAS as análises do ChatLab dessa pessoa —
+// sempre pede confirmação antes, já que é uma exclusão de histórico inteiro.
+function excluirChatlabPessoa(cid){
+  const c=S.chatters.find(ch=>ch.id===cid);
+  const nome=c?c.name:'essa pessoa';
+  if(!confirm(`Excluir TODO o histórico do ChatLab de ${nome}? Isso remove todas as conversas analisadas dela. Essa ação não pode ser desfeita.`))return;
+  S.chatlabAnalyses=S.chatlabAnalyses.filter(a=>(a.chatterId||'_sem')!==cid);
+  save();
+  toast('🗑️ Histórico do ChatLab removido');
 }
 function toggleClGroup(cid){
   const b=document.getElementById('cl-gbody-'+cid),ic=document.getElementById('cl-gic-'+cid);
@@ -10285,8 +10521,15 @@ function renderEstudos(){
   renderMelhoras();
   renderStudyList();
   renderEstudosHistorico();
+}
+
+function renderEstrategia(){
+  checkMedalAchievements();
+  renderMedalNotice('estrategia-medal-notice');
+  renderLiderancaEstrategica();
   renderConselheiroSemanal();
   renderConselheiroPessoalHistorico();
+  renderEstrategiaDiagnostico();
 }
 
 /* ===========================================================
@@ -11074,7 +11317,7 @@ function mandamentosPanelHtml(cid){
   const atendeCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='atende').length;
   const naoCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='nao').length;
   const padrinhoId=S.chatterFichas?.[cid]?.padrinhoId||'';
-  const padrinhos=S.chatters.filter(ch=>ch.level==='padrinho'&&ch.id!==cid);
+  const padrinhos=S.chatters.filter(ch=>(ch.level==='padrinho'||ch.isPadrinho)&&ch.id!==cid);
   const padrinhoSelectHtml=`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-top:2px">
     <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">👑 Padrinho responsável</div>
     ${padrinhos.length?`<select class="fselect" onchange="setPadrinhoResponsavel('${cid}',this.value)">
@@ -11246,7 +11489,7 @@ function aplicarAvaliacaoPendente(docId,data){
     if(data.observacoesGerais)S.chatterFichas[c.id].padrinhoObservacoesGerais=data.observacoesGerais;
     if(data.padrinhoNome){
       const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
-      const padrinhoMatch=S.chatters.find(ch=>ch.level==='padrinho'&&norm(ch.name)===norm(data.padrinhoNome));
+      const padrinhoMatch=S.chatters.find(ch=>(ch.level==='padrinho'||ch.isPadrinho)&&norm(ch.name)===norm(data.padrinhoNome));
       if(padrinhoMatch)S.chatterFichas[c.id].padrinhoId=padrinhoMatch.id;
     }
     save();
@@ -11359,7 +11602,7 @@ function aplicarAfilhadoClaimPendente(docId,data){
       :S.chatters.find(ch=>normalizeName(ch.name)===normalizeName(data.testerNome));
     const padrinho=data.padrinhoId
       ?S.chatters.find(ch=>ch.id===data.padrinhoId)
-      :S.chatters.find(ch=>ch.level==='padrinho'&&normalizeName(ch.name)===normalizeName(data.padrinhoNome));
+      :S.chatters.find(ch=>(ch.level==='padrinho'||ch.isPadrinho)&&normalizeName(ch.name)===normalizeName(data.padrinhoNome));
     if(!tester){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
       return;
@@ -13034,16 +13277,18 @@ function getCompanyMonthToDateRevenue(){
   }
   return total;
 }
+// Frente 2 — meta global da operação (Sistema de Remuneração Gerente, seção 01):
+// proporcional até 100% (R$1.500 na meta cheia), e acima de 100% cada ponto
+// percentual vale o dobro (R$30/ponto, em vez de R$15/ponto) — sem limite.
 function calcGerMeta2(metaGlobal, fatGlobal){
   if(!metaGlobal||!fatGlobal)return 0;
-  const pct=fatGlobal/metaGlobal;
-  if(pct<=0.9)return Math.round(1500*pct);
-  if(pct<=1.0)return 1500;
-  if(pct<=1.1)return 1800;
-  if(pct<=1.2)return 2100;
-  if(pct<=1.3)return 2400;
-  return Math.round(2400+(pct-1.3)*metaGlobal*0.008);
+  const pct=(fatGlobal/metaGlobal)*100; // em pontos percentuais
+  if(pct<=100)return Math.round(pct*15);
+  return Math.round(1500+(pct-100)*30);
 }
+// Piso garantido do gerente (R$3.000/mês) — rede de segurança: se a soma das
+// duas frentes não chegar lá, a diferença é completada. Nunca reduz o total.
+const GER_PISO_GARANTIDO=3000;
 
 function renderGerChattersConfig(){
   // Config manual removida — meta e faturamento de cada chatter agora vêm
@@ -13089,7 +13334,9 @@ function renderGerPreview(){
   },0);
   const fatGlobal=getCompanyMonthToDateRevenue(); // faturamento real do mês, automático
   const frente2=calcGerMeta2(metaGlobal,fatGlobal);
-  const total=frente1+frente2; // vem só do resultado real — sem piso artificial
+  const somaFrentes=frente1+frente2;
+  const pisoAplicado=somaFrentes<GER_PISO_GARANTIDO;
+  const total=Math.max(somaFrentes,GER_PISO_GARANTIDO); // piso garantido de R$3.000 — nunca abaixo disso
 
   el.innerHTML=`
     <div style="background:var(--bg-soft);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--text2)">
@@ -13113,19 +13360,288 @@ function renderGerPreview(){
           <td colspan="4" style="padding:8px 10px;font-weight:700">Frente 2 — meta global (${metaGlobal>0?Math.round(fatGlobal/metaGlobal*100):0}%)</td>
           <td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);font-weight:700;color:var(--info)">${money(frente2)}</td>
         </tr>`:''}
+        ${pisoAplicado?`<tr style="background:var(--warn-soft)">
+          <td colspan="4" style="padding:8px 10px;font-weight:700;color:var(--warn)">🛡️ Piso garantido aplicado (frentes somaram ${money(somaFrentes)})</td>
+          <td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);font-weight:700;color:var(--warn)">${money(GER_PISO_GARANTIDO-somaFrentes)}</td>
+        </tr>`:''}
         <tr style="background:var(--accent-soft)">
-          <td colspan="4" style="padding:10px;font-weight:800;font-size:14px;color:var(--accent)">Total do mês (real)</td>
+          <td colspan="4" style="padding:10px;font-weight:800;font-size:14px;color:var(--accent)">Total do mês${pisoAplicado?' (piso garantido)':' (real)'}</td>
           <td style="padding:10px;text-align:right;font-family:var(--font-mono);font-weight:800;font-size:18px;color:var(--accent)">${money(total)}</td>
         </tr>
         </tbody>
       </table>
-    </div>`;
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px">Piso garantido: R$3.000/mês · Sem teto — não há limite pra soma das frentes num mês forte.</div>`;
 }
 
 /* ===========================================================
    PROJEÇÃO — análise mensal de desenvolvimento por chatter
    =========================================================== */
+/* ===========================================================
+   PROJEÇÃO DA EMPRESA — "se continuar assim, onde vamos chegar?"
+   Faturamento (dia/semana/mês + cenários), meta (falta/ritmo),
+   performance (ticket/conversão/leads), comissão projetada
+   (chatters + liderança) e um simulador "e se...?" — tudo
+   derivado dos dados já existentes (faturamento, metas, ChatLab).
+   =========================================================== */
+function getProjecaoEmpresaData(overrides){
+  overrides=overrides||{};
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
+  const wkey=getWeekKey(0);
+  const goals=S.chatterWeekGoals[wkey]||{};
+  const wd=getWeekDates(0);
+
+  // Faturamento de hoje, por modelo e total
+  const todayKey=fmt(new Date());
+  const porModelo={};
+  let hojeTotal=0;
+  chatters.forEach(c=>{
+    (S.models||[]).forEach(m=>{
+      const v=parseFloat(S.revenues[`${c.id}_${m.id}_${todayKey}`])||0;
+      if(v>0){porModelo[m.id]=(porModelo[m.id]||0)+v;hojeTotal+=v;}
+    });
+  });
+
+  // Semana: real até hoje + projeção do resto da semana no ritmo diário médio
+  const todayDow=new Date().getDay();
+  const diasPassadosSemana=todayDow===0?7:todayDow;
+  const semanaAtual=chatters.reduce((s,c)=>s+getChatterWeekRevenue(c.id,0),0);
+  const semanaProjetada=diasPassadosSemana>0?(semanaAtual/diasPassadosSemana)*7:semanaAtual;
+
+  const fatMesAteAgora=getCompanyMonthToDateRevenue();
+  const mesProjetadoBase=getCompanyMonthlyProjection(); // já existe: soma da média semanal recente de cada chatter × 30/7
+
+  const metaGlobalMes=chatters.reduce((s,c)=>{
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaVal=parseFloat(goals[c.id])||0;
+    const meta=metaVal>0?metaVal:(PAG_CATS[cat]?.n100||0);
+    return s+meta*(30/7);
+  },0);
+
+  // Simulador — ajustes aplicados de forma simples e transparente sobre a
+  // projeção base (não é um modelo estatístico, é uma estimativa de impacto)
+  const ajusteConversao=overrides.conversao||0;
+  const ajusteTicket=overrides.ticket||0;
+  const chattersExtra=overrides.chattersExtra||0;
+  const ajusteChurn=overrides.churn||0;
+  const impactoContratacao=chattersExtra>0&&chatters.length>0?(chattersExtra/chatters.length):0;
+  const fatorSimulador=Math.max(0,1+(ajusteTicket/100)+(ajusteConversao/100)+impactoContratacao+(ajusteChurn/100));
+
+  const mesProjetado=mesProjetadoBase*fatorSimulador;
+  const mesMelhor=mesProjetado*1.15;
+  const mesPior=mesProjetado*0.85;
+
+  const faltaMeta=Math.max(0,metaGlobalMes-fatMesAteAgora);
+  const pctProjetado=metaGlobalMes>0?Math.round(mesProjetado/metaGlobalMes*100):null;
+
+  const hoje=new Date();
+  const ultimoDiaMes=new Date(hoje.getFullYear(),hoje.getMonth()+1,0).getDate();
+  const diasRestantes=Math.max(1,ultimoDiaMes-hoje.getDate());
+  const ritmoDiarioNecessario=faltaMeta/diasRestantes;
+
+  let vphSum=0,vphDays=0,ticketSum=0,ticketDays=0;
+  chatters.forEach(c=>{
+    const analytics=S.chatterFichas[c.id]?.analytics?.weeklyData||{};
+    wd.forEach(d=>{
+      const a=analytics[fmt(d)];
+      if(a&&a.ticketMedio>0){
+        ticketSum+=a.ticketMedio;ticketDays++;
+        if(a.vendasPorHora>0){vphSum+=a.vendasPorHora;vphDays++;}
+      }
+    });
+  });
+  const teamValorHora=vphDays>0?vphSum/vphDays:0;
+  const horasNecessariasDia=teamValorHora>0?ritmoDiarioNecessario/teamValorHora:null;
+  const ticketMedioProjetado=ticketDays>0?(ticketSum/ticketDays)*(1+ajusteTicket/100):0;
+
+  const todasAnalisesSemana=[];
+  chatters.forEach(c=>coletarAnalisesDaSemana(c.id,0).forEach(a=>todasAnalisesSemana.push(a)));
+  const metricasTime=calcMetricasSemana(todasAnalisesSemana);
+  const conversaoEsperada=metricasTime.taxaConversao!=null?Math.max(0,Math.min(100,metricasTime.taxaConversao+ajusteConversao)):null;
+  const vendasNecessarias=(ticketMedioProjetado>0&&faltaMeta>0)?Math.ceil(faltaMeta/ticketMedioProjetado):(faltaMeta>0?null:0);
+  const leadsNecessarios=(vendasNecessarias&&conversaoEsperada>0)?Math.ceil(vendasNecessarias/(conversaoEsperada/100)):null;
+
+  // Comissão projetada dos chatters, no ritmo (ajustado) do mês, pela categoria/medalha de cada um
+  let comissaoChatters=0;
+  chatters.forEach(c=>{
+    const projMensal=getChatterAvgWeeklyRevenue(c.id)*(30/7)*fatorSimulador;
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaMensal=(parseFloat(goals[c.id])||PAG_CATS[cat]?.n100||0)*(30/7);
+    const pct=metaMensal>0?projMensal/metaMensal*100:0;
+    const medal=autoMedalForPct(pct);
+    comissaoChatters+=projMensal*(PAG_COM[medal]||0.04);
+  });
+
+  // Comissão da liderança projetada — mesma lógica do simulador de pagamento
+  // da gerência, usando o ritmo (ajustado) em vez do real até hoje
+  let frente1Proj=0;
+  chatters.forEach(c=>{
+    const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const metaVal=parseFloat(goals[c.id])||0;
+    const metaSemana=metaVal>0?metaVal:(PAG_CATS[cat]?.n100||0);
+    const projSemana=getChatterAvgWeeklyRevenue(c.id)*fatorSimulador;
+    frente1Proj+=calcGerPremio(projSemana,metaSemana);
+  });
+  const frente2Proj=calcGerMeta2(metaGlobalMes,mesProjetado);
+  const comissaoLideranca=Math.max(frente1Proj+frente2Proj,GER_PISO_GARANTIDO);
+
+  return{
+    hojeTotal,porModelo,semanaAtual,semanaProjetada,fatMesAteAgora,mesProjetado,mesMelhor,mesPior,
+    metaGlobalMes,faltaMeta,pctProjetado,ritmoDiarioNecessario,horasNecessariasDia,teamValorHora,
+    ticketMedioProjetado,conversaoEsperada,vendasNecessarias,leadsNecessarios,
+    comissaoChatters,comissaoLideranca,diasRestantes
+  };
+}
+function renderProjecaoEmpresa(sim){
+  const el=document.getElementById('proj-empresa');
+  if(!el)return;
+  sim=sim||S._projSimState||{conversao:0,ticket:0,chattersExtra:0,churn:0};
+  S._projSimState=sim;
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
+  if(!chatters.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Cadastre chatters e lance faturamento pra ver a projeção.</div>';return;}
+  const d=getProjecaoEmpresaData(sim);
+
+  const modeloLines=Object.entries(d.porModelo).sort((a,b)=>b[1]-a[1]).map(([mid,v])=>{
+    const m=(S.models||[]).find(x=>x.id===mid);
+    return`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${m?m.name:mid}</span><span style="font-family:var(--font-mono);font-weight:700">${money(v)}</span></div>`;
+  }).join('')||'<div style="font-size:12px;color:var(--text3)">Sem lançamento hoje ainda</div>';
+
+  const alertaCor=d.pctProjetado===null?'var(--text3)':d.pctProjetado>=100?'var(--ok)':d.pctProjetado>=85?'var(--warn)':'var(--bad)';
+  const aumentoNecessario=(d.mesProjetado>0&&d.faltaMeta>0)?Math.round((d.faltaMeta/d.mesProjetado)*100):null;
+
+  el.innerHTML=`
+    <div class="panel">
+      <div class="panel-head"><div><div class="panel-title">💰 Faturamento</div><div class="panel-note">Hoje, semana e mês — no ritmo atual</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Hoje</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(d.hojeTotal)}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Semana (projetada)</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(d.semanaProjetada)}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Mês (real até hoje)</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(d.fatMesAteAgora)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Por modelo (hoje)</div>
+      ${modeloLines}
+      <div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Cenários pro mês</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div style="background:var(--bad-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Pior cenário</div>
+          <div style="font-size:13px;font-weight:800;font-family:var(--font-mono);color:var(--bad)">${money(d.mesPior)}</div>
+        </div>
+        <div style="background:var(--accent-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Esperado</div>
+          <div style="font-size:13px;font-weight:800;font-family:var(--font-mono);color:var(--accent-strong)">${money(d.mesProjetado)}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Melhor cenário</div>
+          <div style="font-size:13px;font-weight:800;font-family:var(--font-mono);color:var(--ok)">${money(d.mesMelhor)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div><div class="panel-title">🎯 Meta do mês</div><div class="panel-note">Meta global = soma das metas semanais de cada chatter</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Falta pra bater</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono);color:${d.faltaMeta>0?'var(--bad)':'var(--ok)'}">${d.faltaMeta>0?money(d.faltaMeta):'Já bateu ✅'}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Projeção da meta</div>
+          <div style="font-size:14px;font-weight:800;color:${alertaCor}">${d.pctProjetado!=null?d.pctProjetado+'%':'—'}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Ritmo necessário</div>
+          <div style="font-size:13px;font-weight:800;font-family:var(--font-mono)">${money(d.ritmoDiarioNecessario)}/dia</div>
+          ${d.horasNecessariasDia?`<div style="font-size:9.5px;color:var(--text3)">≈${d.horasNecessariasDia.toFixed(1)}h de venda/dia no ritmo atual de ${money(d.teamValorHora)}/h</div>`:''}
+        </div>
+      </div>
+      ${d.pctProjetado!=null?`<div style="background:${d.pctProjetado>=100?'var(--bg-soft)':'var(--warn-soft)'};border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.6">
+        🔔 <strong>Se continuar nesse ritmo:</strong> meta mensal em ${d.pctProjetado}%${d.faltaMeta>0?`, faltarão ${money(d.faltaMeta)}${aumentoNecessario?`, é necessário aumentar as vendas em ${aumentoNecessario}%`:''}`:', a meta já está garantida no ritmo atual'}.
+      </div>`:''}
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div><div class="panel-title">📈 Performance projetada</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Ticket médio</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${d.ticketMedioProjetado>0?money(d.ticketMedioProjetado):'—'}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Conversão esperada</div>
+          <div style="font-size:14px;font-weight:800">${d.conversaoEsperada!=null?d.conversaoEsperada+'%':'—'}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Leads necessários</div>
+          <div style="font-size:14px;font-weight:800">${d.leadsNecessarios!=null?d.leadsNecessarios:'—'}</div>
+        </div>
+      </div>
+      ${d.conversaoEsperada==null?'<div style="font-size:11px;color:var(--text3);margin-top:8px">Conversão e leads dependem de análises do ChatLab dessa semana — analise mais conversas pra essa projeção aparecer.</div>':''}
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div><div class="panel-title">💵 Comissão projetada (no ritmo atual)</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Chatters (soma do time)</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(d.comissaoChatters)}</div>
+        </div>
+        <div style="background:var(--bg-soft);border-radius:9px;padding:9px;text-align:center">
+          <div style="font-size:9.5px;color:var(--text3)">Liderança (gerência)</div>
+          <div style="font-size:14px;font-weight:800;font-family:var(--font-mono)">${money(d.comissaoLideranca)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px">Comissão da operação ainda não tem uma fórmula configurada no app — se existir um % combinado, me conta que eu adiciono aqui.</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div><div class="panel-title">🧪 Simulador — "e se...?"</div><div class="panel-note">Mexa nos campos e veja o impacto na hora, sem salvar nada</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="field" style="margin-bottom:0">
+          <label class="flabel">Aumentar conversão em (pp)</label>
+          <input type="number" class="finput" id="sim-conversao" value="${sim.conversao}" step="1">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label class="flabel">Aumentar ticket médio em (%)</label>
+          <input type="number" class="finput" id="sim-ticket" value="${sim.ticket}" step="1">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label class="flabel">Contratar mais chatters</label>
+          <input type="number" class="finput" id="sim-chatters" value="${sim.chattersExtra}" step="1" min="0">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label class="flabel">Diminuir churn em (%)</label>
+          <input type="number" class="finput" id="sim-churn" value="${sim.churn}" step="1">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="aplicarSimuladorProjecao()">Calcular impacto</button>
+      ${(sim.conversao||sim.ticket||sim.chattersExtra||sim.churn)?`<button class="btn btn-ghost btn-block" style="margin-top:6px" onclick="resetSimuladorProjecao()">↺ Resetar simulação</button>`:''}
+    </div>
+  `;
+}
+function aplicarSimuladorProjecao(){
+  const sim={
+    conversao:parseFloat(document.getElementById('sim-conversao')?.value)||0,
+    ticket:parseFloat(document.getElementById('sim-ticket')?.value)||0,
+    chattersExtra:parseFloat(document.getElementById('sim-chatters')?.value)||0,
+    churn:parseFloat(document.getElementById('sim-churn')?.value)||0,
+  };
+  renderProjecaoEmpresa(sim);
+}
+function resetSimuladorProjecao(){
+  renderProjecaoEmpresa({conversao:0,ticket:0,chattersExtra:0,churn:0});
+}
+
 function renderProjecao(){
+  renderProjecaoEmpresa();
   const sel=document.getElementById('proj-chatter');
   const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   if(sel){
