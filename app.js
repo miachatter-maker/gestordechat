@@ -200,6 +200,12 @@ function migrateState(s){
     {id:'lid-seed-5',categoria:'medio',texto:'Observa mais uma semana antes de qualquer movimento.',done:false,criadoEm:new Date().toISOString()},
     {id:'lid-seed-6',categoria:'estrutural',texto:'Para de medir sua liderança pelo resultado de quem não quer crescer. Seu termômetro real são o Felipe e o Eduardo. Eles são o reflexo do que você está construindo.',done:false,criadoEm:new Date().toISOString()}
   ];
+  // Conselheiro Executivo — leitura semanal automática (dados reais, sem
+  // precisar clicar toda vez) e espaço de apoio pessoal separado (não leva
+  // dado de operação, só o texto da gestora — ver rodarConselheiro /
+  // gerarConselheiroSemanal / conversarConselheiroPessoal).
+  if(!s.conselheiroSemanal)s.conselheiroSemanal={wkey:'',text:'',generatedAt:''};
+  if(!s.conselheiroPessoal)s.conselheiroPessoal=[];
   if(!s.turnoLog)s.turnoLog={};
   if(!s.chatters)s.chatters=[];
   if(!s.shifts)s.shifts=[];
@@ -10172,6 +10178,8 @@ function renderEstudos(){
   renderMelhoras();
   renderStudyList();
   renderEstudosHistorico();
+  renderConselheiroSemanal();
+  renderConselheiroPessoalHistorico();
 }
 
 /* ===========================================================
@@ -10181,9 +10189,14 @@ function toggleConselheiro(){
   const body=document.getElementById('conselheiro-body');
   const ic=document.getElementById('conselheiro-ic');
   if(!body)return;
-  const open=body.style.display!=='none';
-  body.style.display=open?'none':'block';
-  if(ic)ic.textContent=open?'▸':'▾';
+  const wasOpen=body.style.display!=='none';
+  body.style.display=wasOpen?'none':'block';
+  if(ic)ic.textContent=wasOpen?'▸':'▾';
+  // Ao abrir (não ao fechar), gera a leitura da semana automaticamente se
+  // ainda não tiver uma pra semana atual — assim ela já encontra pronto,
+  // sem precisar clicar em nada; gerarConselheiroSemanal já checa o cache
+  // internamente e não gasta cota de IA à toa se já gerou essa semana.
+  if(!wasOpen)gerarConselheiroSemanal(false);
 }
 
 const CONSELHEIRO_SYSTEM=`Você é meu Conselheiro Executivo de Liderança.
@@ -10217,22 +10230,122 @@ async function rodarConselheiro(){
   btn.disabled=true;btn.textContent='Consultando…';
   out.innerHTML='<div style="color:var(--text2);font-size:12.5px;padding:10px 0">⏳ Analisando…</div>';
   try{
-    const res=await fetch(AI_PROXY_URL,{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:3000,
-        system:CONSELHEIRO_SYSTEM,
-        messages:[{role:'user',content:text}]
-      })
-    });
-    const data=await res.json();
-    const reply=data.content?.map(b=>b.type==='text'?b.text:'').join('')||'';
-    if(!reply)throw new Error(data.error?.message||'Resposta vazia');
+    // Antes o Conselheiro só via o texto digitado, sem nenhum dado real do
+    // app — agora manda junto o mesmo contexto operacional (faturamento,
+    // ChatLab, Métricas, tarefas de Liderança pendentes) que o "Pergunte à
+    // IA" usa, pra análise vir baseada nos números reais da equipe, não só
+    // na descrição da gestora.
+    const contexto=buildOperationalContext();
+    const prompt=`DADOS REAIS DA OPERAÇÃO (gerados automaticamente pelo sistema — use isso pra fundamentar sua análise, não invente números):\n\n${contexto}\n\nSITUAÇÃO DESCRITA PELA GESTORA:\n${text}`;
+    const reply=await clFetchAI(CONSELHEIRO_SYSTEM,prompt,3500);
+    if(!reply)throw new Error('Resposta vazia');
     out.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">${clMd(reply)}</div>`;
   }catch(err){
-    out.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
+    if(err.quota){renderAIWaitCountdown('conselheiro-out',err.waitSeconds,{prefix:'⏳ Limite de uso da IA',panel:true});}
+    else out.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
   }finally{
     btn.disabled=false;btn.textContent='💬 Consultar';
   }
+}
+
+/* ---------- Leitura semanal automática (dados reais, sem precisar pedir) ---------- */
+const CONSELHEIRO_SEMANAL_SYSTEM=`Você é o Conselheiro Executivo de Liderança da Mia, gestora de uma equipe de chatters. Toda semana você faz uma leitura proativa e direta dos dados reais da operação (fornecidos abaixo) para ela não precisar garimpar número por número sozinha.
+
+Responda SEMPRE com esta estrutura curta (markdown simples, direto, sem enrolação, sem elogio genérico):
+## 🟢 Quem está bem e por quê
+## 🔴 Quem está em risco e por quê (com o número que prova isso)
+## 🎯 As 2-3 ações mais importantes desta semana
+
+Baseie-se SOMENTE nos dados fornecidos — nunca invente número. Seja específico (cite nomes e valores reais), honesto mesmo quando a notícia é ruim, e priorize o que realmente importa agora em vez de listar tudo.`;
+
+async function gerarConselheiroSemanal(force){
+  const wkey=getWeekKey(0);
+  if(!force&&S.conselheiroSemanal?.wkey===wkey&&S.conselheiroSemanal?.text){
+    renderConselheiroSemanal();
+    return;
+  }
+  const el=document.getElementById('conselheiro-semanal');
+  if(el)el.innerHTML='<div style="color:var(--text2);font-size:12.5px;padding:6px 0">⏳ Lendo a semana…</div>';
+  try{
+    const contexto=buildOperationalContext();
+    const text=await clFetchAI(CONSELHEIRO_SEMANAL_SYSTEM,`DADOS DA SEMANA:\n\n${contexto}`,2500);
+    if(!text)throw new Error('Resposta vazia');
+    S.conselheiroSemanal={wkey,text,generatedAt:new Date().toISOString()};
+    save();
+  }catch(err){
+    if(err.quota){renderAIWaitCountdown('conselheiro-semanal',err.waitSeconds,{prefix:'⏳ Leitura da semana — limite de uso da IA',panel:true});return;}
+    if(el)el.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
+    return;
+  }
+  renderConselheiroSemanal();
+}
+function renderConselheiroSemanal(){
+  const el=document.getElementById('conselheiro-semanal');
+  if(!el)return;
+  const cs=S.conselheiroSemanal;
+  const wkey=getWeekKey(0);
+  if(!cs?.text||cs.wkey!==wkey){
+    el.innerHTML=`<div style="color:var(--text3);font-size:12.5px;padding:4px 0 8px">Ainda sem leitura desta semana.</div>`;
+    return;
+  }
+  el.innerHTML=`<div style="font-size:10.5px;color:var(--text3);margin-bottom:6px">Gerado ${new Date(cs.generatedAt).toLocaleDateString('pt-BR')} às ${new Date(cs.generatedAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>${clMd(cs.text)}`;
+}
+
+/* ---------- Apoio pessoal (separado do lado de negócio de propósito) ----------
+   Espaço pra Mia escrever como ELA está, não como a equipe está. Não injeta
+   nenhum dado da operação aqui — só o texto dela. O prompt é deliberadamente
+   acolhedor e nunca clínico: valida o que ela sente sem fingir ser terapeuta,
+   nunca dá diagnóstico, sempre reforça descanso real e apoio humano/profissional
+   pra assuntos pesados (luto, saúde, relação), e nunca reforça autocrítica. */
+const CONSELHEIRO_PESSOAL_SYSTEM=`Você é um espaço de apoio para uma gestora de equipe que está sob muita pressão — não um terapeuta, não um médico, e você deixa isso claro se for relevante, sem ser repetitivo.
+
+Seu papel: ouvir de verdade, validar o que ela está sentindo sem minimizar nem exagerar, ajudar a organizar o que está pesando, e devolver perspectiva com gentileza e honestidade — nunca com clichês vazios tipo "vai ficar tudo bem".
+
+Regras importantes:
+- Nunca dê diagnóstico psicológico ou médico. Nunca prescreva ou sugira medicação.
+- Nunca reforce autocrítica negativa ("você é uma líder ruim", etc) — se ela disser isso de si mesma, questione gentilmente em vez de concordar.
+- Sempre que fizer sentido, incentive descanso real (não produtividade disfarçada de descanso) e apoio humano de verdade — terapia, um médico, uma amiga, família — especialmente para assuntos como luto, saúde de um familiar, dor de relação ou exaustão prolongada. Faça isso de forma natural, uma vez, não repetidamente.
+- Se em algum momento houver qualquer sinal de risco à vida ou de autolesão, pare o tom normal imediatamente e, com calma e sem alarme, incentive contato com um profissional ou o CVV (188, ligação e chat, 24h) — sem fazer diagnóstico e sem prometer confidencialidade que não pode garantir.
+- Nunca minimize dizendo que "é só cansaço" quando ela descreve algo mais sério — mas também não catastrofize.
+- Seja breve. Isso é uma conversa, não um artigo.
+
+Responda em português, em tom pessoal e caloroso, sem formatação de markdown pesada (nada de títulos ## ou listas longas) — como uma pessoa de confiança escrevendo de volta.`;
+
+async function conversarConselheiroPessoal(){
+  const inp=document.getElementById('conselheiro-pessoal-input');
+  const out=document.getElementById('conselheiro-pessoal-out');
+  const btn=document.getElementById('conselheiro-pessoal-btn');
+  const text=inp?.value.trim();
+  if(!text){toast('⚠️ Escreva o que está sentindo/pensando');return;}
+  btn.disabled=true;btn.textContent='…';
+  out.innerHTML='<div style="color:var(--text2);font-size:12.5px;padding:8px 0">⏳ Lendo com calma…</div>';
+  try{
+    const reply=await clFetchAI(CONSELHEIRO_PESSOAL_SYSTEM,text,1800);
+    if(!reply)throw new Error('Resposta vazia');
+    out.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:4px;white-space:pre-wrap">${clMd(reply)}</div>`;
+    if(!S.conselheiroPessoal)S.conselheiroPessoal=[];
+    S.conselheiroPessoal.unshift({id:'cp'+Date.now(),date:todayKey(),texto:text,resposta:reply});
+    S.conselheiroPessoal=S.conselheiroPessoal.slice(0,20);
+    save();
+    inp.value='';
+    renderConselheiroPessoalHistorico();
+  }catch(err){
+    if(err.quota){renderAIWaitCountdown('conselheiro-pessoal-out',err.waitSeconds,{prefix:'⏳ Limite de uso da IA',panel:true});}
+    else out.innerHTML=`<div style="color:var(--bad);font-size:12.5px">❌ ${err.message}</div>`;
+  }finally{
+    btn.disabled=false;btn.textContent='💙 Conversar';
+  }
+}
+function renderConselheiroPessoalHistorico(){
+  const el=document.getElementById('conselheiro-pessoal-historico');
+  if(!el)return;
+  const hist=S.conselheiroPessoal||[];
+  if(!hist.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin:14px 0 6px">Conversas anteriores</div>`+
+    hist.slice(0,10).map(h=>`<details style="margin-bottom:6px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--text2)">${h.date} — ${h.texto.length>60?h.texto.slice(0,60)+'…':h.texto}</summary>
+      <div style="padding:8px 0 0 4px;white-space:pre-wrap">${clMd(h.resposta)}</div>
+    </details>`).join('');
 }
 
 /* ===========================================================
@@ -10344,6 +10457,50 @@ function buildOperationalContext(){
   if(comChatObs.length){
     lines.push(`\nOBSERVAÇÕES DE CHAT (checklist diário de acompanhamento) desta semana:`);
     comChatObs.forEach(l=>lines.push(l));
+  }
+
+  // MÉTRICAS: ranking de crescimento de faturamento (matemática pura, já
+  // calculada em buildMetricasData — a IA só interpreta, nunca refaz conta)
+  // + Índice de Desempenho (ID) já ponderado. Dá pra IA a visão "quem está
+  // melhorando/piorando essa semana vs a passada", que é exatamente o tipo
+  // de pergunta que a gestora mais faz ao Conselheiro.
+  try{
+    const md=buildMetricasData(0);
+    if(md.perChatter.length){
+      lines.push(`\nMÉTRICAS — comparação com a semana anterior (faturamento normal + hora extra, já somados) e Índice de Desempenho (ID, 0-100, combina performance de meta + crescimento + qualidade do ChatLab + consistência):`);
+      [...md.perChatter].sort((a,b)=>(b.variacao??-999)-(a.variacao??-999)).forEach(p=>{
+        lines.push(`- ${p.c.name} (${p.cargo}): R$${p.fatAtual.toFixed(2)} essa semana vs R$${p.fatAnterior.toFixed(2)} semana passada (variação ${p.variacao==null?'sem base de comparação':(p.variacao>0?'+':'')+p.variacao+'%'}); ID geral ${p.idGeral??'—'}${p.clMetrics.avgIGP!=null?`; IGP médio do ChatLab essa semana ${p.clMetrics.avgIGP}`:''}${p.clMetrics.taxaConversao!=null?`; conversão ${p.clMetrics.taxaConversao}%`:''}.`);
+      });
+    }
+  }catch(e){/* Métricas pode não estar carregada ainda em algum fluxo — não quebra o contexto por isso */}
+
+  // CHATLAB: diagnóstico objetivo por chatter (maiores erros e sinais de
+  // whale da semana), extraído do mesmo campo .tags que cada análise salva —
+  // não é uma chamada nova de IA, só agregação do que já foi analisado.
+  const comChatlabSemana=[];
+  ativos.forEach(c=>{
+    const analises=coletarAnalisesDaSemana(c.id,0);
+    if(!analises.length)return;
+    const m=calcMetricasSemana(analises);
+    const erros={};
+    analises.forEach(a=>{if(a.tags?.principalErro)erros[a.tags.principalErro]=(erros[a.tags.principalErro]||0)+1;});
+    const topErros=Object.entries(erros).sort((a,b)=>b[1]-a[1]).slice(0,2).map(([e,n])=>`${e} (${n}x)`).join(', ');
+    comChatlabSemana.push(`- ${c.name}: ${analises.length} conversa(s) analisada(s), IGP médio ${m.avgIGP??'—'}, conversão ${m.taxaConversao??'—'}%${topErros?`, erros mais comuns: ${topErros}`:''}${m.whaleCount?`, ${m.whaleCount} sinal(is) de whale`:''}.`);
+  });
+  if(comChatlabSemana.length){
+    lines.push(`\nCHATLAB — diagnóstico de atendimento desta semana (agregado das análises já feitas, sem nova chamada de IA):`);
+    comChatlabSemana.forEach(l=>lines.push(l));
+  }
+
+  // ESTRATÉGIAS DE LIDERANÇA: tarefas que a própria gestora já se comprometeu
+  // a fazer (quadro editável em Gestão) e ainda não marcou como feitas —
+  // contexto importante pra IA não sugerir algo que ela já decidiu fazer,
+  // ou cobrar se ela ainda não fez.
+  const lidPendentes=(S.liderancaEstrategias||[]).filter(t=>!t.done);
+  if(lidPendentes.length){
+    const catLabel={imediato:'Imediato (essa semana)',curto:'Curto prazo (próximas 2 semanas)',medio:'Médio prazo (esse mês)',estrutural:'Estrutural (sempre)'};
+    lines.push(`\nESTRATÉGIAS DE LIDERANÇA — ações que a gestora já se comprometeu a fazer e ainda estão pendentes:`);
+    lidPendentes.forEach(t=>lines.push(`- [${catLabel[t.categoria]||t.categoria}] ${t.texto}`));
   }
 
   return lines.join('\n');
