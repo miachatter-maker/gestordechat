@@ -1068,7 +1068,87 @@ function navTo(view){
   document.querySelectorAll('.navbtn').forEach(t=>t.classList.toggle('active',t.dataset.go===view));
   _rts[view]=0; // reset so explicit nav always renders
   renderView(view);
+  closeAppMenu(); // fecha o menu-drawer (se estiver aberto) toda vez que troca de aba
 }
+
+/* ===========================================================
+   MENU ESTILO APP (drawer) — abre ao clicar no logo G. Mostra a
+   foto de perfil da gestora (mesma S.managerProfile já usada no
+   painel de Gestão) + a lista de abas, que viraram uma navegação
+   vertical em vez de ficarem sempre fixas no topo.
+   =========================================================== */
+function toggleAppMenu(){
+  const ov=document.getElementById('appmenu-overlay');
+  if(!ov)return;
+  const opening=!ov.classList.contains('open');
+  if(opening)renderAppMenuProfile();
+  ov.classList.toggle('open',opening);
+}
+function closeAppMenu(){
+  document.getElementById('appmenu-overlay')?.classList.remove('open');
+}
+function closeAppMenuIfBackdrop(e){
+  if(e.target.id==='appmenu-overlay')closeAppMenu();
+}
+function renderAppMenuProfile(){
+  const p=S.managerProfile||{};
+  const av=document.getElementById('appmenu-avatar');
+  if(av)av.innerHTML=p.photoUrl?`<img src="${p.photoUrl}" style="width:100%;height:100%;object-fit:cover">`:'G';
+  const nm=document.getElementById('appmenu-name');
+  if(nm)nm.textContent=p.name||'Mia';
+  const cg=document.getElementById('appmenu-cargo');
+  if(cg)cg.textContent=p.cargo||'Manager';
+}
+
+/* ===========================================================
+   SWIPE ENTRE ABAS — arrastar o dedo pra esquerda/direita na tela
+   troca de aba, seguindo a mesma ordem em que elas aparecem no
+   menu-drawer. Ignora o gesto se: começou dentro de um card que
+   já tem seu próprio swipe-pra-excluir (identificado pelo atributo
+   data-key, usado por attachSwipeDismiss/attachSwipeToDelete),
+   começou num input/textarea/select/botão, ou começou dentro de
+   algo que já rola na horizontal (tabela larga, segtabs etc) —
+   detectado genericamente por scrollWidth>clientWidth, sem precisar
+   listar cada classe manualmente.
+   =========================================================== */
+function getSwipeViewOrder(){
+  return[...document.querySelectorAll('#toptabs .toptab')].map(t=>t.dataset.go).filter(Boolean);
+}
+function isInsideHorizScroll(el,boundary){
+  let node=el;
+  while(node&&node!==boundary&&node!==document.body){
+    if(node.scrollWidth>node.clientWidth+2)return true;
+    node=node.parentElement;
+  }
+  return false;
+}
+(function initViewSwipe(){
+  const area=document.querySelector('.main');
+  if(!area)return;
+  let sx=0,sy=0,tracking=false;
+  const onStart=e=>{
+    const t=e.touches?e.touches[0]:e;
+    if(e.target.closest('[data-key]')||e.target.closest('input,textarea,select,button,a')||isInsideHorizScroll(e.target,area)){
+      tracking=false;return;
+    }
+    sx=t.clientX;sy=t.clientY;tracking=true;
+  };
+  const onEnd=e=>{
+    if(!tracking)return;
+    tracking=false;
+    const t=e.changedTouches?e.changedTouches[0]:e;
+    const dx=t.clientX-sx,dy=t.clientY-sy;
+    if(Math.abs(dx)<70||Math.abs(dx)<Math.abs(dy)*1.3)return;
+    const order=getSwipeViewOrder();
+    const cur=document.querySelector('.view.active')?.id?.replace('v-','');
+    const idx=order.indexOf(cur);
+    if(idx===-1)return;
+    if(dx<0&&idx<order.length-1)navTo(order[idx+1]); // arrastou pra esquerda → próxima aba
+    else if(dx>0&&idx>0)navTo(order[idx-1]); // arrastou pra direita → aba anterior
+  };
+  area.addEventListener('touchstart',onStart,{passive:true});
+  area.addEventListener('touchend',onEnd);
+})();
 function renderView(v){
   // Debounce: skip if same view rendered < 350ms ago (prevents Firebase sync re-render spam)
   const now=Date.now();

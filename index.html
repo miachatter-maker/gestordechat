@@ -70,7 +70,8 @@ body{
   padding:14px 18px 0;
 }
 .topbar-row{display:flex;align-items:center;gap:10px;padding-bottom:13px;}
-.brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0;}
+.brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0;background:none;border:none;cursor:pointer;padding:2px;font-family:var(--font-display);text-align:left;}
+.brand:active{opacity:.7;}
 .brand-mark{
   width:28px;height:28px;border-radius:7px;flex-shrink:0;
   background:var(--accent);
@@ -80,12 +81,11 @@ body{
 .brand-text{display:flex;flex-direction:column;gap:0px;min-width:0;}
 .brand-greet{font-size:10.5px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;}
 .brand-date{font-size:14px;font-weight:600;color:var(--text);text-transform:capitalize;}
+.brand-chevron{font-size:14px;color:var(--text3);flex-shrink:0;margin-left:2px;}
 .topclock{
   font-family:var(--font-mono);font-size:13.5px;font-weight:500;color:var(--text2);
   flex-shrink:0;
 }
-.toptabs{display:flex;gap:2px;overflow-x:auto;padding-bottom:0;}
-.toptabs::-webkit-scrollbar{display:none;}
 .toptab{
   flex-shrink:0;font-family:var(--font-display);font-size:13px;font-weight:500;
   color:var(--text2);background:transparent;border:none;padding:9px 12px;
@@ -93,6 +93,40 @@ body{
 }
 .toptab.active{color:var(--text);font-weight:600;}
 .toptab.active::after{content:'';position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent);border-radius:1px;}
+
+/* ---------- MENU ESTILO APP (drawer) ---------- */
+.appmenu-overlay{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(36,26,29,.4);
+  opacity:0;pointer-events:none;
+  transition:opacity .18s ease;
+}
+.appmenu-overlay.open{opacity:1;pointer-events:auto;}
+.appmenu-panel{
+  position:absolute;top:0;left:0;bottom:0;width:82%;max-width:320px;
+  background:var(--surface);box-shadow:2px 0 28px rgba(0,0,0,.2);
+  transform:translateX(-105%);transition:transform .22s ease;
+  display:flex;flex-direction:column;overflow-y:auto;
+}
+.appmenu-overlay.open .appmenu-panel{transform:translateX(0);}
+.appmenu-profile{
+  display:flex;align-items:center;gap:12px;padding:22px 16px 18px;
+  border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:1;
+}
+.appmenu-avatar{
+  width:46px;height:46px;border-radius:50%;background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;flex-shrink:0;overflow:hidden;
+}
+.appmenu-profile-text{flex:1;min-width:0;}
+.appmenu-name{font-size:14.5px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.appmenu-cargo{font-size:11.5px;color:var(--text3);margin-top:1px;}
+.appmenu-close{background:none;border:none;font-size:16px;color:var(--text3);cursor:pointer;padding:4px;flex-shrink:0;}
+.appmenu-list{display:flex;flex-direction:column;padding:8px;gap:1px;}
+.appmenu-list .toptab{
+  text-align:left;width:100%;padding:12px 13px;border-radius:9px;font-size:14px;
+}
+.appmenu-list .toptab.active{background:var(--accent-soft);color:var(--accent-strong);}
+.appmenu-list .toptab.active::after{display:none;}
 
 /* ---------- MAIN ---------- */
 .main{flex:1;padding:20px 16px 32px;max-width:640px;margin:0 auto;width:100%;}
@@ -413,13 +447,14 @@ body{
 
 <header class="topbar">
   <div class="topbar-row">
-    <div class="brand">
+    <button class="brand" id="brand-trigger" onclick="toggleAppMenu()">
       <div class="brand-mark">G</div>
       <div class="brand-text">
         <span class="brand-greet">Gestão da equipe</span>
         <span class="brand-date" id="hd-date">—</span>
       </div>
-    </div>
+      <span class="brand-chevron">☰</span>
+    </button>
     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
       <span class="pill pill-flat" id="sync-badge" style="font-size:9.5px">💾 local</span>
       <span style="font-size:8px;color:var(--text3)">build:20260708c</span>
@@ -429,28 +464,45 @@ body{
       <div class="topclock" id="hd-clock">00:00</div>
     </div>
   </div>
-  <nav class="toptabs" id="toptabs">
-    <button class="toptab active" data-go="home">Painel</button>
-    <button class="toptab" data-go="gestao">Agenda</button>
-    <button class="toptab" data-go="fat">Faturamento</button>
-    <button class="toptab" data-go="turno">Turno</button>
-    <button class="toptab" data-go="time">Equipe</button>
-    <button class="toptab" data-go="fichas">Fichas</button>
-    <button class="toptab" data-go="report">Relatório</button>
-    <button class="toptab" data-go="extra">H. Extra</button>
-    <button class="toptab" data-go="gerador">Relatórios</button>
-    <button class="toptab" data-go="semana">Semana</button>
-    <button class="toptab" data-go="estudos">Estudos</button>
-    <button class="toptab" data-go="evolucao">Evolução</button>
-    <button class="toptab" data-go="chatlab">ChatLab</button>
-    <button class="toptab" data-go="testers">Testers</button>
-    <button class="toptab" data-go="reservas">Reservas</button>
-    <button class="toptab" data-go="pagamento">Pagamento</button>
-    <button class="toptab" data-go="metricas">Métricas</button>
-    <button class="toptab" data-go="projecao">Projeção</button>
-    
-  </nav>
 </header>
+
+<!-- MENU ESTILO APP — abre ao clicar no logo G. Mostra foto de perfil da
+     gestora + todas as abas numa lista vertical (em vez de ficarem sempre
+     fixas no topo). Os mesmos botões .toptab de antes vivem aqui agora —
+     o listener de clique já genérico (querySelectorAll('.toptab,.navbtn'))
+     continua funcionando igual, só mudou onde eles ficam no layout. -->
+<div class="appmenu-overlay" id="appmenu-overlay" onclick="closeAppMenuIfBackdrop(event)">
+  <div class="appmenu-panel" id="appmenu-panel">
+    <div class="appmenu-profile">
+      <div class="appmenu-avatar" id="appmenu-avatar">G</div>
+      <div class="appmenu-profile-text">
+        <div class="appmenu-name" id="appmenu-name">Mia</div>
+        <div class="appmenu-cargo" id="appmenu-cargo">Manager</div>
+      </div>
+      <button class="appmenu-close" onclick="toggleAppMenu()">✕</button>
+    </div>
+    <nav class="appmenu-list" id="toptabs">
+      <button class="toptab active" data-go="home">⌂ Painel</button>
+      <button class="toptab" data-go="gestao">🗓 Agenda</button>
+      <button class="toptab" data-go="fat">¤ Faturamento</button>
+      <button class="toptab" data-go="turno">⇄ Turno</button>
+      <button class="toptab" data-go="time">▦ Equipe</button>
+      <button class="toptab" data-go="fichas">👤 Fichas</button>
+      <button class="toptab" data-go="report">📋 Relatório</button>
+      <button class="toptab" data-go="extra">⚡ H. Extra</button>
+      <button class="toptab" data-go="gerador">📄 Relatórios</button>
+      <button class="toptab" data-go="semana">📆 Semana</button>
+      <button class="toptab" data-go="estudos">📚 Estudos</button>
+      <button class="toptab" data-go="evolucao">📈 Evolução</button>
+      <button class="toptab" data-go="chatlab">💬 ChatLab</button>
+      <button class="toptab" data-go="testers">🧪 Testers</button>
+      <button class="toptab" data-go="reservas">🔵 Reservas</button>
+      <button class="toptab" data-go="pagamento">💰 Pagamento</button>
+      <button class="toptab" data-go="metricas">📊 Métricas</button>
+      <button class="toptab" data-go="projecao">🎯 Projeção</button>
+    </nav>
+  </div>
+</div>
 
 <main class="main">
 
