@@ -8415,12 +8415,15 @@ function renderAquecimento(){
   const labels={seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta',sex:'Sexta'};
   el.innerHTML=RETENTION_AGENDA_DAYS.map(d=>{
     const aberto=aquecimentoDiaAberto===d.dk;
-    return`<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden">
-      <div style="padding:11px 13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft)" onclick="toggleAquecimentoDia('${d.dk}')">
-        <div style="font-weight:700;font-size:13.5px">${labels[d.dk]} <span style="font-weight:500;color:var(--text3);font-size:12px">— ${d.titulo}</span></div>
-        <span style="color:var(--text3)">${aberto?'▾':'▸'}</span>
+    return`<div style="background:var(--warn-soft);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid var(--warn)">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleAquecimentoDia('${d.dk}')">
+        <div>
+          <div style="font-weight:700;font-size:14px">🔥 ${labels[d.dk]}</div>
+          <div style="font-size:11.5px;color:var(--text2)">${d.titulo}</div>
+        </div>
+        <span style="font-size:11px;color:var(--warn)">${aberto?'▾':'▸'}</span>
       </div>
-      ${aberto?`<div style="padding:11px 13px">
+      ${aberto?`<div style="margin-top:10px">
         <div style="font-size:12.5px;color:var(--text2);line-height:1.55;margin-bottom:10px">${d.texto}</div>
         <button class="btn btn-soft btn-sm" onclick="toggleAquecimentoAgendar('${d.dk}')">📅 Agendar na Agenda</button>
         <div id="aquec-agendar-${d.dk}" style="display:none;gap:6px;margin-top:8px">
@@ -8433,6 +8436,11 @@ function renderAquecimento(){
 }
 // TREINAMENTO FIXO — Sexta/Sábado/Domingo sempre presentes (não precisam
 // ser recriados toda semana), com o roteiro editável direto no card.
+let treinamentoFixoAberto=null;
+function toggleTreinamentoFixoDia(dk){
+  treinamentoFixoAberto=treinamentoFixoAberto===dk?null:dk;
+  renderTreinamentoFixo();
+}
 function saveTreinamentoFixoScript(dk,val){
   if(!S.treinamentoFixo)S.treinamentoFixo={};
   if(!S.treinamentoFixo[dk])S.treinamentoFixo[dk]={titulo:'',texto:''};
@@ -8445,9 +8453,18 @@ function renderTreinamentoFixo(){
   const dias=[{dk:'sex',label:'Sexta'},{dk:'sab',label:'Sábado'},{dk:'dom',label:'Domingo'}];
   el.innerHTML=dias.map(d=>{
     const entry=S.treinamentoFixo?.[d.dk]||{titulo:'',texto:''};
-    return`<div style="border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;padding:12px 13px;margin-bottom:10px">
-      <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">🎓 ${d.label}${entry.titulo?` — ${entry.titulo}`:''}</div>
-      <textarea class="ftext" style="min-height:60px;font-size:12.5px" placeholder="Roteiro/plano do treinamento de ${d.label.toLowerCase()}..." onblur="saveTreinamentoFixoScript('${d.dk}',this.value)">${entry.texto||''}</textarea>
+    const aberto=treinamentoFixoAberto===d.dk;
+    return`<div style="background:var(--warn-soft);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid var(--warn)">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleTreinamentoFixoDia('${d.dk}')">
+        <div>
+          <div style="font-weight:700;font-size:14px">🎓 ${d.label}${entry.titulo?` — ${entry.titulo}`:''}</div>
+          <div style="font-size:11.5px;color:var(--text2)">${entry.texto?'Roteiro definido':'Sem roteiro ainda — toque pra adicionar'}</div>
+        </div>
+        <span style="font-size:11px;color:var(--warn)">${aberto?'▾':'▸'}</span>
+      </div>
+      ${aberto?`<div style="margin-top:10px">
+        <textarea class="ftext" style="min-height:60px;font-size:12.5px" placeholder="Roteiro/plano do treinamento de ${d.label.toLowerCase()}..." onblur="saveTreinamentoFixoScript('${d.dk}',this.value)">${entry.texto||''}</textarea>
+      </div>`:''}
     </div>`;
   }).join('');
 }
