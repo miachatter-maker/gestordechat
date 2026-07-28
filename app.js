@@ -1291,8 +1291,8 @@ function toast(msg,dur=2300){const t=document.getElementById('toast');t.textCont
 // ---------- CLOCK ----------
 function updateClock(){
   const now=new Date();
-  document.getElementById('hd-clock').textContent=`${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
-  document.getElementById('hd-date').textContent=`${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]}`;
+  const elClock=document.getElementById('hd-clock');if(elClock)elClock.textContent=`${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
+  const elDate=document.getElementById('hd-date');if(elDate)elDate.textContent=`${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]}`;
   updateAlarmCountdown();
   checkMidnightGeneration();
   // Refresh escritório every minute — schedule-based status changes on the minute

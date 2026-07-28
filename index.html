@@ -71,7 +71,7 @@ body{
   padding:14px 18px 0;
 }
 .topbar-row{display:flex;align-items:center;gap:10px;padding-bottom:13px;}
-.brand{display:flex;align-items:center;gap:9px;flex:1;min-width:0;background:none;border:none;cursor:pointer;padding:2px 6px;margin:-2px -6px;border-radius:8px;font-family:var(--font-display);text-align:left;transition:background-color .15s;}
+.brand{display:flex;align-items:center;gap:9px;flex:none;min-width:0;background:none;border:none;cursor:pointer;padding:6px 8px;margin:-4px -8px;border-radius:9px;font-family:var(--font-display);text-align:left;transition:background-color .15s;}
 .brand:hover{background:var(--accent-soft);}
 .brand:active{opacity:.7;}
 .brand-mark{
@@ -465,20 +465,10 @@ body{
   <div class="topbar-row">
     <button class="brand" id="brand-trigger" onclick="toggleAppMenu()">
       <div class="brand-mark">G</div>
-      <div class="brand-text">
-        <span class="brand-greet">Gestão da equipe</span>
-        <span class="brand-date" id="hd-date">—</span>
-      </div>
-      <span class="brand-chevron">☰</span>
     </button>
-    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-      <span class="pill pill-flat" id="sync-badge" style="font-size:9.5px">💾 local</span>
-      <span style="font-size:8px;color:var(--text3)">build:20260708c</span>
-      <button onclick="openModal('m-pergunte-ia')" style="background:none;border:none;cursor:pointer;font-size:15px;padding:2px 4px" title="Pergunte à IA sobre a operação">🤖</button>
-      <button onclick="exportBackup()" title="Exportar backup" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:.6" title="Exportar backup JSON">⬇️</button>
-      <button onclick="importBackup()" title="Importar backup" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:.6" title="Restaurar backup JSON">⬆️</button>
-      <div class="topclock" id="hd-clock">00:00</div>
-    </div>
+    <span id="hd-date" style="display:none"></span>
+    <span id="hd-clock" style="display:none"></span>
+    <span id="sync-badge" style="display:none"></span>
   </div>
 </header>
 
