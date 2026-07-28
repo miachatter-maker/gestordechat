@@ -203,6 +203,25 @@ body{
   #team-list .roster-group-label{grid-column:1/-1;margin:4px 0 8px;}
   #team-list .teamcard,.roster>*{margin-bottom:0;}
 }
+/* Várias abas (Projeção, Métricas etc) renderizam vários .panel dentro de
+   UM container só via JS — esse container não é filho direto da view,
+   então por padrão ficaria full-width e os .panel de dentro ficariam
+   presos empilhados mesmo com a view inteira já em colunas. Em vez de
+   listar cada container manualmente (frágil — qualquer um novo ficaria
+   de fora), :has() detecta sozinho: qualquer div filho direto da view
+   que tenha 2+ .panel dentro vira, ela mesma, um mini multi-column. */
+@media (min-width:900px){
+  .view.active>div:has(>.panel):has(>.panel~.panel){
+    column-count:2;column-gap:16px;
+  }
+  .view.active>div:has(>.panel):has(>.panel~.panel)>.panel{
+    break-inside:avoid;-webkit-column-break-inside:avoid;
+    display:inline-block;width:100%;vertical-align:top;
+  }
+}
+@media (min-width:1400px){
+  .view.active>div:has(>.panel):has(>.panel~.panel){column-count:3;}
+}
 
 .eyebrow{font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--accent-strong);text-transform:uppercase;margin-bottom:6px;}
 .view-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:3px;color:var(--text);}
