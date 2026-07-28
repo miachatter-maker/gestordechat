@@ -222,6 +222,25 @@ body{
 @media (min-width:1400px){
   .view.active>div:has(>.panel):has(>.panel~.panel){column-count:3;}
 }
+/* Turno, ChatLab e Testers têm só 2 cards no topo e um deles é bem mais
+   alto que o outro (ex: a escala da semana inteira vs um aviso curto de
+   presença). O modo "balance" do CSS multi-column, quando um card já é
+   maior que a altura ideal calculada pra 2 colunas, às vezes empilha os
+   2 cards na mesma coluna e deixa a coluna do lado inteira vazia — o
+   mesmo tipo de buraco vazio que a gente já corrigiu antes, só que agora
+   causado pelo navegador, não pelo nosso CSS. Testado com JS (inclusive
+   forçando column-fill:auto com altura calculada) e o comportamento do
+   Chrome continua imprevisível nesses casos — mais seguro simplesmente
+   deixar essas 3 abas em coluna única no desktop: sem buraco vazio, cada
+   card ocupa a largura toda, um embaixo do outro (como já ficam boas
+   assim, sem precisar dividir em colunas). */
+@media (min-width:900px){
+  #v-turno.view.active,
+  #v-chatlab.view.active,
+  #v-testers.view.active{
+    column-count:1;
+  }
+}
 
 .eyebrow{font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--accent-strong);text-transform:uppercase;margin-bottom:6px;}
 .view-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:3px;color:var(--text);}
