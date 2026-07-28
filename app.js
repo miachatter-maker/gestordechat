@@ -7646,6 +7646,27 @@ function calcChatterPctMeta(c,offset){
   const rev=getChatterWeekRevenue(c.id,offset);
   return meta>0?Math.round(rev/meta*100):null;
 }
+// % da semana já "andada" — pra semanas passadas (offset<0) é sempre 100
+// (semana fechada); pra semana atual (offset 0) é proporcional ao dia de
+// hoje. Sem isso, comparar o % da meta batido na terça-feira com a meta
+// da semana inteira faria todo mundo parecer "em risco" só por ainda ser
+// início de semana — o que não é justo nem verdadeiro.
+function getWeekProgressPct(offset){
+  if(offset<0)return 100;
+  const dow=new Date().getDay(); // 0=dom...6=sáb
+  const diasElapsed=dow===0?7:dow;
+  return Math.min(100,(diasElapsed/7)*100);
+}
+// Ritmo relativo ao esperado pra essa altura da semana (100 = exatamente
+// no ritmo pra bater a meta; abaixo de 100 = atrasado; acima = adiantado).
+// É isso que deve ser usado pra classificar status/risco — o % bruto da
+// meta (calcChatterPctMeta) só serve como dado de apoio no texto.
+function calcChatterRitmo(c,offset){
+  const pct=calcChatterPctMeta(c,offset);
+  if(pct==null)return null;
+  const progresso=getWeekProgressPct(offset);
+  return progresso>0?Math.round((pct/progresso)*100):pct;
+}
 function calcChatterAvgTicket(c,offset){
   const f=S.chatterFichas[c.id];
   const wd=getWeekDates(offset);
@@ -7657,25 +7678,28 @@ function calcChatterAvgTicket(c,offset){
 function calcChatterDiagnostico(c){
   const pctNow=calcChatterPctMeta(c,0);
   const pctPrev=calcChatterPctMeta(c,-1);
-  const delta=(pctNow!=null&&pctPrev!=null)?pctNow-pctPrev:null;
+  const ritmoNow=calcChatterRitmo(c,0);
+  const ritmoPrev=calcChatterRitmo(c,-1);
+  const delta=(ritmoNow!=null&&ritmoPrev!=null)?ritmoNow-ritmoPrev:null;
   const mNow=calcMetricasSemana(coletarAnalisesDaSemana(c.id,0));
   const mPrev=calcMetricasSemana(coletarAnalisesDaSemana(c.id,-1));
   const igpDelta=(mNow.avgIGP!=null&&mPrev.avgIGP!=null)?mNow.avgIGP-mPrev.avgIGP:null;
 
   let status='semdados',label='⚪ Sem dados suficientes',cor='var(--text3)',motivo='Ainda não há faturamento ou ChatLab suficiente essa semana pra avaliar.';
-  if(pctNow!=null){
-    if(pctNow<55&&(delta==null||delta<=0)){
+  if(ritmoNow!=null){
+    const contexto=`(fez ${pctNow}% da meta da semana até agora)`;
+    if(ritmoNow<55&&(delta==null||delta<=0)){
       status='risco';label='⚫ Alto risco de sair';cor='#3a3a3a';
-      motivo=`Só ${pctNow}% da meta essa semana${delta!=null?(delta<0?`, caindo ${Math.abs(Math.round(delta))}pp em relação à semana passada`:', sem sinal de melhora'):''}${igpDelta!=null&&igpDelta<0?' e o atendimento no ChatLab também piorou':''}.`;
+      motivo=`Está a só ${ritmoNow}% do ritmo esperado pra essa altura da semana ${contexto}${delta!=null?(delta<0?`, caindo em relação ao mesmo ritmo da semana passada`:', sem sinal de melhora'):''}${igpDelta!=null&&igpDelta<0?' e o atendimento no ChatLab também piorou':''}.`;
     } else if(delta!=null&&delta<=-15){
       status='queda';label='🔴 Em queda';cor='var(--bad)';
-      motivo=`Caiu ${Math.abs(Math.round(delta))}pp em relação à semana passada (de ${Math.round(pctPrev)}% pra ${pctNow}% da meta).`;
-    } else if((delta!=null&&delta>=10)||pctNow>=100){
+      motivo=`Caiu ${Math.abs(Math.round(delta))}pp de ritmo em relação à semana passada ${contexto}.`;
+    } else if((delta!=null&&delta>=10)||ritmoNow>=100){
       status='evolucao';label='🟢 Em evolução';cor='var(--ok)';
-      motivo=(delta!=null&&delta>=10)?`Subiu ${Math.round(delta)}pp em relação à semana passada (de ${Math.round(pctPrev)}% pra ${pctNow}%).`:`Está batendo ${pctNow}% da meta essa semana.`;
+      motivo=(delta!=null&&delta>=10)?`Subiu ${Math.round(delta)}pp de ritmo em relação à semana passada ${contexto}.`:`No ritmo certo pra bater a meta ${contexto}.`;
     } else {
       status='estagnado';label='🟡 Estagnado';cor='var(--warn)';
-      motivo=`Em ${pctNow}% da meta, sem variação significativa em relação à semana passada${pctPrev!=null?` (${Math.round(pctPrev)}%)`:''}.`;
+      motivo=`No ritmo de ${ritmoNow}% do esperado, sem variação significativa em relação à semana passada ${contexto}.`;
     }
   }
   // Ação sugerida — a partir do erro mais recorrente no ChatLab (essa semana + anterior)
@@ -7691,7 +7715,7 @@ function calcChatterDiagnostico(c){
   } else if(status==='estagnado'){
     acao='Sem um erro técnico se repetindo — pode ser falta de volume/leads mais do que técnica. Vale um 1:1 rápido pra entender o que está travando.';
   }
-  return{chatter:c,status,label,cor,motivo,acao,pctNow,pctPrev,delta,igpDelta,mNow};
+  return{chatter:c,status,label,cor,motivo,acao,pctNow,pctPrev,ritmoNow,ritmoPrev,delta,igpDelta,mNow};
 }
 function calcChatterGargalos(c,diag){
   const gargalos=[];
@@ -7699,7 +7723,7 @@ function calcChatterGargalos(c,diag){
   if(avgTicket>0&&avgTicket<130)gargalos.push({tipo:'Ticket baixo',detalhe:`Ticket médio de ${money(avgTicket)} essa semana`});
   const taxaConv=diag.mNow.taxaConversao;
   if(taxaConv!=null&&taxaConv<20)gargalos.push({tipo:'Conversão baixa',detalhe:`Só ${taxaConv}% das conversas analisadas no ChatLab converteram essa semana`});
-  if(diag.pctNow!=null&&diag.pctNow<40)gargalos.push({tipo:'Muito abaixo da meta',detalhe:`${diag.pctNow}% da meta — pode ser poucos leads chegando ou tempo demais com clientes sem potencial`});
+  if(diag.ritmoNow!=null&&diag.ritmoNow<40)gargalos.push({tipo:'Muito abaixo do ritmo',detalhe:`${diag.ritmoNow}% do ritmo esperado pra essa altura da semana — pode ser poucos leads chegando ou tempo demais com clientes sem potencial`});
   return gargalos;
 }
 function renderEstrategiaDiagnostico(){
