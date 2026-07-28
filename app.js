@@ -3298,7 +3298,7 @@ function renderTeam(filter){
 
   let html='';
   if(basicoGroup.length){
-    html+=`<div style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 8px">Time Base (${basicoGroup.length})</div>`;
+    html+=`<div class="roster-group-label" style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 8px">Time Base (${basicoGroup.length})</div>`;
     html+=basicoGroup.map(renderCard).join('');
   }
   list.innerHTML=html;

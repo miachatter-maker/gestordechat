@@ -158,29 +158,50 @@ body{
 
 /* ---------- LAYOUT DESKTOP (PC) ---------- */
 /* No celular fica exatamente como está (coluna única). A partir de telas
-   largas (PC), os painéis de cada aba se encaixam lado a lado em grid —
-   cabeçalho, filtros e avisos continuam ocupando a linha inteira. */
+   largas (PC), os cards de cada aba se distribuem em colunas no estilo
+   "jornal" (CSS multi-column) — cada .panel nunca quebra ao meio (fica
+   inteiro numa coluna só) e o CSS resolve sozinho o encaixe mesmo quando
+   os cards têm alturas bem diferentes, sem deixar buracos.
+   IMPORTANTE: por padrão TUDO que não é .panel/.statgrid ocupa a largura
+   toda (column-span:all) — título, subtítulo, filtros, seletores, avisos,
+   seções colapsáveis sem classe .panel etc. Isso é de propósito: numa
+   lista de exceções (o esquema anterior), qualquer elemento esquecido
+   virava sem querer uma "coluna" vazia e quebrava o layout inteiro — com
+   o padrão invertido isso não acontece mais, só quem pede pra entrar no
+   grid (.panel/.statgrid) entra. */
 @media (min-width:900px){
-  .main{max-width:1240px;padding-top:64px;}
+  .main{max-width:1100px;padding-top:64px;}
   .view.active{
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(360px,1fr));
-    align-items:start;gap:16px;
+    column-count:2;
+    column-gap:16px;
   }
-  .view.active>.eyebrow,
-  .view.active>.view-title,
-  .view.active>.view-sub,
-  .view.active>.view-header-row,
-  .view.active>.segtabs,
-  .view.active>.watchbanner,
-  .view.active>.alarmhero,
-  .view.active>[id$="-range"]{
-    grid-column:1/-1;
+  .view.active>*{
+    column-span:all;
   }
-  .view.active>.panel,.view.active>.statgrid{margin-bottom:0;}
+  .view.active>.panel,
+  .view.active>.statgrid{
+    column-span:none;
+    break-inside:avoid;
+    -webkit-column-break-inside:avoid;
+    display:inline-block;
+    width:100%;
+    vertical-align:top;
+  }
 }
 @media (min-width:1400px){
-  .view.active{grid-template-columns:repeat(auto-fit,minmax(380px,1fr));}
+  .view.active{column-count:3;}
+}
+/* Listas "soltas" de cards pequenos e uniformes (não são .panel, então por
+   padrão ficariam full-width empilhados) ganham seu próprio grid interno
+   no desktop, pra aproveitar a largura em vez de empilhar um card por
+   linha. */
+@media (min-width:900px){
+  #team-list,.roster{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));
+    gap:8px;align-content:start;
+  }
+  #team-list .roster-group-label{grid-column:1/-1;margin:4px 0 8px;}
+  #team-list .teamcard,.roster>*{margin-bottom:0;}
 }
 
 .eyebrow{font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--accent-strong);text-transform:uppercase;margin-bottom:6px;}
