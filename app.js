@@ -1475,7 +1475,7 @@ function renderGoals(){
         <span style="color:${met?'var(--ok)':'var(--warn)'}">${pct}%</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:9px">
-        <input type="number" class="finput" style="flex:1" id="goal-update-${g.id}" placeholder="Atualizar valor atual...">
+        <input type="number" inputmode="decimal" class="finput" style="flex:1" id="goal-update-${g.id}" placeholder="Atualizar valor atual...">
         <button class="btn btn-soft btn-sm" onclick="updateGoalProgress('${g.id}')">Atualizar</button>
       </div>
     </div>`;
@@ -3432,7 +3432,7 @@ function openChatterDetail(id){
     return`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
       <span style="font-size:13px;color:var(--text2)">${m.emoji||'🧩'} ${m.name}</span>
       <div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--font-mono);color:var(--text3);font-size:12px">R$</span>
-      <input type="number" class="finput" style="width:84px;text-align:right;padding:6px 8px;font-size:13px;font-family:var(--font-mono)" value="${val}" placeholder="0" oninput="saveRevenue('${id}','${m.id}',this.value)"></div>
+      <input type="number" inputmode="decimal" class="finput" style="width:84px;text-align:right;padding:6px 8px;font-size:13px;font-family:var(--font-mono)" value="${val}" placeholder="0" oninput="saveRevenue('${id}','${m.id}',this.value)"></div>
     </div>`;
   }).join('');
 
@@ -3935,7 +3935,7 @@ function reportMetricRow(label,autoVal,draftKey){
   const manual=getReportDraft(draftKey);
   const hasManual=manual!==''&&manual!==undefined&&manual!==null;
   const val=hasManual?manual:autoVal;
-  return`<div class="reprow"><div class="replb">${label}</div><input type="number" class="finput" style="width:64px;text-align:right;padding:4px 8px;flex:none" id="rpt-${draftKey}" value="${val}" data-auto="${autoVal}" onblur="saveReportMetric('${draftKey}',this)"></div>`;
+  return`<div class="reprow"><div class="replb">${label}</div><input type="number" inputmode="decimal" class="finput" style="width:64px;text-align:right;padding:4px 8px;flex:none" id="rpt-${draftKey}" value="${val}" data-auto="${autoVal}" onblur="saveReportMetric('${draftKey}',this)"></div>`;
 }
 function saveReportMetric(draftKey,el){
   const auto=parseInt(el.dataset.auto)||0;
@@ -4289,7 +4289,7 @@ function renderRevenueTable(){
       <td><div style="font-weight:700;font-size:13px">${c.name}</div></td>
       <td>${modelCell}</td>
       <td style="text-align:right">
-        <input type="number" class="rinput" value="${rowVal||''}" placeholder="—"
+        <input type="number" inputmode="decimal" class="rinput" value="${rowVal||''}" placeholder="—"
           oninput="saveRevenueRow('${c.id}','${dateKey}',this)">
       </td>
     </tr>`;
@@ -4496,7 +4496,7 @@ function renderDailyByChatter(){
         <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;${i<chattersData.length-1?'border-bottom:1px solid var(--line)':''}">
           <div style="font-size:13.5px;font-weight:600">${c.name}</div>
           <div style="display:flex;align-items:center;gap:8px">
-            <input type="number" class="finput" style="width:90px;text-align:right;padding:5px 8px;font-size:13px;font-family:var(--font-mono)"
+            <input type="number" inputmode="decimal" class="finput" style="width:90px;text-align:right;padding:5px 8px;font-size:13px;font-family:var(--font-mono)"
               value="${rev||''}" placeholder="0"
               oninput="saveRevenue('${c.id}','${m.id}',this.value,'${dateKey}')">
           </div>
@@ -4556,7 +4556,7 @@ function renderChatterGoals(){
         <div class="goal-text">${c.name}</div>
         <div style="display:flex;align-items:center;gap:5px">
           <span style="font-size:11px;color:var(--text3)">meta:</span>
-          <input type="number" class="finput" style="width:90px;text-align:right;padding:5px 8px;font-size:12.5px" value="${target||''}" placeholder="0"
+          <input type="number" inputmode="decimal" class="finput" style="width:90px;text-align:right;padding:5px 8px;font-size:12.5px" value="${target||''}" placeholder="0"
             onchange="saveChatterGoal('${c.id}',this.value)">
         </div>
       </div>
@@ -7158,7 +7158,7 @@ function renderExtra(){
           <div class="fgrid2">
             <div class="field">
               <label class="flabel">Faturamento (R$)</label>
-              <input type="number" class="finput" style="font-family:var(--font-mono)" value="${slot.revenue||''}" placeholder="0"
+              <input type="number" inputmode="decimal" class="finput" style="font-family:var(--font-mono)" value="${slot.revenue||''}" placeholder="0"
                 onblur="saveExtraSlot('${v.shiftId}',${v.slotIdx},'revenue',parseFloat(this.value)||0)">
             </div>
             <div class="field">
