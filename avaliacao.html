@@ -186,7 +186,7 @@ window.setNota=function(critId,val){
 // Monta o relatório "Análise-Padrinhos" formatado pra colar no Discord,
 // a partir das respostas do formulário que o padrinho acabou de preencher.
 function buildAnalisePadrinhos(padrinhoNome,obsGerais){
-  const statusLabel={atende:'✅ Atende',parcial:'⚠️ Parcial',nao:'❌ Não atende'};
+  const statusLabel={atende:'Atende',parcial:'Atende parcialmente',nao:'Não atende'};
   let atende=0,parcial=0,nao=0;
   const linhasCriterios=CRITERIOS.map((c,idx)=>{
     const r=respostas[c.id]||{};
@@ -206,7 +206,7 @@ function buildAnalisePadrinhos(padrinhoNome,obsGerais){
     `Avaliado por: ${padrinhoNome}`,
     `Data: ${dataStr}`,
     '',
-    `Resumo: ✅ ${atende} atende · ⚠️ ${parcial} parcial · ❌ ${nao} não atende  (${avaliados}/${total} critérios avaliados)`,
+    `Resumo: ${atende} atende, ${parcial} parcial, ${nao} não atende  (${avaliados}/${total} critérios avaliados)`,
     '',
     linhasCriterios
   ];

@@ -85,6 +85,23 @@ function migrateState(s){
   if(!s.problemsToday||!Array.isArray(s.problemsToday))s.problemsToday=[];
   if(!s.demandas)s.demandas={};
   if(!s.trainings)s.trainings=[];
+  // Limpa a antiga entrada automática "Aquecimento Discord" que vivia dentro
+  // de S.trainings com data presa numa semana (autoRetention) — foi
+  // substituída pelo quadro fixo Sexta/Sábado/Domingo (s.treinamentoFixo,
+  // abaixo) + o quadro Aquecimento por dia da semana (RETENTION_AGENDA_DAYS,
+  // sempre igual, sem data). Treinamentos criados manualmente por você não
+  // são afetados por esse filtro.
+  s.trainings=s.trainings.filter(t=>!t.autoRetention);
+  // Treinamento fixo — sempre toda Sexta/Sábado/Domingo, sem precisar
+  // recriar por semana. ID fixo (é um objeto por dia, não array, então não
+  // tem risco de duplicar no merge) — só semeia o texto de Sexta que já
+  // existia (migração de cargo/filtro final); Sábado e Domingo começam em
+  // branco pra você preencher.
+  if(!s.treinamentoFixo)s.treinamentoFixo={
+    sex:{titulo:'Treinamento — migração de cargo e filtro final',texto:'No Discord: mova quem confirmou do cargo "Inscrito - Vaga de Chatter" pro cargo "Em treinamento". Quem não confirmou, sai. Você tem o controle de quem entra — adicione só quem quiser, poupando seu tempo treinando quem sabe que não vai trazer problema.'},
+    sab:{titulo:'',texto:''},
+    dom:{titulo:'',texto:''}
+  };
   if(!s.weekEvolutions)s.weekEvolutions={};
   if(!s.modelRequests)s.modelRequests={};
   if(!s.weeklyAnalysisDone)s.weeklyAnalysisDone={};
@@ -887,6 +904,26 @@ function updateBackupStatus(msg,pillClass){
 const DAYS=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 const MONTHS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const DAY_KEYS=['dom','seg','ter','qua','qui','sex','sab'];
+// Verifica se um chatter NÃO precisava ter relatório/faturamento num dia
+// específico — porque estava de folga (recorrente, s.folgaDia/folgaDia2),
+// teve falta pontual justificada (S.absences tipo 'falta'), teve o turno
+// inteiro repassado via swap pra outra pessoa, ou nem estava escalado
+// naquele dia da semana. Usado pra não sinalizar "relatório faltando" em
+// dias que a pessoa genuinamente não trabalhou.
+function chatterNaoPrecisaDeRelatorio(chatterId,dateKey){
+  const dow=new Date(dateKey+'T00:00:00').getDay();
+  const dayAbbr=DAY_KEYS[dow];
+  const hasFalta=(S.absences||[]).some(a=>a.chatterId===chatterId&&a.date===dateKey&&a.type==='falta');
+  if(hasFalta)return true;
+  const shifts=(S.shifts||[]).filter(s=>s.chatterId===chatterId&&(s.days||[]).includes(dayAbbr));
+  if(!shifts.length)return true; // não estava escalado nesse dia da semana
+  return shifts.every(s=>{
+    const temBloco2=!!(s.start2&&s.end2);
+    const bloco1Off=s.folgaDia===dayAbbr||(S.swaps||[]).some(sw=>sw.date===dateKey&&sw.shiftId===s.id&&sw.originalId===chatterId&&sw.start===s.start&&sw.end===s.end);
+    const bloco2Off=!temBloco2||s.folgaDia2===dayAbbr||(S.swaps||[]).some(sw=>sw.date===dateKey&&sw.shiftId===s.id&&sw.originalId===chatterId&&sw.start===s.start2&&sw.end===s.end2);
+    return bloco1Off&&bloco2Off;
+  });
+}
 const LVLCLASS={treinamento:'lvl-treinamento',teste:'lvl-teste',junior:'lvl-junior',pleno:'lvl-pleno',senior:'lvl-senior',padrinho:'lvl-padrinho'};
 const LVLEMOJI={treinamento:'◆',teste:'○',junior:'▲',pleno:'●',senior:'★',padrinho:'👑'};
 
@@ -1779,7 +1816,7 @@ function getSmartAlerts(){
     if(dk>=todayKey())return; // only past days
     S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c)).forEach(c=>{
       const hasRev=S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dk}`])||0)>0);
-      if(!hasRev){
+      if(!hasRev&&!chatterNaoPrecisaDeRelatorio(c.id,dk)){
         if(!missingByChatter[c.id])missingByChatter[c.id]={c,dates:[]};
         missingByChatter[c.id].dates.push(dk);
       }
@@ -5181,7 +5218,6 @@ function saveTraining(){
 function renderTrainings(){
   const el=document.getElementById('training-list');
   if(!el)return;
-  if(ensureRetentionTrainingEntry())save();
   if(!S.trainings.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhum treinamento. Use + novo acima.</div>';return;}
   el.innerHTML=S.trainings.map(t=>{
     const today=todayKey();
@@ -5531,6 +5567,86 @@ function renderWeeklyPerformanceChart(chatterId){
     </div>
     ${htHtml}`;
 }
+// Resumo do ChatLab pra Ficha individual — junta TODAS as análises já
+// feitas dessa pessoa (não só a semana) e monta, sem IA nova nenhuma (só
+// reaproveitando parseChatLabDashboard/tags que cada análise já salvou):
+// maiores erros, pontos fortes/fracos, o que melhorou/piorou (metade mais
+// antiga vs metade mais recente das análises) e um diagnóstico textual de
+// evolução do atendimento em geral.
+function chatlabResumoFichaHtml(cid){
+  const todas=(S.chatlabAnalyses||[]).filter(a=>a.chatterId===cid).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  if(!todas.length){
+    return fichaAccordion('chatlabresumo-'+cid,'','<div class="panel-title">🧪 Resumo do ChatLab</div>',
+      '<div style="font-size:12.5px;color:var(--text3)">Ainda não há conversas analisadas no ChatLab pra essa pessoa.</div>');
+  }
+  const meio=Math.floor(todas.length/2);
+  const antigas=todas.slice(0,meio);
+  const recentes=todas.slice(meio);
+
+  const avgIgp=arr=>{const v=arr.filter(a=>a.igp!=null);return v.length?Math.round(v.reduce((s,a)=>s+a.igp,0)/v.length):null;};
+  const igpTodas=avgIgp(todas);
+  const igpAntigas=avgIgp(antigas);
+  const igpRecentes=avgIgp(recentes);
+
+  const catAvgsTodas=getChatLabCategoryAverages(todas);
+  const catAvgsAntigas=antigas.length?getChatLabCategoryAverages(antigas):{};
+  const catAvgsRecentes=getChatLabCategoryAverages(recentes);
+
+  const catEntries=CHATLAB_CATEGORIAS.map(cat=>({label:cat.label,val:catAvgsTodas[cat.key]})).filter(c=>c.val!=null);
+  const fortes=[...catEntries].sort((a,b)=>b.val-a.val).slice(0,2);
+  const fracos=[...catEntries].sort((a,b)=>a.val-b.val).slice(0,2);
+
+  const deltas=antigas.length?CHATLAB_CATEGORIAS.map(cat=>{
+    const antes=catAvgsAntigas[cat.key],depois=catAvgsRecentes[cat.key];
+    if(antes==null||depois==null)return null;
+    return{label:cat.label,delta:depois-antes};
+  }).filter(Boolean):[];
+  const melhorou=[...deltas].sort((a,b)=>b.delta-a.delta).filter(d=>d.delta>0.3).slice(0,2);
+  const piorou=[...deltas].sort((a,b)=>a.delta-b.delta).filter(d=>d.delta<-0.3).slice(0,2);
+
+  const errosTally={};
+  todas.forEach(a=>{if(a.tags?.principalErro)errosTally[a.tags.principalErro]=(errosTally[a.tags.principalErro]||0)+1;});
+  const maioresErros=Object.entries(errosTally).sort((a,b)=>b[1]-a[1]).slice(0,3);
+
+  const taggedTodas=todas.filter(a=>a.tags);
+  const taxaConvTodas=taggedTodas.length?Math.round(taggedTodas.filter(a=>a.tags.converteu==='sim').length/taggedTodas.length*100):null;
+
+  const nomeCurto=(S.chatters.find(c=>c.id===cid)?.name||'').split(' ')[0]||'';
+  const partes=[];
+  if(igpAntigas!=null&&igpRecentes!=null){
+    const diff=igpRecentes-igpAntigas;
+    if(diff>=5)partes.push(`o atendimento de ${nomeCurto} melhorou de forma consistente — o IGP médio foi de ${igpAntigas} para ${igpRecentes}`);
+    else if(diff<=-5)partes.push(`o atendimento de ${nomeCurto} piorou — o IGP médio caiu de ${igpAntigas} para ${igpRecentes}`);
+    else partes.push(`o atendimento de ${nomeCurto} está estável (IGP médio de ${igpAntigas} pra ${igpRecentes})`);
+  } else if(igpTodas!=null){
+    partes.push(`${nomeCurto} tem IGP médio de ${igpTodas} nas ${todas.length} análise${todas.length>1?'s':''} já feita${todas.length>1?'s':''}, ainda sem histórico suficiente pra comparar evolução`);
+  }
+  if(fortes.length)partes.push(`os pontos mais fortes são ${fortes.map(f=>f.label).join(' e ')}`);
+  if(melhorou.length)partes.push(`o que mais melhorou foi ${melhorou.map(m=>m.label).join(' e ')}`);
+  if(piorou.length)partes.push(`o que mais piorou foi ${piorou.map(m=>m.label).join(' e ')} — vale atenção`);
+  if(maioresErros.length)partes.push(`o erro mais recorrente é "${maioresErros[0][0]}"${maioresErros[0][1]>1?` (apareceu ${maioresErros[0][1]}x)`:''}`);
+  const diagnostico=partes.length?partes.join('; ')+'.':'Ainda não há dados suficientes pra montar um diagnóstico completo.';
+
+  const catBox=(label,val,suffix)=>`<div style="background:var(--bg-soft);border-radius:8px;padding:8px 10px">
+    <div style="font-size:9.5px;color:var(--text3);text-transform:uppercase">${label}</div>
+    <div style="font-weight:800;font-family:var(--font-mono);font-size:14px">${val!=null?val+(suffix||''):'—'}</div>
+  </div>`;
+
+  const body=`
+    <div style="font-size:13px;color:var(--text);line-height:1.6;background:var(--info-soft);border-radius:9px;padding:10px 12px;margin-bottom:12px">🩺 <strong>Diagnóstico de Evolução:</strong> ${diagnostico}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      ${catBox('IGP médio (geral)',igpTodas)}
+      ${catBox('Taxa de conversão',taxaConvTodas,'%')}
+    </div>
+    ${fortes.length?`<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;margin-bottom:4px">💪 Pontos fortes</div>${fortes.map(f=>`<div style="font-size:12.5px;padding:3px 0">${f.label} — ${f.val.toFixed(1)}/10</div>`).join('')}</div>`:''}
+    ${fracos.length?`<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;margin-bottom:4px">⚠️ Pontos fracos</div>${fracos.map(f=>`<div style="font-size:12.5px;padding:3px 0">${f.label} — ${f.val.toFixed(1)}/10</div>`).join('')}</div>`:''}
+    ${melhorou.length?`<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--ok);text-transform:uppercase;margin-bottom:4px">📈 O que melhorou</div>${melhorou.map(m=>`<div style="font-size:12.5px;padding:3px 0">${m.label} (+${m.delta.toFixed(1)})</div>`).join('')}</div>`:''}
+    ${piorou.length?`<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--bad);text-transform:uppercase;margin-bottom:4px">📉 O que piorou</div>${piorou.map(m=>`<div style="font-size:12.5px;padding:3px 0">${m.label} (${m.delta.toFixed(1)})</div>`).join('')}</div>`:''}
+    ${maioresErros.length?`<div><div style="font-size:11px;font-weight:700;color:var(--warn);text-transform:uppercase;margin-bottom:4px">🔴 Maiores erros</div>${maioresErros.map(([erro,n])=>`<div style="font-size:12.5px;padding:3px 0">${erro}${n>1?` <span style="color:var(--text3)">(${n}x)</span>`:''}</div>`).join('')}</div>`:''}
+    <div style="font-size:10px;color:var(--text3);margin-top:10px">Baseado em ${todas.length} análise${todas.length>1?'s':''} do ChatLab já salva${todas.length>1?'s':''} — sem chamada nova de IA.</div>
+  `;
+  return fichaAccordion('chatlabresumo-'+cid,'','<div><div class="panel-title">🧪 Resumo do ChatLab</div><div class="panel-note">Erros, acertos, evolução e diagnóstico — direto das conversas já analisadas</div></div>',body);
+}
 function renderFichaChatter(chatterId){
   const el=document.getElementById('ficha-content');if(!el)return;
   const c=S.chatters.find(ch=>ch.id===chatterId);if(!c){el.innerHTML='';return;}
@@ -5582,6 +5698,8 @@ function renderFichaChatter(chatterId){
     )}
 
     ${renderOrientacaoPanel(chatterId)}
+
+    ${chatlabResumoFichaHtml(chatterId)}
 
     ${renderFichaCruzamento(chatterId)}
   `;
@@ -7646,8 +7764,13 @@ function addMonthlyTask(){addTaskGeneric('monthly',todayKey().slice(0,7),'monthl
 // em vez de ficar marcado a semana/mês inteiro depois de feito uma vez.
 // Tarefas COM data+hora marcada continuam com o comportamento antigo (prazo
 // real: uma vez feita, fica feita — é isso que alimenta o alerta de prazo).
+// Tarefas DIÁRIAS (S.dailyTasksByDay) são por definição recorrentes — moram
+// num balde por dia da semana (seg/ter/qua...) e voltam a aparecer toda
+// semana nesse mesmo dia — então elas TAMBÉM precisam resetar o "feito"
+// todo dia (senão marcar como feita numa segunda deixava feita pra sempre
+// em toda segunda seguinte, já que o objeto do balde é reaproveitado).
 function recurresDaily(scope,t){
-  return(scope==='weekly'||scope==='monthly')&&!t.date;
+  return scope==='daily'||((scope==='weekly'||scope==='monthly')&&!t.date);
 }
 function isTaskDoneToday(scope,t){
   if(recurresDaily(scope,t))return!!(S.taskDoneLog[todayKey()]||{})[t.id];
@@ -7764,13 +7887,6 @@ function getAutoDailyAgendaItems(dateKey){
       }
     });
   });
-  getRetentionAgendaItems().forEach(r=>{
-    if(r.date===dateKey){
-      items.push({key:`retention|${r.date}`,time:'13:00',date:'',
-        text:`🎓 ${r.titulo}`,isDone:!!S.retentionDone[r.date],
-        toggle:`toggleRetentionDay('${r.date}')`,tag:'Treinamento'});
-    }
-  });
   return items;
 }
 function renderTaskBoard(containerId,scope,key){
@@ -7814,13 +7930,14 @@ function renderTaskBoards(){
 }
 
 /* ===========================================================
-   AQUECIMENTO DISCORD — agenda de retenção Segunda-Sexta pros
-   "Inscritos" antes do treinamento de sexta-feira. Conteúdo e
-   regras seguem exatamente a ESTRATÉGIA DE RETENÇÃO E FILTRO —
-   CATEGORIA INSCRITOS. Datas são sempre calculadas a partir de
-   hoje (nunca ficam "presas" numa semana antiga): de segunda a
-   sexta mostra o ciclo desta semana; sábado/domingo já mostra o
-   ciclo da PRÓXIMA semana, pronta pra nova turma de inscritos.
+   AQUECIMENTO DISCORD — roteiro fixo Segunda a Quinta pros
+   "Inscritos" antes do treinamento (que agora é seu próprio quadro
+   fixo Sexta/Sábado/Domingo, ver TREINAMENTO FIXO abaixo). Não é
+   mais um ciclo com data "presa" numa semana — é sempre a mesma
+   lista por dia da semana. Clicar num dia abre o roteiro e mostra
+   um botão "Agendar na Agenda": escolhe o horário e o item entra
+   recorrente em Tarefas Diárias naquele dia da semana (usando o
+   mesmo balde S.dailyTasksByDay que a Agenda já usa).
    =========================================================== */
 const RETENTION_AGENDA_DAYS=[
   {dk:'seg',dia:1,titulo:'Ativação de identidade — Pergunta do Dia',
@@ -7831,60 +7948,72 @@ const RETENTION_AGENDA_DAYS=[
     texto:'Em avisos-oficiais: "Estamos observando quem está aqui, quem está interagindo e quem já demonstra o perfil que buscamos. O treinamento começa em X dias — mas nossa avaliação já começou." No bate-papo-geral, cite pelo nome 2 ou 3 candidatos que interagiram bem: "Fulano, Ciclano — boa postura aqui. É exatamente isso."'},
   {dk:'qui',dia:4,titulo:'Antecipação e comprometimento final',
     texto:'Em avisos-oficiais: "Amanhã começa. Confirme sua presença reagindo com ✅ nessa mensagem. Quem não confirmar até as 22h de hoje será removido da lista — a vaga vai para o próximo da fila." Pergunta do dia no bate-papo: "O que você vai fazer diferente amanhã para já entrar no treinamento no seu melhor nível?"'},
-  {dk:'sex',dia:5,titulo:'Treinamento — migração de cargo e filtro final',
-    texto:'No Discord: mova quem confirmou do cargo "Inscrito - Vaga de Chatter" pro cargo "Em treinamento". Quem não confirmou, sai. Você tem o controle de quem entra — adicione só quem quiser, poupando seu tempo treinando quem sabe que não vai trazer problema.'},
 ];
-// Segunda-feira "ativa" do ciclo: de seg a sex mostra a semana atual; no fim
-// de semana (sáb/dom) já adianta pra próxima segunda, porque o treinamento
-// de sexta já aconteceu (ou vai acontecer hoje à noite) e a próxima turma de
-// inscritos precisa ver o ciclo novo pronto, sem precisar mexer em nada.
-function getRetentionWeekMonday(){
-  const now=new Date();
-  const mon=getMondayOfWeek(now);
-  const dow=now.getDay(); // 0=dom,6=sab
-  if(dow===0||dow===6)mon.setDate(mon.getDate()+7);
-  return mon;
+let aquecimentoDiaAberto=null;
+function toggleAquecimentoDia(dk){
+  aquecimentoDiaAberto=aquecimentoDiaAberto===dk?null:dk;
+  renderAquecimento();
 }
-function getRetentionAgendaItems(){
-  const mon=getRetentionWeekMonday();
-  return RETENTION_AGENDA_DAYS.map((d,i)=>{
-    const dt=new Date(mon);dt.setDate(mon.getDate()+i);
-    return{...d,date:fmt(dt)};
-  });
+function toggleAquecimentoAgendar(dk){
+  const row=document.getElementById('aquec-agendar-'+dk);
+  if(!row)return;
+  row.style.display=row.style.display==='flex'?'none':'flex';
 }
-function toggleRetentionDay(date){
-  S.retentionDone[date]=!S.retentionDone[date];
-  save();renderTaskBoards();
+function agendarAquecimentoDia(dk){
+  const inp=document.getElementById('aquec-time-'+dk);
+  const time=inp?.value;
+  if(!time){toast('⚠️ Escolha um horário');return;}
+  const d=RETENTION_AGENDA_DAYS.find(x=>x.dk===dk);
+  if(!d)return;
+  if(!S.dailyTasksByDay[dk])S.dailyTasksByDay[dk]=[];
+  S.dailyTasksByDay[dk].push({id:'tk'+Date.now()+Math.random().toString(36).slice(2,4),text:`🔥 ${d.titulo}`,time,date:'',urgent:false,done:false});
+  save();
+  toast(`✅ Agendado toda ${DAYS[DAY_KEYS.indexOf(dk)]} às ${time} — já aparece em Tarefas Diárias!`);
+  const row=document.getElementById('aquec-agendar-'+dk);
+  if(row)row.style.display='none';
+  renderTaskBoards();
 }
-// Mantém, dentro do quadro clicável 🎓 TREINAMENTO que já existe (aba
-// Agenda/Gestão, S.trainings), UMA entrada automática representando o ciclo
-// de Aquecimento Discord da semana ativa (Seg-Sex), com o roteiro exato do
-// PDF já preenchido dia a dia. Sempre que o ciclo atual termina (o
-// treinamento de sexta acaba e vira sábado/domingo), essa entrada é
-// substituída por uma nova já com as datas da PRÓXIMA turma — não fica presa
-// numa semana antiga. Edições manuais dela durante a semana são preservadas
-// (só troca quando a data muda). Não mexe nos treinamentos criados por você.
-const RETENTION_TRAINING_TITLE='🔥 Aquecimento Discord — toda semana, Segunda a Quinta (Treinamento na Sexta)';
-function ensureRetentionTrainingEntry(){
-  const mon=fmt(getRetentionWeekMonday());
-  const existing=S.trainings.find(t=>t.autoRetention);
-  if(existing&&existing.date===mon){
-    // Corrige só o título de entradas antigas já salvas (rótulo mudou de
-    // "Seg-Sex" pra deixar claro que o Aquecimento em si é Segunda-Quinta e
-    // o Treinamento é na Sexta) sem mexer nos roteiros que já foram editados
-    // durante a semana.
-    if(existing.title!==RETENTION_TRAINING_TITLE){existing.title=RETENTION_TRAINING_TITLE;return true;}
-    return false;
-  }
-  S.trainings=S.trainings.filter(t=>!t.autoRetention);
-  S.trainings.push({
-    id:'tr-retention-'+mon,
-    title:RETENTION_TRAINING_TITLE,
-    date:mon,
-    autoRetention:true,
-    days:RETENTION_AGENDA_DAYS.map(d=>({day:d.dia,script:`${d.titulo}\n\n${d.texto}`}))
-  });
-  return true;
+function renderAquecimento(){
+  const el=document.getElementById('aquecimento-content');
+  if(!el)return;
+  const labels={seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta'};
+  el.innerHTML=RETENTION_AGENDA_DAYS.map(d=>{
+    const aberto=aquecimentoDiaAberto===d.dk;
+    return`<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden">
+      <div style="padding:11px 13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft)" onclick="toggleAquecimentoDia('${d.dk}')">
+        <div style="font-weight:700;font-size:13.5px">${labels[d.dk]} <span style="font-weight:500;color:var(--text3);font-size:12px">— ${d.titulo}</span></div>
+        <span style="color:var(--text3)">${aberto?'▾':'▸'}</span>
+      </div>
+      ${aberto?`<div style="padding:11px 13px">
+        <div style="font-size:12.5px;color:var(--text2);line-height:1.55;margin-bottom:10px">${d.texto}</div>
+        <button class="btn btn-soft btn-sm" onclick="toggleAquecimentoAgendar('${d.dk}')">📅 Agendar na Agenda</button>
+        <div id="aquec-agendar-${d.dk}" style="display:none;gap:6px;margin-top:8px">
+          <input type="time" class="finput" id="aquec-time-${d.dk}" style="flex:1">
+          <button class="btn btn-primary btn-sm" onclick="agendarAquecimentoDia('${d.dk}')">OK</button>
+        </div>
+      </div>`:''}
+    </div>`;
+  }).join('');
+}
+// TREINAMENTO FIXO — Sexta/Sábado/Domingo sempre presentes (não precisam
+// ser recriados toda semana), com o roteiro editável direto no card.
+function saveTreinamentoFixoScript(dk,val){
+  if(!S.treinamentoFixo)S.treinamentoFixo={};
+  if(!S.treinamentoFixo[dk])S.treinamentoFixo[dk]={titulo:'',texto:''};
+  S.treinamentoFixo[dk].texto=val;
+  save();
+}
+function renderTreinamentoFixo(){
+  const el=document.getElementById('treinamento-fixo-content');
+  if(!el)return;
+  const dias=[{dk:'sex',label:'Sexta'},{dk:'sab',label:'Sábado'},{dk:'dom',label:'Domingo'}];
+  el.innerHTML=dias.map(d=>{
+    const entry=S.treinamentoFixo?.[d.dk]||{titulo:'',texto:''};
+    return`<div style="border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;padding:12px 13px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">🎓 ${d.label}${entry.titulo?` — ${entry.titulo}`:''}</div>
+      <textarea class="ftext" style="min-height:60px;font-size:12.5px" placeholder="Roteiro/plano do treinamento de ${d.label.toLowerCase()}..." onblur="saveTreinamentoFixoScript('${d.dk}',this.value)">${entry.texto||''}</textarea>
+    </div>`;
+  }).join('');
 }
 
 /* ===========================================================
@@ -8586,7 +8715,7 @@ function renderHomeMissingReports(){
       const hasRev=S.models.some(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dk}`])||0)>0);
       const justKey='just_'+c.id+'_'+dk;
       const hasJust=S.justificativas&&S.justificativas[justKey];
-      if(!hasRev&&!hasJust)missing.push({name:c.name,id:c.id,date:dk});
+      if(!hasRev&&!hasJust&&!chatterNaoPrecisaDeRelatorio(c.id,dk))missing.push({name:c.name,id:c.id,date:dk});
     });
   });
   if(!missing.length){el.innerHTML='';return;}
@@ -8632,6 +8761,8 @@ function renderGestao(){
   renderTaskBoards();
   renderEventActionList();
   renderTrainings();
+  renderTreinamentoFixo();
+  renderAquecimento();
   renderPrizePanel();
   renderLiderancaEstrategica();
   renderModelRequestsSplit();
@@ -10391,8 +10522,8 @@ function renderReservas(){
     const extraWeek=getChatterExtraRevenue(c.id,0);
     const extraBonusWeek=extraWeek*0.10;
     const daysAsReserva=daysSinceDecision(c.id);
-    return`<div class="panel" style="border-left:3px solid var(--bad)">
-      <div class="panel-head"><div><div class="panel-title">${c.name}</div><div class="panel-note">Reserva há ${daysAsReserva} dias</div></div>
+    return`<div class="panel reserva-swipe-row" data-key="${c.id}" style="border-left:3px solid var(--bad);touch-action:pan-y">
+      <div class="panel-head"><div><div class="panel-title">${c.name}</div><div class="panel-note">Reserva há ${daysAsReserva} dias · arraste pra esquerda pra excluir</div></div>
         <button class="btn btn-ghost btn-xs" onclick="openAddShiftForChatter('${c.id}')">🔁 Realocar em turno</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
@@ -10410,6 +10541,7 @@ function renderReservas(){
       </div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--text3)">Ainda não cobriu nenhum turno</div>'}
     </div>`;
   }).join('');
+  attachSwipeToDelete(el,'.reserva-swipe-row',id=>deleteChatter(id),renderReservas);
 }
 /* ===========================================================
    SOLICITAÇÃO DE AFILHADO — quadro na aba Testers com decisão
@@ -11743,6 +11875,32 @@ function renderMetricasID(data){
   </div>`;
 }
 
+// Ranking de crescimento semanal — puramente calculado a partir do
+// faturamento já lançado (sem IA nenhuma envolvida), pra mostrar rápido
+// quem está com os melhores resultados dessa semana vs a semana passada.
+function renderMetricasRankingCrescimento(data){
+  const elegiveis=data.perChatter.filter(p=>p.fatAtual>0||p.fatAnterior>0);
+  if(!elegiveis.length)return'';
+  const ranked=[...elegiveis].sort((a,b)=>{
+    if(a.variacao==null&&b.variacao==null)return b.fatAtual-a.fatAtual;
+    if(a.variacao==null)return 1;
+    if(b.variacao==null)return-1;
+    return b.variacao-a.variacao;
+  });
+  return`<div class="panel">
+    <div class="panel-head"><div><div class="panel-title">📊 Ranking de Crescimento Semanal</div><div class="panel-note">Calculado direto do faturamento lançado (sem IA) — do maior crescimento pra a maior queda vs a semana anterior</div></div></div>
+    <div style="overflow-x:auto"><table class="rtable">
+      <thead><tr><th>Chatter</th><th style="text-align:right">Essa semana</th><th style="text-align:right">Semana passada</th><th style="text-align:right">Variação</th></tr></thead>
+      <tbody>${ranked.map(p=>`<tr>
+        <td style="font-weight:700;font-size:12.5px">${p.c.name}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${money(p.fatAtual)}</td>
+        <td style="text-align:right;font-family:var(--font-mono);color:var(--text3)">${money(p.fatAnterior)}</td>
+        <td style="text-align:right;font-weight:800;color:${p.variacao==null?'var(--text3)':p.variacao>=0?'var(--ok)':'var(--bad)'}">${fmtPctSigned(p.variacao)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
 function renderMetricasEvolucaoModelo(data){
   return`<div class="panel">
     <div class="panel-head"><div><div class="panel-title">📈 Evolução por Modelo</div><div class="panel-note">Faturamento da semana vs semana passada, e quem mais faturou em cada modelo</div></div></div>
@@ -11780,7 +11938,7 @@ function renderMetricas(){
   if(!el)return;
   const data=buildMetricasData(weekOffset);
   _metricasDataCache=data;
-  el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
+  el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasRankingCrescimento(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
   renderMetricasPerformanceMensal();
   renderMetricasTreinamento();
   renderMetricasAnaliseMensal();
