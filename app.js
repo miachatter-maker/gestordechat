@@ -1122,23 +1122,49 @@ function isInsideHorizScroll(el,boundary){
   }
   return false;
 }
+// V2: a primeira versão só olhava touchstart/touchend — num toque real de
+// verdade o dedo quase nunca se move 100% na horizontal, sempre tem um
+// pouco de deriva vertical, e como não existia handler de touchmove o
+// scroll vertical nativo rolava a página AO MESMO TEMPO, competindo com o
+// gesto e fazendo o cálculo final de deltaY ficar grande demais — o que
+// descartava o swipe na prática. Agora trava a DIREÇÃO logo nos primeiros
+// ~10px de movimento (como qualquer carrossel de app): se for predominante
+// horizontal, chama preventDefault nos touchmove seguintes pra impedir o
+// scroll vertical de competir; se for vertical, solta o gesto e deixa o
+// scroll normal da página acontecer.
 (function initViewSwipe(){
   const area=document.querySelector('.main');
   if(!area)return;
-  let sx=0,sy=0,tracking=false;
+  const LOCK_PX=10,NAV_PX=60;
+  let sx=0,sy=0,tracking=false,dir=null; // dir: null (ainda decidindo) | 'h' | 'v'
   const onStart=e=>{
-    const t=e.touches?e.touches[0]:e;
-    if(e.target.closest('[data-key]')||e.target.closest('input,textarea,select,button,a')||isInsideHorizScroll(e.target,area)){
-      tracking=false;return;
+    if(e.target.closest('[data-key]')||e.target.closest('input,textarea,select,button,a')){
+      tracking=false;dir=null;return;
     }
-    sx=t.clientX;sy=t.clientY;tracking=true;
+    const t=e.touches?e.touches[0]:e;
+    sx=t.clientX;sy=t.clientY;tracking=true;dir=null;
+  };
+  const onMove=e=>{
+    if(!tracking)return;
+    const t=e.touches?e.touches[0]:e;
+    const dx=t.clientX-sx,dy=t.clientY-sy;
+    if(dir===null){
+      if(Math.abs(dx)<LOCK_PX&&Math.abs(dy)<LOCK_PX)return; // ainda pouco movimento pra decidir
+      const wantsHoriz=Math.abs(dx)>Math.abs(dy)*1.2;
+      // Só trava como swipe horizontal se não estiver dentro de algo que já
+      // rola na horizontal por conta própria (tabela larga, segtabs etc).
+      dir=(wantsHoriz&&!isInsideHorizScroll(e.target,area))?'h':'v';
+      if(dir==='v')tracking=false; // solta o gesto pro scroll nativo assumir
+    }
+    if(dir==='h'&&e.cancelable)e.preventDefault();
   };
   const onEnd=e=>{
-    if(!tracking)return;
+    if(!tracking||dir!=='h'){tracking=false;dir=null;return;}
     tracking=false;
     const t=e.changedTouches?e.changedTouches[0]:e;
-    const dx=t.clientX-sx,dy=t.clientY-sy;
-    if(Math.abs(dx)<70||Math.abs(dx)<Math.abs(dy)*1.3)return;
+    const dx=t.clientX-sx;
+    dir=null;
+    if(Math.abs(dx)<NAV_PX)return;
     const order=getSwipeViewOrder();
     const cur=document.querySelector('.view.active')?.id?.replace('v-','');
     const idx=order.indexOf(cur);
@@ -1147,6 +1173,7 @@ function isInsideHorizScroll(el,boundary){
     else if(dx>0&&idx>0)navTo(order[idx-1]); // arrastou pra direita → aba anterior
   };
   area.addEventListener('touchstart',onStart,{passive:true});
+  area.addEventListener('touchmove',onMove,{passive:false});
   area.addEventListener('touchend',onEnd);
 })();
 function renderView(v){
