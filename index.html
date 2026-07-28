@@ -95,7 +95,7 @@ body{
 .toptab.active::after{content:'';position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent);border-radius:1px;}
 
 /* ---------- MAIN ---------- */
-.main{flex:1;padding:20px 16px 100px;max-width:640px;margin:0 auto;width:100%;}
+.main{flex:1;padding:20px 16px 32px;max-width:640px;margin:0 auto;width:100%;}
 .view{display:none;}
 .view.active{display:block;}
 
@@ -131,7 +131,7 @@ body{
 .btn-block{width:100%;}
 .btn-icon{width:32px;height:32px;padding:0;border-radius:8px;flex-shrink:0;}
 .fab{
-  position:fixed;right:18px;bottom:96px;z-index:80;
+  position:fixed;right:18px;bottom:24px;z-index:80;
   width:50px;height:50px;border-radius:50%;background:var(--accent);
   color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;
   border:none;cursor:pointer;box-shadow:0 4px 16px rgba(232,119,155,.35);
@@ -1459,16 +1459,6 @@ body{
 
 </main>
 
-<nav class="bottomnav" id="bottomnav">
-  <button class="navbtn active" data-go="home"><span class="navbtn-ic">⌂</span><span class="navbtn-lb">Painel</span></button>
-  <button class="navbtn" data-go="gestao"><span class="navbtn-ic">🗓</span><span class="navbtn-lb">Agenda</span></button>
-  <button class="navbtn" data-go="fat"><span class="navbtn-ic">¤</span><span class="navbtn-lb">Fat.</span></button>
-  <button class="navbtn" data-go="turno"><span class="navbtn-ic">⇄</span><span class="navbtn-lb">Turno</span></button>
-  <button class="navbtn" data-go="time"><span class="navbtn-ic">▦</span><span class="navbtn-lb">Equipe</span></button>
-  <button class="navbtn" data-go="fichas"><span class="navbtn-ic">👤</span><span class="navbtn-lb">Fichas</span></button>
-  <button class="navbtn" data-go="extra"><span class="navbtn-ic">⚡</span><span class="navbtn-lb">H.Extra</span></button>
-  <button class="navbtn" data-go="gerador"><span class="navbtn-ic">📄</span><span class="navbtn-lb">Relatórios</span></button>
-</nav>
 </div>
 
 <!-- ===================================================== MODALS ===================================================== -->
