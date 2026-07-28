@@ -7369,17 +7369,19 @@ function renderLiderancaEstrategica(){
     const el=document.getElementById('lid-list-'+cat.key);
     if(!el)return;
     const items=(S.liderancaEstrategias||[]).filter(t=>t.categoria===cat.key);
+    const countEl=document.getElementById('lid-count-'+cat.key);
+    if(countEl)countEl.textContent=items.length?`${items.filter(t=>!t.done).length}/${items.length}`:'';
     if(!items.length){
-      el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px 0 8px">Nenhuma ação aqui ainda.</div>';
+      el.innerHTML='<div class="lid-empty">Nenhuma ação aqui ainda.</div>';
       return;
     }
     el.innerHTML=items.map(t=>`
-      <div class="lid-row" data-key="${t.id}" style="display:flex;align-items:flex-start;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);touch-action:pan-y">
-        <button onclick="toggleLiderancaTarefa('${t.id}')" style="width:22px;height:22px;border-radius:5px;border:2px solid ${t.done?'var(--ok)':'var(--line)'};background:${t.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;margin-top:6px;display:flex;align-items:center;justify-content:center">${t.done?'<span style="color:#fff;font-size:11px">✓</span>':''}</button>
-        <textarea class="ftext lid-textarea" style="flex:1;font-size:13.5px;line-height:1.5;resize:none;overflow:hidden;${t.done?'text-decoration:line-through;color:var(--text3)':''}" onblur="salvarLiderancaTexto('${t.id}',this)" oninput="lidAutoGrow(this)">${t.texto}</textarea>
+      <div class="lid-card lid-card-${cat.key}${t.done?' done':''}" data-key="${t.id}" style="touch-action:pan-y">
+        <button class="lid-check${t.done?' done':''}" onclick="toggleLiderancaTarefa('${t.id}')">${t.done?'✓':''}</button>
+        <textarea class="lid-text${t.done?' done':''}" onblur="salvarLiderancaTexto('${t.id}',this)" oninput="lidAutoGrow(this)">${t.texto}</textarea>
       </div>`).join('');
-    attachSwipeToDelete(el,'.lid-row',id=>removerLiderancaTarefa(id),renderLiderancaEstrategica);
-    el.querySelectorAll('.lid-textarea').forEach(ta=>lidAutoGrow(ta));
+    attachSwipeToDelete(el,'.lid-card',id=>removerLiderancaTarefa(id),renderLiderancaEstrategica);
+    el.querySelectorAll('.lid-text').forEach(ta=>lidAutoGrow(ta));
   });
   renderLiderancaHome();
 }
