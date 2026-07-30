@@ -5996,8 +5996,9 @@ function renderChatObsPanel(chatterId){
   return fichaAccordion('chatobs-'+chatterId,'','<div><div class="panel-title">💬 Observações de Chat</div><div class="panel-note">Checklist diário — o que avaliar hoje nesse chatter</div></div>',body);
 }
 /* ===========================================================
-   MAPEAMENTO DE PERFORMANCE — entrevista guiada (roteiro fixo de
-   6 perguntas conversacionais, uma por bloco) + gravação/transcrição + análise por IA.
+   MAPEAMENTO DE PERFORMANCE — entrevista guiada (roteiro fixo,
+   perguntas conversacionais em 6 blocos, alguns com mais de uma
+   pergunta) + gravação/transcrição + análise por IA.
    Gera perfil (Executor/Criativo/Líder/Analítico híbrido), scores de
    comunicação e inteligência emocional, motivadores, estilo de liderança
    ideal e um radar de 10 competências (0-10). Fica salvo na ficha do
@@ -6103,9 +6104,15 @@ function stopMapeamentoRecording(silent){
   }
 }
 
-const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista conversacional de 6 perguntas fáceis e abertas, uma por bloco (Vida pessoal, Autoridade, Motivação real, Como aprende de verdade, Personalidade e talento, Ambição) — poucas perguntas, de boa, tipo papo, mas cada uma pensada pra deixar a pessoa desenvolver naturalmente e revelar algo específico e difícil de fingir: história pessoal real (incluindo idade, cidade/onde mora, e o que a fez arriscar um CNPJ próprio que depende totalmente dela — sinal real de coragem/motivação empreendedora — além de outros detalhes pessoais que ela mencionar), que tipo de autoridade funciona com essa pessoa, o que a motiva de verdade no dia a dia, como ela aprende de fato, um traço real de personalidade e um talento genuíno — e deve produzir um mapeamento de performance completo da pessoa entrevistada.
+const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista conversacional guiada por 6 blocos (Vida pessoal, Autoridade, Motivação real, Como aprende de verdade, Personalidade e talento, Ambição) — poucas perguntas fáceis e abertas por bloco (alguns blocos têm mais de uma), de boa, tipo papo, mas cada uma pensada pra deixar a pessoa desenvolver naturalmente e revelar algo específico e difícil de fingir:
+- Vida pessoal: dados básicos (idade, onde mora, com quem mora) e um resumo em estilo "sinopse de filme" da trajetória — o que já trabalhou, o que aprendeu e o que estava buscando até chegar aqui.
+- Autoridade: que tipo de cobrança funciona com essa pessoa, o que a desmotiva, e também o que realmente a motivou ou marcou positivamente (não julgue só pelo que ela quer evitar).
+- Motivação real: inclui uma pergunta hipotética ("se ganhasse na loteria, continuaria trabalhando?") que ajuda a distinguir motivação intrínseca de motivação puramente financeira, além do que a mantém dando o melhor em dias difíceis.
+- Como aprende de verdade: como ela aprende algo novo na prática.
+- Personalidade e talento: inclui um "Desafio GPT" opcional, onde a pessoa pode trazer uma descrição do próprio talento e uma metodologia de ensino/aprendizagem que ela mesma obteve conversando com uma IA — trate isso como um sinal rico de autoconhecimento e familiaridade com ferramentas de IA, não como resposta "menos genuína" por ter vindo de uma IA.
+- Ambição: onde se imagina daqui a uns 2 anos e o que falta pra chegar lá.
 
-Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real (pra preencher comoMotivar de forma específica, não genérica).
+Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real, incluindo a resposta da pergunta da loteria (pra preencher comoMotivar e motivadores de forma específica, não genérica).
 
 IMPORTANTE — cuidado e sensibilidade na análise: essa pessoa está sendo avaliada de verdade pela liderança, então o mapeamento tem peso real sobre como ela vai ser tratada. Evite julgamentos genéricos, duros ou definitivos com base em pouca informação — uma entrevista curta não define uma pessoa por completo. Brevidade, nervosismo ou respostas mais tímidas NÃO são sinal automático de baixo potencial ou fraqueza — considere que entrevistas são situações de pressão e trate isso com contexto, não como defeito de personalidade. Busque nuance: quase ninguém é só uma coisa. Prefira descrever potencial e condições de sucesso ("funciona bem quando...") a rótulos negativos fechados ("é fraco em..."). Sempre que apontar um ponto de atenção, baseie-se em algo específico que a pessoa realmente disse ou demonstrou na transcrição — nunca em suposição ou estereótipo. O objetivo final é ajudar essa pessoa a crescer, não catalogá-la.
 
@@ -6115,9 +6122,10 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhu
   "dadosPessoais": {
     "idade": "idade que a pessoa mencionou (ex: '24 anos') ou 'não informado' se não foi dito",
     "ondeMora": "cidade e/ou estado que a pessoa mencionou ou 'não informado' se não foi dito",
+    "comQuemMora": "com quem a pessoa mora (ex: 'sozinha', 'com os pais', 'com o marido e um filho') ou 'não informado' se não foi dito",
     "sobre": "resumo curto (1-2 frases) de outras informações pessoais reais ditas na entrevista (ex: o que fazia antes, situação familiar, contexto de vida) — só o que foi realmente dito, nunca invente nem deduza além do que está na transcrição"
   },
-  "resumoHistoria": "resumo objetivo em 2-4 frases da trajetória e do contexto da pessoa",
+  "resumoHistoria": "resumo objetivo em 2-4 frases, como se fosse a sinopse de um filme sobre a trajetória da pessoa: de onde veio, o que já trabalhou, o que aprendeu no caminho e o que estava buscando até chegar aqui",
   "comunicacao": (número de 0 a 100),
   "inteligenciaEmocional": (número de 0 a 100),
   "aprendizagem": "vendo" | "fazendo" | "ouvindo" | "repetindo" | "explorando",
@@ -7151,9 +7159,10 @@ function renderMapeamentoPanel(chatterId){
       </div>
       <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--bg-soft);border-radius:10px;padding:12px;z-index:1">
         ${m.personalidadeUmaFrase?`<div style="font-size:14px;font-weight:700;color:var(--accent);font-style:italic;margin-bottom:8px">"${m.personalidadeUmaFrase}"</div>`:''}
-        ${(infoOk(dp.idade)||infoOk(dp.ondeMora))?`<div style="display:flex;gap:12px;font-size:11.5px;color:var(--text3);margin-bottom:6px">
+        ${(infoOk(dp.idade)||infoOk(dp.ondeMora)||infoOk(dp.comQuemMora))?`<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;color:var(--text3);margin-bottom:6px">
           ${infoOk(dp.idade)?`<span>🎂 ${dp.idade}</span>`:''}
           ${infoOk(dp.ondeMora)?`<span>📍 ${dp.ondeMora}</span>`:''}
+          ${infoOk(dp.comQuemMora)?`<span>🏠 mora com ${dp.comQuemMora}</span>`:''}
         </div>`:''}
         <div class="panel-note" style="margin-bottom:6px">👤 Quem é essa pessoa</div>
         ${dp.sobre?`<div style="font-size:12.5px;color:var(--text2);line-height:1.5;margin-bottom:4px">${dp.sobre}</div>`:''}
