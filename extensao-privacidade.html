@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Política de Privacidade — ChatLab Autoanálise (extensão)</title>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;max-width:680px;margin:0 auto;padding:32px 20px 80px;color:#241A1D;line-height:1.6;font-size:15px;}
+  h1{font-size:22px;margin-bottom:6px;}
+  h2{font-size:16px;margin:26px 0 8px;color:#D85C84;}
+  p,li{font-size:14.5px;color:#3a2f32;}
+  .updated{color:#9a888c;font-size:13px;margin-bottom:24px;}
+</style>
+</head>
+<body>
+<h1>Política de Privacidade — ChatLab Autoanálise</h1>
+<div class="updated">Última atualização: 30 de julho de 2026</div>
+
+<p>Esta extensão do Chrome ("ChatLab Autoanálise") é uma ferramenta interna da Agência Seduct, usada pela equipe de chatters junto com o sistema GestorPro (gestordechat.vercel.app), para agilizar o envio de trechos de conversa para a própria ferramenta de autoanálise (ChatLab).</p>
+
+<h2>O que a extensão faz</h2>
+<p>A extensão só age quando o próprio usuário aciona explicitamente, de duas formas: (1) selecionando um texto na página do Privacy (privacy.com.br) e escolhendo "Analisar no ChatLab" no menu de botão direito, ou (2) selecionando um texto e usando o atalho de teclado Ctrl+Shift+L. Em ambos os casos, a extensão lê apenas o texto que o próprio usuário selecionou manualmente naquele momento — nunca lê a página inteira, nunca monitora digitação, nunca roda em segundo plano e nunca captura nada sem essa ação explícita do usuário.</p>
+
+<h2>Como esse texto é usado</h2>
+<p>O texto selecionado é guardado por até 5 minutos no armazenamento local do próprio navegador (chrome.storage.local), só para ser transferido para a aba do ChatLab que a extensão abre em seguida, onde é preenchido automaticamente no campo de autoanálise. Depois de preenchido (ou após 5 minutos), esse texto temporário é apagado do armazenamento da extensão. A extensão em si não envia esse texto para nenhum servidor — quem envia a conversa para análise (via IA) é a própria página do ChatLab, exatamente como já acontecia antes ao colar manualmente, seguindo o mesmo tratamento de dados do sistema GestorPro.</p>
+
+<h2>Dados salvos de forma permanente</h2>
+<p>A extensão guarda, na sua conta do Chrome (chrome.storage.sync), apenas o link pessoal de autoanálise que o próprio usuário configura uma vez (contém um identificador do chatter e seu nome, gerados pela gestão da agência). Esse dado não é compartilhado com terceiros e existe apenas para a extensão saber para qual link abrir automaticamente.</p>
+
+<h2>O que a extensão NÃO faz</h2>
+<ul>
+  <li>Não coleta, envia ou vende dados para terceiros ou para fins de publicidade.</li>
+  <li>Não monitora a navegação do usuário.</li>
+  <li>Não lê ou grava nada fora do momento em que o usuário aciona manualmente o menu de contexto ou o atalho.</li>
+  <li>Não funciona em nenhum site além do Privacy (para leitura de seleção) e do próprio GestorPro (para preencher o formulário de autoanálise).</li>
+</ul>
+
+<h2>Contato</h2>
+<p>Dúvidas sobre esta extensão ou sobre tratamento de dados podem ser enviadas à gestão da Agência Seduct responsável pelo GestorPro.</p>
+</body>
+</html>
