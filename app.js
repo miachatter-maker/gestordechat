@@ -5997,7 +5997,7 @@ function renderChatObsPanel(chatterId){
 }
 /* ===========================================================
    MAPEAMENTO DE PERFORMANCE — entrevista guiada (roteiro fixo de
-   20 perguntas em 6 blocos) + gravação/transcrição + análise por IA.
+   6 perguntas conversacionais, uma por bloco) + gravação/transcrição + análise por IA.
    Gera perfil (Executor/Criativo/Líder/Analítico híbrido), scores de
    comunicação e inteligência emocional, motivadores, estilo de liderança
    ideal e um radar de 10 competências (0-10). Fica salvo na ficha do
@@ -6103,7 +6103,7 @@ function stopMapeamentoRecording(silent){
   }
 }
 
-const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista estruturada de 11 perguntas curtas e assertivas em 6 blocos (Vida pessoal, Autoridade, Motivação real, Como aprende de verdade, Personalidade e talento, Ambição) — poucas perguntas, mas cada uma pensada pra revelar algo específico e difícil de fingir: história pessoal real, que tipo de autoridade funciona com essa pessoa, o que a motiva de verdade no dia a dia, como ela aprende de fato, um traço real de personalidade e um talento genuíno — e deve produzir um mapeamento de performance completo da pessoa entrevistada.
+const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de performance sênior, especialista em mapeamento comportamental de equipes de vendas/atendimento (chatters de OnlyFans/redes sociais). Você recebe a TRANSCRIÇÃO de uma entrevista conversacional de 6 perguntas fáceis e abertas, uma por bloco (Vida pessoal, Autoridade, Motivação real, Como aprende de verdade, Personalidade e talento, Ambição) — poucas perguntas, de boa, tipo papo, mas cada uma pensada pra deixar a pessoa desenvolver naturalmente e revelar algo específico e difícil de fingir: história pessoal real (incluindo idade, cidade/onde mora e outros detalhes pessoais que ela mencionar), que tipo de autoridade funciona com essa pessoa, o que a motiva de verdade no dia a dia, como ela aprende de fato, um traço real de personalidade e um talento genuíno — e deve produzir um mapeamento de performance completo da pessoa entrevistada.
 
 Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real (pra preencher comoMotivar de forma específica, não genérica).
 
@@ -6112,6 +6112,11 @@ IMPORTANTE — cuidado e sensibilidade na análise: essa pessoa está sendo aval
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhum texto antes ou depois), seguindo EXATAMENTE este formato:
 {
   "personalidadeUmaFrase": "desafio: descreva a personalidade dessa pessoa em UMA ÚNICA FRASE curta, direta e específica — nada de clichê genérico tipo 'pessoa esforçada e comunicativa', tem que soar como algo que só se diria sobre ELA",
+  "dadosPessoais": {
+    "idade": "idade que a pessoa mencionou (ex: '24 anos') ou 'não informado' se não foi dito",
+    "ondeMora": "cidade e/ou estado que a pessoa mencionou ou 'não informado' se não foi dito",
+    "sobre": "resumo curto (1-2 frases) de outras informações pessoais reais ditas na entrevista (ex: o que fazia antes, situação familiar, contexto de vida) — só o que foi realmente dito, nunca invente nem deduza além do que está na transcrição"
+  },
   "resumoHistoria": "resumo objetivo em 2-4 frases da trajetória e do contexto da pessoa",
   "comunicacao": (número de 0 a 100),
   "inteligenciaEmocional": (número de 0 a 100),
@@ -7134,6 +7139,8 @@ function renderMapeamentoPanel(chatterId){
     </div>`;
   }
   const perfisTxt=(m.perfis||[]).map(p=>`${p.tipo} ${p.pct}%`).join(' / ');
+  const dp=m.dadosPessoais||{};
+  const infoOk=v=>v&&!/n[ãa]o informad/i.test(v);
   const radar=m.radar||{};
   const radarKeys=Object.keys(radar);
   const body=`
@@ -7144,7 +7151,12 @@ function renderMapeamentoPanel(chatterId){
       </div>
       <div id="map-swipe-card-${chatterId}" style="position:relative;background:var(--bg-soft);border-radius:10px;padding:12px;z-index:1">
         ${m.personalidadeUmaFrase?`<div style="font-size:14px;font-weight:700;color:var(--accent);font-style:italic;margin-bottom:8px">"${m.personalidadeUmaFrase}"</div>`:''}
+        ${(infoOk(dp.idade)||infoOk(dp.ondeMora))?`<div style="display:flex;gap:12px;font-size:11.5px;color:var(--text3);margin-bottom:6px">
+          ${infoOk(dp.idade)?`<span>🎂 ${dp.idade}</span>`:''}
+          ${infoOk(dp.ondeMora)?`<span>📍 ${dp.ondeMora}</span>`:''}
+        </div>`:''}
         <div class="panel-note" style="margin-bottom:6px">👤 Quem é essa pessoa</div>
+        ${dp.sobre?`<div style="font-size:12.5px;color:var(--text2);line-height:1.5;margin-bottom:4px">${dp.sobre}</div>`:''}
         <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${m.resumoHistoria||'-'}</div>
       </div>
     </div>
