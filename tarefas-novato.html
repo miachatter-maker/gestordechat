@@ -166,6 +166,16 @@ const TAREFAS_DIA={
 window.openLightbox=function(src){document.getElementById('lightbox-img').src=src;document.getElementById('lightbox').style.display='flex';};
 window.closeLightbox=function(){document.getElementById('lightbox').style.display='none';};
 
+// IMPORTANTE (achado em 31/07/2026): o limite de largura (900px) sozinho não
+// garantia um tamanho máximo — print de celular é uma imagem ALTA (não só
+// larga), então mesmo limitando a largura o print inteiro podia passar de
+// 250-300KB dependendo do aparelho/detalhe da tela. Com 15 tarefas guardadas
+// por tester (pedido da gestora), isso sozinho quase estourou o limite de
+// ~1MB por documento do Firestore (chegou a 977KB, 3 testers pendentes já
+// ocupavam 826KB dos 977KB). Agora comprime até caber num orçamento de
+// tamanho de verdade — reduz a qualidade e, se ainda não couber, reduz o
+// tamanho também — em vez de só limitar a largura e torcer.
+const PPM_MAX_BASE64_CHARS=48000; // ~35KB reais — de sobra pra ler um print de resultado de teste de digitação
 function fileToCompressedDataUrl(file){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
@@ -173,12 +183,30 @@ function fileToCompressedDataUrl(file){
       const img=new Image();
       img.onload=()=>{
         let w=img.width,h=img.height;
-        const maxW=900;
+        const maxW=700;
         if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
         const canvas=document.createElement('canvas');
         canvas.width=w;canvas.height=h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        resolve(canvas.toDataURL('image/jpeg',0.62));
+        let quality=0.6;
+        let dataUrl=canvas.toDataURL('image/jpeg',quality);
+        let tentativas=0;
+        while(dataUrl.length>PPM_MAX_BASE64_CHARS&&quality>0.25&&tentativas<8){
+          quality-=0.07;
+          dataUrl=canvas.toDataURL('image/jpeg',quality);
+          tentativas++;
+        }
+        if(dataUrl.length>PPM_MAX_BASE64_CHARS){
+          // Print muito grande/detalhado mesmo na qualidade mínima — reduz o
+          // tamanho físico também (redesenha menor a partir do canvas já
+          // reduzido, sem reler o arquivo original).
+          const w2=Math.round(w*0.6),h2=Math.round(h*0.6);
+          const canvas2=document.createElement('canvas');
+          canvas2.width=w2;canvas2.height=h2;
+          canvas2.getContext('2d').drawImage(canvas,0,0,w2,h2);
+          dataUrl=canvas2.toDataURL('image/jpeg',0.5);
+        }
+        resolve(dataUrl);
       };
       img.onerror=()=>reject(new Error('Não consegui ler essa imagem.'));
       img.src=reader.result;
