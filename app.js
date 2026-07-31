@@ -23,7 +23,7 @@ function aiQuotaError(data){
   // real do Mapeamento dos Novos "falhando sem gerar nada" num pico de uso).
   // Trata os dois casos como a mesma situação transitória: mostra a mesma
   // contagem regressiva de espera em vez de um erro seco.
-  if(/quota|rate.?limit|high demand|overloaded|sobrecarregad/i.test(raw)){
+  if(/quota|rate.?limit|high demand|overloaded|sobrecarregad|alta demanda/i.test(raw)){
     // O proxy (api/claude.js) já calcula o tempo real de espera (extraído da
     // própria resposta do Gemini) e manda numa frase tipo "espere cerca de
     // 47s" — extrai esse número aqui pra alimentar uma contagem regressiva
@@ -31,7 +31,7 @@ function aiQuotaError(data){
     const m=raw.match(/(\d+)\s*s\b/i);
     const err=new Error(raw||'Limite de uso da IA no momento — costuma voltar sozinho em cerca de 1 minuto.');
     err.quota=true;
-    err.waitSeconds=m?parseInt(m[1],10):(/high demand|overloaded|sobrecarregad/i.test(raw)?20:60);
+    err.waitSeconds=m?parseInt(m[1],10):(/high demand|overloaded|sobrecarregad|alta demanda/i.test(raw)?20:60);
     return err;
   }
   return null;
