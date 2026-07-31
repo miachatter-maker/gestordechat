@@ -260,6 +260,23 @@ function migrateState(s){
 // o mais recente de cada data, em vez de acumular repetidos).
 function pruneHeavyData(s){
   try{
+    // Garante a migração de tarefasNovato pra sua fatia própria mesmo quando
+    // chega um snapshot SÓ do shard-fichas (migrateState só roda pro
+    // documento central-dados) — sem repetir isso aqui, o merge por união de
+    // chaves (deepMergeState) podia reintroduzir o campo antigo vindo de uma
+    // cópia remota que ainda não tinha sido sobrescrita, e o próximo save()
+    // escrevia ele de volta, num loop que nunca deixava a migração pegar de
+    // vez. Roda toda vez, mas só tem efeito enquanto sobrar algo pra mover.
+    if(s.chatterFichas){
+      if(!s.tarefasNovatoPorTester)s.tarefasNovatoPorTester={};
+      Object.keys(s.chatterFichas).forEach(cid=>{
+        const tn=s.chatterFichas[cid]&&s.chatterFichas[cid].tarefasNovato;
+        if(tn&&Object.keys(tn).length){
+          s.tarefasNovatoPorTester[cid]={...(s.tarefasNovatoPorTester[cid]||{}),...tn};
+        }
+        if(s.chatterFichas[cid])delete s.chatterFichas[cid].tarefasNovato;
+      });
+    }
     // Remove duplicatas estruturalmente idênticas em arrays sem "id" — o
     // bug antigo de mesclagem duplicava esses itens a cada sincronização.
     // Compara por conteúdo (JSON.stringify), preservando a ordem.
