@@ -91,6 +91,11 @@ const content=document.getElementById('content');
 
 let fbDb=null;
 let chatters=[],mapeamentoBatches=[],chatterFichasLive={},afilhadoClaimsLive=[];
+// tarefasNovato mora numa fatia própria do Firestore desde 31/07/2026 (não
+// mais dentro de chatterFichasLive/shard-fichas) — documento dedicado só
+// pros prints de PPM de quem ainda está em teste, sem dividir o orçamento
+// de ~1MB com a Ficha de todo mundo já contratado.
+let tarefasNovatoLive={};
 let rawTarefaDocs=[],rawClaimDocs=[];
 let selPadrinhoId=localStorage.getItem('tn_padrinhoId')||'';
 let expandedTester='';
@@ -166,6 +171,17 @@ function startListeners(){
       }catch(e){console.error('Erro ao ler shard-fichas',e);}
     }
   },e=>console.error('Erro shard-fichas',e));
+  fbDb.collection('gestorpro').doc('shard-tarefas-tester').onSnapshot(doc=>{
+    if(!doc.exists)return;
+    const remote=doc.data();
+    if(remote&&remote.payload){
+      try{
+        const parsed=JSON.parse(remote.payload);
+        tarefasNovatoLive=parsed.tarefasNovatoPorTester||{};
+        renderAll();
+      }catch(e){console.error('Erro ao ler shard-tarefas-tester',e);}
+    }
+  },e=>console.error('Erro shard-tarefas-tester',e));
   fbDb.collection('gestorpro').where('type','==','tarefaNovatoPendente').onSnapshot(snap=>{
     rawTarefaDocs=snap.docs.map(d=>d.data());
     renderAll();
@@ -184,7 +200,7 @@ function tsMillis(ts){
   return 0;
 }
 function getMergedTarefas(testerId){
-  const base=JSON.parse(JSON.stringify((chatterFichasLive[testerId]&&chatterFichasLive[testerId].tarefasNovato)||{}));
+  const base=JSON.parse(JSON.stringify(tarefasNovatoLive[testerId]||{}));
   rawTarefaDocs.filter(d=>d.testerId===testerId&&d.fridayKey&&d.dia).forEach(d=>{
     if(!base[d.fridayKey])base[d.fridayKey]={};
     const key='dia'+d.dia;

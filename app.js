@@ -166,6 +166,21 @@ function migrateState(s){
   if(!s.mapRecordings)s.mapRecordings=[]; // [{id,name,transcript,date,mapped}] — gravações rápidas do novo Mapeamento (6 slots)
   if(!s.mapSlotDrafts)s.mapSlotDrafts={}; // '1'..'6' -> texto em andamento (recuperação se travar no meio da gravação)
   if(!s.mapSlotNames)s.mapSlotNames={}; // '1'..'6' -> nome digitado antes/durante a gravação (a pedido da gestora, em vez de depender só do reconhecimento automático)
+  if(!s.tarefasNovatoPorTester)s.tarefasNovatoPorTester={};
+  // MIGRAÇÃO ÚNICA (31/07/2026): tira tarefasNovato de dentro de cada
+  // chatterFicha e move pra sua fatia própria (ver comentário em
+  // SHARD_FIELDS). Só copia se ainda achar dado no lugar antigo — depois da
+  // primeira vez que salva, o campo antigo não existe mais e isso vira
+  // um no-op sozinho, sem risco de duplicar ou reverter a migração.
+  if(s.chatterFichas){
+    Object.keys(s.chatterFichas).forEach(cid=>{
+      const tn=s.chatterFichas[cid]&&s.chatterFichas[cid].tarefasNovato;
+      if(tn&&Object.keys(tn).length){
+        s.tarefasNovatoPorTester[cid]={...(s.tarefasNovatoPorTester[cid]||{}),...tn};
+      }
+      if(s.chatterFichas[cid])delete s.chatterFichas[cid].tarefasNovato;
+    });
+  }
   if(!s.mapeamentoBatches)s.mapeamentoBatches=[]; // [{id,date,results:[{id,name,recordingId,...campos da IA}]}] — MAPEAMENTO DOS NOVOS
   if(!s.afilhadoClaims)s.afilhadoClaims=[]; // [{id,testerId,testerNome,padrinhoId,padrinhoNome,status:'pendente'|'aprovado'|'reprovado'|'reservado',criadoEm}] — quadro SOLICITAÇÃO DE AFILHADO (Testers)
   if(!s.weekGoals)s.weekGoals={};
@@ -366,6 +381,12 @@ function pruneHeavyData(s){
         if(!idsValidos.has(tid))delete s.testerLogs[tid];
       });
     }
+    if(s.tarefasNovatoPorTester&&Array.isArray(s.chatters)){
+      const idsValidos=new Set(s.chatters.map(c=>c.id));
+      Object.keys(s.tarefasNovatoPorTester).forEach(tid=>{
+        if(!idsValidos.has(tid))delete s.tarefasNovatoPorTester[tid];
+      });
+    }
   }catch(e){console.error('Erro ao limpar dados pesados',e);}
   return s;
 }
@@ -531,8 +552,15 @@ function deepMergeState(local,remote){
 // o espaço disponível (~1MB por documento) por vários — sem mudar nada na
 // tela: o app continua trabalhando com um único objeto de estado (S) na
 // memória, só a gravação/leitura no Firebase é que fica dividida.
-const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses','chatlabWeeklyReports'];
-const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab',chatlabWeeklyReports:'shard-chatlab-semanal'};
+// tarefasNovatoPorTester ganhou fatia PRÓPRIA (31/07/2026, a pedido da
+// gestora, preocupada com pouco espaço sobrando): antes morava dentro de
+// cada chatterFicha, disputando o MESMO ~1MB do documento shard-fichas com
+// o histórico de TODO MUNDO já contratado — só 3-4 testers em teste ao
+// mesmo tempo já quase estouravam o limite. Com fatia própria, os prints de
+// PPM de quem ainda está em teste têm um orçamento de ~1MB SÓ PRA ELES,
+// somando na prática mais que o dobro de espaço de sobra sem apagar nada.
+const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses','chatlabWeeklyReports','tarefasNovatoPorTester'];
+const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab',chatlabWeeklyReports:'shard-chatlab-semanal',tarefasNovatoPorTester:'shard-tarefas-tester'};
 const ALL_SYNC_DOC_IDS=[FIREBASE_DOC_ID,...SHARD_FIELDS.map(f=>SHARD_DOC_IDS[f])];
 let fbDocsSeen=new Set();
 let fbDocsStatus={}; // docId -> 'ok'|'not-exists'|'error: ...' — pra diagnóstico
@@ -1026,7 +1054,7 @@ function getCicloNovatoInfo(ref){
 }
 // status do Dia N (1/2/3) de um tester dentro de um ciclo (fridayKey): 'enviado'|'bloqueado'|'aberto'|'futuro'
 function getStatusTarefaNovatoDia(cid,fridayKey,diaN){
-  const registro=S.chatterFichas?.[cid]?.tarefasNovato?.[fridayKey]?.['dia'+diaN];
+  const registro=S.tarefasNovatoPorTester?.[cid]?.[fridayKey]?.['dia'+diaN];
   if(registro&&registro.enviadoEm)return'enviado';
   const sex=new Date(fridayKey+'T12:00:00');
   const dataDia=new Date(sex.getFullYear(),sex.getMonth(),sex.getDate()+(diaN-1));
@@ -11492,13 +11520,10 @@ function setTesterDecision(chatterId,decision){
   // de cada dia) só servem pra guiar a escolha dos padrinhos — assim que
   // QUALQUER decisão é tomada (aprovado, reprovado OU colocado nas Reservas)
   // elas não têm mais função e são apagadas, senão os prints ficam
-  // acumulando pra sempre no mesmo documento sharded (shard-fichas) que
-  // guarda a Ficha de todo mundo, arriscando estourar o limite de 1MB do
-  // Firestore. Sem exceção pra Reservas/espera — a gestora pediu
-  // explicitamente pra não guardar nem esse caso.
-  if(S.chatterFichas[chatterId]){
-    delete S.chatterFichas[chatterId].tarefasNovato;
-  }
+  // acumulando à toa na fatia própria de tarefas (shard-tarefas-tester). Sem
+  // exceção pra Reservas/espera — a gestora pediu explicitamente pra não
+  // guardar nem esse caso.
+  delete S.tarefasNovatoPorTester[chatterId];
   if(decision==='aprovado'){
     c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
     if(c.level==='teste'||c.level==='treinamento')c.level='junior'; // promove o nível também, senão fica filtrado de fora em quadros que checam nível separado do cargo
@@ -11576,22 +11601,24 @@ function renderTesters(){
 
   // Indicador de espaço — a pedido da gestora, pra planejar quantos testers
   // dá pra receber ao mesmo tempo sem chegar perto do limite de ~1MB por
-  // documento do Firestore (shard-fichas guarda a Ficha de TODOS, incluindo
-  // os prints do PPM de quem ainda não teve decisão). Calcula em cima do
-  // mesmo S.chatterFichas que vai pro Firestore, então é o número real.
+  // documento do Firestore. Desde 31/07/2026 as tarefas (com print do PPM)
+  // moram numa fatia PRÓPRIA (shard-tarefas-tester), separada do documento
+  // que guarda a Ficha de todo mundo já contratado — mostra os dois
+  // orçamentos separados, cada um com seu próprio ~1024KB.
   const fichaKB=Math.round(JSON.stringify(S.chatterFichas||{}).length/1024);
-  const tarefasKB=Math.round(Object.values(S.chatterFichas||{}).reduce((soma,f)=>soma+(f.tarefasNovato?JSON.stringify(f.tarefasNovato).length:0),0)/1024);
-  const testersComTarefas=Object.values(S.chatterFichas||{}).filter(f=>f.tarefasNovato&&Object.keys(f.tarefasNovato).length).length;
-  const capCor=fichaKB>850?'var(--bad)':fichaKB>500?'var(--warn)':'var(--ok)';
-  const capMsg=fichaKB>850?'⚠️ perto do limite — decida (aprovado/reprovado/reservas) quem já terminou o ciclo pra liberar espaço na hora'
-    :fichaKB>500?'de olho, mas ainda tranquilo — vai decidindo quem termina o ciclo que o espaço libera sozinho'
+  const tarefasKB=Math.round(JSON.stringify(S.tarefasNovatoPorTester||{}).length/1024);
+  const testersComTarefas=Object.values(S.tarefasNovatoPorTester||{}).filter(t=>t&&Object.keys(t).length).length;
+  const pior=Math.max(fichaKB,tarefasKB);
+  const capCor=pior>850?'var(--bad)':pior>500?'var(--warn)':'var(--ok)';
+  const capMsg=pior>850?'⚠️ perto do limite — decida (aprovado/reprovado/reservas) quem já terminou o ciclo pra liberar espaço na hora'
+    :pior>500?'de olho, mas ainda tranquilo — vai decidindo quem termina o ciclo que o espaço libera sozinho'
     :'espaço de sobra pra receber mais gente';
   el.innerHTML=`
     <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;font-size:12.5px;color:var(--text2)">
       📊 <strong>${pending.length} em avaliação</strong> — classificados do melhor pro pior pelo resultado dos 3 dias de teste. Os 3 primeiros ficam sempre em destaque como fila de espera.
     </div>
     <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--text2);border-left:3px solid ${capCor}">
-      💾 <strong>Espaço usado: ${fichaKB}KB</strong> de ~1024KB por documento (${tarefasKB}KB são prints de PPM de ${testersComTarefas} tester${testersComTarefas!==1?'s':''} ainda sem decisão final) — ${capMsg}
+      💾 <strong>Tarefas dos testers: ${tarefasKB}KB</strong> de ~1024KB (fatia própria, ${testersComTarefas} tester${testersComTarefas!==1?'s':''} com print ainda sem decisão final) · Fichas de todo mundo: ${fichaKB}KB de ~1024KB — ${capMsg}
     </div>
     ${scored.map((item,idx)=>{
       const {c,rev,analysis,decision}=item;
@@ -11928,16 +11955,19 @@ function aplicarTarefaNovatoPendente(docId,data){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
       return;
     }
-    if(!S.chatterFichas[c.id])S.chatterFichas[c.id]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
-    if(!S.chatterFichas[c.id].tarefasNovato)S.chatterFichas[c.id].tarefasNovato={};
+    // Tarefas de tester moram na fatia própria S.tarefasNovatoPorTester (não
+    // mais dentro de chatterFichas) — documento Firestore dedicado, sem
+    // dividir o orçamento de ~1MB com o histórico de todo mundo já
+    // contratado (ver comentário em SHARD_FIELDS).
+    if(!S.tarefasNovatoPorTester[c.id])S.tarefasNovatoPorTester[c.id]={};
     const fk=data.fridayKey;
     const diaN=data.dia;
     if(!fk||!diaN){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'ciclo/dia ausente'});
       return;
     }
-    if(!S.chatterFichas[c.id].tarefasNovato[fk])S.chatterFichas[c.id].tarefasNovato[fk]={};
-    S.chatterFichas[c.id].tarefasNovato[fk]['dia'+diaN]={
+    if(!S.tarefasNovatoPorTester[c.id][fk])S.tarefasNovatoPorTester[c.id][fk]={};
+    S.tarefasNovatoPorTester[c.id][fk]['dia'+diaN]={
       resumo:data.resumo||'',
       disponibilidade:data.disponibilidade||'',
       cincoNotadas:data.cincoNotadas||'', // só usado no Dia 2
@@ -11945,25 +11975,22 @@ function aplicarTarefaNovatoPendente(docId,data){
       ppmUrl:data.ppmUrl||'', // mantido por compatibilidade, caso o Storage venha a ser usado no futuro
       enviadoEm:new Date().toISOString()
     };
-    // Poda ciclos antigos — cada print vira uma string base64 dentro do
-    // MESMO documento sharded (shard-fichas) que guarda a ficha de TODOS os
-    // chatters, então sem limpeza os prints ficariam acumulando à toa. A
-    // pedido da gestora: garantir pelo menos 15 tarefas (1 foto do PPM por
-    // dia) guardadas por tester enquanto a decisão ainda não é final — dá
-    // mais histórico pra decidir. Conta de trás pra frente (ciclo mais
-    // recente primeiro) até acumular 15 tarefas e só então apaga os ciclos
-    // inteiros mais antigos que sobrarem. Assim que a decisão é tomada
-    // (aprovado/reprovado/reserva), tudo isso é apagado de qualquer forma
-    // pelo setTesterDecision — essa poda aqui só protege quem ainda está
-    // em processo.
-    const ciclosSalvos=Object.keys(S.chatterFichas[c.id].tarefasNovato).sort();
+    // Poda ciclos antigos — a pedido da gestora: garantir pelo menos 15
+    // tarefas (1 foto do PPM por dia) guardadas por tester enquanto a
+    // decisão ainda não é final — dá mais histórico pra decidir. Conta de
+    // trás pra frente (ciclo mais recente primeiro) até acumular 15 tarefas
+    // e só então apaga os ciclos inteiros mais antigos que sobrarem. Assim
+    // que a decisão é tomada (aprovado/reprovado/reserva), tudo isso é
+    // apagado de qualquer forma pelo setTesterDecision — essa poda aqui só
+    // protege quem ainda está em processo.
+    const ciclosSalvos=Object.keys(S.tarefasNovatoPorTester[c.id]).sort();
     let totalTarefas=0,manterAPartirDe=ciclosSalvos.length;
     for(let i=ciclosSalvos.length-1;i>=0;i--){
-      totalTarefas+=Object.keys(S.chatterFichas[c.id].tarefasNovato[ciclosSalvos[i]]).length;
+      totalTarefas+=Object.keys(S.tarefasNovatoPorTester[c.id][ciclosSalvos[i]]).length;
       manterAPartirDe=i;
       if(totalTarefas>=15)break;
     }
-    ciclosSalvos.slice(0,manterAPartirDe).forEach(old=>delete S.chatterFichas[c.id].tarefasNovato[old]);
+    ciclosSalvos.slice(0,manterAPartirDe).forEach(old=>delete S.tarefasNovatoPorTester[c.id][old]);
     save();
     toast(`📋 Tarefa do Dia ${diaN} de ${c.name} recebida via link.`);
     if(currentViewName()==='testers')renderTesters();
