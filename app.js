@@ -11470,13 +11470,14 @@ function setTesterDecision(chatterId,decision){
   c.testerDecision=decision;
   c.testerDecisionDate=todayKey();
   // A pedido da gestora: as tarefas enviadas pelo link (com print em base64
-  // de cada dia) só servem pra guiar a escolha dos padrinhos — depois que a
-  // decisão é FINAL (aprovado ou reprovado) elas não têm mais função e são
-  // apagadas, senão os prints ficam acumulando pra sempre no mesmo documento
-  // sharded (shard-fichas) que guarda a Ficha de todo mundo, arriscando
-  // estourar o limite de 1MB do Firestore. "Espera"/Reservas não é decisão
-  // final — continua guardando, já que a pessoa ainda pode ser decidida.
-  if((decision==='aprovado'||decision==='reprovado')&&S.chatterFichas[chatterId]){
+  // de cada dia) só servem pra guiar a escolha dos padrinhos — assim que
+  // QUALQUER decisão é tomada (aprovado, reprovado OU colocado nas Reservas)
+  // elas não têm mais função e são apagadas, senão os prints ficam
+  // acumulando pra sempre no mesmo documento sharded (shard-fichas) que
+  // guarda a Ficha de todo mundo, arriscando estourar o limite de 1MB do
+  // Firestore. Sem exceção pra Reservas/espera — a gestora pediu
+  // explicitamente pra não guardar nem esse caso.
+  if(S.chatterFichas[chatterId]){
     delete S.chatterFichas[chatterId].tarefasNovato;
   }
   if(decision==='aprovado'){
