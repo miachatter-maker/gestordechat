@@ -11913,13 +11913,23 @@ function aplicarTarefaNovatoPendente(docId,data){
     };
     // Poda ciclos antigos — cada print vira uma string base64 dentro do
     // MESMO documento sharded (shard-fichas) que guarda a ficha de TODOS os
-    // chatters, então sem limpeza os prints de testers já decididos ficariam
-    // acumulando pra sempre até estourar o limite de 1MB do documento no
-    // Firestore. Mantém só os 2 ciclos (semanas) mais recentes por tester.
+    // chatters, então sem limpeza os prints ficariam acumulando à toa. A
+    // pedido da gestora: garantir pelo menos 15 tarefas (1 foto do PPM por
+    // dia) guardadas por tester enquanto a decisão ainda não é final — dá
+    // mais histórico pra decidir. Conta de trás pra frente (ciclo mais
+    // recente primeiro) até acumular 15 tarefas e só então apaga os ciclos
+    // inteiros mais antigos que sobrarem. Assim que a decisão é tomada
+    // (aprovado/reprovado/reserva), tudo isso é apagado de qualquer forma
+    // pelo setTesterDecision — essa poda aqui só protege quem ainda está
+    // em processo.
     const ciclosSalvos=Object.keys(S.chatterFichas[c.id].tarefasNovato).sort();
-    if(ciclosSalvos.length>2){
-      ciclosSalvos.slice(0,ciclosSalvos.length-2).forEach(old=>delete S.chatterFichas[c.id].tarefasNovato[old]);
+    let totalTarefas=0,manterAPartirDe=ciclosSalvos.length;
+    for(let i=ciclosSalvos.length-1;i>=0;i--){
+      totalTarefas+=Object.keys(S.chatterFichas[c.id].tarefasNovato[ciclosSalvos[i]]).length;
+      manterAPartirDe=i;
+      if(totalTarefas>=15)break;
     }
+    ciclosSalvos.slice(0,manterAPartirDe).forEach(old=>delete S.chatterFichas[c.id].tarefasNovato[old]);
     save();
     toast(`📋 Tarefa do Dia ${diaN} de ${c.name} recebida via link.`);
     if(currentViewName()==='testers')renderTesters();
