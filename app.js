@@ -11555,9 +11555,24 @@ function renderTesters(){
       style="flex:1;padding:7px 4px;border-radius:8px;border:2px solid ${sel2?colors[op]:'var(--line)'};background:${sel2?bgs[op]:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:11px;color:${sel2?colors[op]:'var(--text2)'}">${labels[op]}</button>`;
   }).join('');
 
+  // Indicador de espaço — a pedido da gestora, pra planejar quantos testers
+  // dá pra receber ao mesmo tempo sem chegar perto do limite de ~1MB por
+  // documento do Firestore (shard-fichas guarda a Ficha de TODOS, incluindo
+  // os prints do PPM de quem ainda não teve decisão). Calcula em cima do
+  // mesmo S.chatterFichas que vai pro Firestore, então é o número real.
+  const fichaKB=Math.round(JSON.stringify(S.chatterFichas||{}).length/1024);
+  const tarefasKB=Math.round(Object.values(S.chatterFichas||{}).reduce((soma,f)=>soma+(f.tarefasNovato?JSON.stringify(f.tarefasNovato).length:0),0)/1024);
+  const testersComTarefas=Object.values(S.chatterFichas||{}).filter(f=>f.tarefasNovato&&Object.keys(f.tarefasNovato).length).length;
+  const capCor=fichaKB>850?'var(--bad)':fichaKB>500?'var(--warn)':'var(--ok)';
+  const capMsg=fichaKB>850?'⚠️ perto do limite — decida (aprovado/reprovado/reservas) quem já terminou o ciclo pra liberar espaço na hora'
+    :fichaKB>500?'de olho, mas ainda tranquilo — vai decidindo quem termina o ciclo que o espaço libera sozinho'
+    :'espaço de sobra pra receber mais gente';
   el.innerHTML=`
-    <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12.5px;color:var(--text2)">
+    <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:10px;font-size:12.5px;color:var(--text2)">
       📊 <strong>${pending.length} em avaliação</strong> — classificados do melhor pro pior pelo resultado dos 3 dias de teste. Os 3 primeiros ficam sempre em destaque como fila de espera.
+    </div>
+    <div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--text2);border-left:3px solid ${capCor}">
+      💾 <strong>Espaço usado: ${fichaKB}KB</strong> de ~1024KB por documento (${tarefasKB}KB são prints de PPM de ${testersComTarefas} tester${testersComTarefas!==1?'s':''} ainda sem decisão final) — ${capMsg}
     </div>
     ${scored.map((item,idx)=>{
       const {c,rev,analysis,decision}=item;
