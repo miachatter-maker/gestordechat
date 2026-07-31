@@ -7050,7 +7050,7 @@ function confirmarVincularTriagem(mode){
   let chatterId='';
   if(mode==='new'){
     chatterId='c'+Date.now();
-    S.chatters.push({id:chatterId,name:cand.nome||'Novo candidato',discord:'',level:'teste',time:'tester',notes:'',watchtime:'',createdAt:new Date().toISOString()});
+    S.chatters.push({id:chatterId,name:cand.nome||'Novo candidato',discord:'',level:'teste',time:'tester',pendenteAprovacao:true,notes:'',watchtime:'',createdAt:new Date().toISOString()});
   } else {
     const sel=document.getElementById('triagem-vincular-select');
     chatterId=sel?sel.value:'';
