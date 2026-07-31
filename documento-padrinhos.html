@@ -223,7 +223,11 @@ function getMapeamentoInfo(nome){
 /* ---------- render ---------- */
 function renderAll(){
   const testers=chatters.filter(c=>c.time==='tester');
-  const padrinhos=chatters.filter(c=>c.level==='padrinho');
+  // Padrinho é um CARGO à parte do nível principal (ex: alguém pode ser
+  // Sênior e Padrinho ao mesmo tempo, ver task de "2 cargos por chatter") —
+  // por isso considera tanto level==='padrinho' quanto a flag isPadrinho,
+  // senão quem tem outro nível principal (ex: José, Eduardo) some da lista.
+  const padrinhos=chatters.filter(c=>c.level==='padrinho'||c.isPadrinho);
   headerSub.textContent='Mapeamento + tarefas de cada tester, atualizado ao vivo';
   if(!padrinhos.length){
     content.innerHTML='<div class="warn-box">Nenhum chatter marcado como 👑 Padrinho ainda — peça pra gestora definir o cargo na aba Equipe.</div>';

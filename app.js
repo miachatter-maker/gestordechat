@@ -6027,11 +6027,15 @@ let _mapMediaStream=null;
 let _mapRecording=false;
 
 function openMapeamentoModal(chatterId){
-  const c=S.chatters.find(ch=>ch.id===chatterId);if(!c)return;
-  window._mapeamentoChatterId=chatterId;
+  // chatterId pode ser null/undefined — nesse caso abre o modal "em branco"
+  // pra permitir nomear a pessoa antes ou durante a gravação (a pedido da
+  // gestora), em vez de exigir uma Ficha já existente pra começar.
+  const c=chatterId?S.chatters.find(ch=>ch.id===chatterId):null;
+  if(chatterId&&!c)return;
+  window._mapeamentoChatterId=chatterId||null;
   const nameEl=document.getElementById('mapeamento-modal-name');
-  if(nameEl)nameEl.textContent=c.name;
-  const draft=(S.chatterFichas[chatterId]&&S.chatterFichas[chatterId].mapeamentoDraftTranscript)||'';
+  if(nameEl)nameEl.value=c?c.name:'';
+  const draft=(c&&S.chatterFichas[chatterId]&&S.chatterFichas[chatterId].mapeamentoDraftTranscript)||'';
   const ta=document.getElementById('mapeamento-transcript');
   if(ta)ta.value=draft;
   const st=document.getElementById('mapeamento-status');
@@ -6041,6 +6045,33 @@ function openMapeamentoModal(chatterId){
   const recBtn=document.getElementById('mapeamento-rec-btn');
   if(recBtn)recBtn.textContent='🎙️ Iniciar gravação';
   openModal('m-mapeamento');
+  if(nameEl&&!c)setTimeout(()=>nameEl.focus(),50);
+}
+
+// Garante que exista um chatterId associado ao mapeamento em andamento,
+// lendo o nome digitado no campo (agora editável) do modal. Se ainda não
+// havia um chatterId (mapeamento aberto "em branco", sem Ficha prévia),
+// cria um chatter novo com esse nome. Se já havia um chatterId mas a pessoa
+// mudou o nome no campo, renomeia o chatter existente. Assim dá pra nomear
+// a pessoa antes OU durante a gravação, como pedido pela gestora.
+function ensureMapeamentoChatterId(){
+  const nameEl=document.getElementById('mapeamento-modal-name');
+  const digitado=(nameEl?nameEl.value:'').trim();
+  let chatterId=window._mapeamentoChatterId;
+  if(chatterId){
+    const c=S.chatters.find(ch=>ch.id===chatterId);
+    if(c&&digitado&&c.name!==digitado){c.name=digitado;save();}
+    return chatterId;
+  }
+  if(!digitado){
+    toast('Digite o nome da pessoa antes de começar.');
+    return null;
+  }
+  chatterId='c'+Date.now()+Math.random().toString(36).slice(2,4);
+  S.chatters.push({id:chatterId,name:digitado,discord:'',level:'treinamento',time:'',notes:'Criado direto pelo Mapeamento de Performance.',watchtime:'',createdAt:new Date().toISOString()});
+  window._mapeamentoChatterId=chatterId;
+  save();
+  return chatterId;
 }
 
 function toggleMapeamentoRecording(){
@@ -6052,6 +6083,7 @@ function startMapeamentoRecording(){
     toast('⚠️ Seu navegador não suporta gravação de áudio — cole a conversa manualmente no campo de texto.');
     return;
   }
+  if(!ensureMapeamentoChatterId())return;
   navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
     _mapMediaStream=stream;
     try{ _mapMediaRecorder=new MediaRecorder(stream); _mapMediaRecorder.start(); }catch(e){ console.warn('MediaRecorder indisponível',e); }
@@ -6129,7 +6161,7 @@ const MAPEAMENTO_SYSTEM=`Você é um psicólogo organizacional e analista de per
 - Personalidade e talento: inclui um "Desafio GPT" opcional, onde a pessoa pode trazer uma descrição do próprio talento e uma metodologia de ensino/aprendizagem que ela mesma obteve conversando com uma IA — trate isso como um sinal rico de autoconhecimento e familiaridade com ferramentas de IA, não como resposta "menos genuína" por ter vindo de uma IA.
 - Ambição: onde se imagina daqui a uns 2 anos e o que falta pra chegar lá.
 
-Analise não só o CONTEÚDO das respostas, mas também sinais de linguagem (segurança, clareza, objetividade, entusiasmo, hesitação) e de emoção (motivação, frustração, ansiedade, confiança) presentes no texto transcrito. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real, incluindo a resposta da pergunta da loteria (pra preencher comoMotivar e motivadores de forma específica, não genérica).
+Sua análise deve ser baseada PRINCIPALMENTE no CONTEÚDO literal do que a pessoa disse — o que ela contou, escolheu falar, priorizou e deixou de mencionar é a fonte principal de evidência. Sinais de tom de voz/emoção (segurança, hesitação, entusiasmo, ansiedade etc.) podem ser citados como detalhe secundário SE forem muito evidentes no texto transcrito, mas nunca como base principal de um julgamento nem para inventar estado emocional que o texto não sustenta — não exagere nem superinterprete emoção a partir de poucas palavras. Preste atenção especial às respostas sobre autoridade (pra preencher liderancaIdeal com precisão) e sobre motivação real, incluindo a resposta da pergunta da loteria (pra preencher comoMotivar e motivadores de forma específica, não genérica), sempre priorizando o que foi dito de fato sobre como foi dito.
 
 IMPORTANTE — cuidado e sensibilidade na análise: essa pessoa está sendo avaliada de verdade pela liderança, então o mapeamento tem peso real sobre como ela vai ser tratada. Evite julgamentos genéricos, duros ou definitivos com base em pouca informação — uma entrevista curta não define uma pessoa por completo. Brevidade, nervosismo ou respostas mais tímidas NÃO são sinal automático de baixo potencial ou fraqueza — considere que entrevistas são situações de pressão e trate isso com contexto, não como defeito de personalidade. Busque nuance: quase ninguém é só uma coisa. Prefira descrever potencial e condições de sucesso ("funciona bem quando...") a rótulos negativos fechados ("é fraco em..."). Sempre que apontar um ponto de atenção, baseie-se em algo específico que a pessoa realmente disse ou demonstrou na transcrição — nunca em suposição ou estereótipo. O objetivo final é ajudar essa pessoa a crescer, não catalogá-la.
 
@@ -6163,11 +6195,11 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhu
 O campo "perfis" deve ter 1 a 3 itens (perfis híbridos são comuns, ex: Executor 82% / Líder 18%), com a soma dos "pct" próxima de 100, ordenados do maior pro menor. Se a transcrição não trouxer informação suficiente para algum campo, use seu melhor julgamento clínico com base no que foi dito — nunca deixe um campo vazio, nulo ou fora do formato pedido.`;
 
 async function gerarMapeamentoIA(){
-  const chatterId=window._mapeamentoChatterId;if(!chatterId)return;
-  const c=S.chatters.find(ch=>ch.id===chatterId);if(!c)return;
   const ta=document.getElementById('mapeamento-transcript');
   const transcript=(ta?ta.value:'').trim();
   if(!transcript){toast('Grave ou cole a conversa antes de gerar o mapeamento.');return;}
+  const chatterId=ensureMapeamentoChatterId();if(!chatterId)return;
+  const c=S.chatters.find(ch=>ch.id===chatterId);if(!c)return;
   stopMapeamentoRecording(true);
   const btn=document.getElementById('mapeamento-gerar-btn');
   const st=document.getElementById('mapeamento-status');
@@ -6209,7 +6241,14 @@ async function gerarMapeamentoIA(){
     save();
     toast('🎯 Mapeamento gerado!');
     closeModal('m-mapeamento');
+    // Se o mapeamento criou um chatter novo (fluxo "nomear antes/durante a
+    // gravação"), o <select> de Fichas ainda não tem essa opção — repopula
+    // antes de selecionar, senão a Ficha some da tela até trocar de aba.
+    renderFichas();
+    const sel=document.getElementById('ficha-chatter-select');
+    if(sel)sel.value=chatterId;
     renderFichaChatter(chatterId);
+    renderTeam(typeof teamFilter!=='undefined'?teamFilter:'todos');
   }catch(e){
     console.error('Erro ao gerar mapeamento',e);
     // A transcrição já foi salva em mapeamentoDraftTranscript (stopMapeamentoRecording
@@ -11947,12 +11986,16 @@ function aplicarTesterAutoInclusaoPendente(docId,data){
     }
     const chatterId='c'+Date.now()+Math.random().toString(36).slice(2,4);
     S.chatters.push({
-      id:chatterId,name:nome,discord:'',level:'teste',time:'tester',pendenteAprovacao:true,
-      notes:'Autoincluído pelo link de tarefas (sem Mapeamento) — confirme com o padrinho responsável antes de aprovar.',
+      // A pedido da gestora: quem se autoinclui (porque não achou o nome)
+      // NÃO espera aprovação pra começar a fazer as tarefas — ela se
+      // cadastra e já pode fazer, os padrinhos só acompanham o que ela
+      // envia (pendenteAprovacao:false, diferente do fluxo com Mapeamento).
+      id:chatterId,name:nome,discord:'',level:'teste',time:'tester',pendenteAprovacao:false,
+      notes:'Autoincluído pelo link de tarefas (sem Mapeamento) — já pode fazer as tarefas normalmente; os padrinhos acompanham o envio.',
       watchtime:'',createdAt:new Date().toISOString()
     });
     save();
-    toast(`🙋 ${nome} se autoincluiu no link de tarefas (sem Mapeamento) — aguardando aprovação do padrinho.`);
+    toast(`🙋 ${nome} se autoincluiu no link de tarefas (sem Mapeamento) — já pode fazer as tarefas.`);
     if(currentViewName()==='testers')renderTesters();
     fbDb.collection('gestorpro').doc(docId).update({processado:true,chatterId}).catch(e=>console.error('Erro ao marcar autoinclusão como processada',e));
   }catch(e){

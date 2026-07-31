@@ -263,7 +263,7 @@ function renderAll(){
         </select>
       </div>
     </div>
-    ${pendingNome?'<div class="warn-box">⏳ Aguardando a gestora confirmar sua inclusão — isso pode levar alguns minutos. Deixe essa página aberta ou volte daqui a pouco.</div>':autoinclusaoHtml()}
+    ${pendingNome?'<div class="warn-box">⏳ Só um instante, estamos te cadastrando (isso é automático, não precisa de aprovação de ninguém) — pode levar alguns segundos. Deixe essa página aberta ou volte daqui a pouco pra já começar suas tarefas.</div>':autoinclusaoHtml()}
     <div id="tester-days"></div>
   `;
   attachAutoinclusaoHandlers();
@@ -477,19 +477,22 @@ window.enviarSegundaChance=async function(diaN,fridayKey){
 };
 function meusDadosHtml(){
   return`<div class="card">
-    <a href="javascript:void(0)" onclick="document.getElementById('meus-dados-form').style.display='block';this.style.display='none'" style="font-size:13px;font-weight:700;color:var(--accent-strong)">📋 Preencher meus dados (idade, cidade, experiência, pretensão salarial)</a>
+    <a href="javascript:void(0)" id="meus-dados-link" onclick="document.getElementById('meus-dados-form').style.display='block';this.style.display='none'" style="font-size:13px;font-weight:700;color:var(--accent-strong)">📋 Preencher meus dados (idade, cidade, experiência, pretensão salarial)</a>
+    <div id="meus-dados-msg" style="display:none;font-size:13px;font-weight:600;color:var(--ok,#177350)">✅ Dados enviados, obrigada!</div>
     <div id="meus-dados-form" style="display:none;margin-top:10px">
       <div class="field"><label class="flabel">Idade</label><input class="finput" id="md-idade"></div>
       <div class="field"><label class="flabel">Cidade</label><input class="finput" id="md-cidade"></div>
       <div class="field"><label class="flabel">Experiência</label><textarea class="ftext" id="md-experiencia" placeholder="Sua experiência profissional"></textarea></div>
       <div class="field"><label class="flabel">Pretensão salarial</label><input class="finput" id="md-pretensao"></div>
-      <button class="btn btn-primary" onclick="enviarMeusDados()">Salvar meus dados</button>
+      <button class="btn btn-primary" id="md-salvar-btn" onclick="enviarMeusDados()">Salvar meus dados</button>
     </div>
   </div>`;
 }
 window.enviarMeusDados=async function(){
   const tester=chatters.find(t=>t.id===selTesterId);
   if(!tester)return;
+  const btn=document.getElementById('md-salvar-btn');
+  if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   try{
     await fbDb.collection('gestorpro').add({
       type:'testerDadosPendente',processado:false,
@@ -500,10 +503,19 @@ window.enviarMeusDados=async function(){
       pretensaoSalarial:(document.getElementById('md-pretensao')?.value||'').trim(),
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
-    alert('Dados enviados, obrigada!');
+    // Minimiza o form sozinho depois de salvar (a pedido da gestora) — em vez
+    // de só alertar e deixar o form aberto, esconde o form e mostra uma
+    // confirmação simpática no lugar do link.
+    const form=document.getElementById('meus-dados-form');
+    const link=document.getElementById('meus-dados-link');
+    const msg=document.getElementById('meus-dados-msg');
+    if(form)form.style.display='none';
+    if(link)link.style.display='none';
+    if(msg)msg.style.display='block';
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='Salvar meus dados';}
   }
 };
 window.enviarDadosPJ=async function(){
