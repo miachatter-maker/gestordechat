@@ -229,10 +229,27 @@ function init(){
 }
 
 function renderAll(){
-  const testers=chatters.filter(c=>c.time==='tester');
+  // Inclui quem já teve decisão (aprovado/reprovado) também, senão a pessoa
+  // some do seletor assim que é aprovada (vira time==='basico') e nunca mais
+  // consegue ver a tela de parabéns/dados PJ ou a de reprovação.
+  const testers=chatters.filter(c=>c.time==='tester'||c.testerDecision);
   headerSub.textContent='Sexta / Sábado / Domingo — ciclo da semana atual';
-  if(!testers.length){
-    content.innerHTML='<div class="warn-box">Nenhum tester cadastrado ainda — peça pra gestora te criar no Mapeamento dos Novos antes de preencher as tarefas.</div>';
+  // Se essa pessoa acabou de se autoincluir (pendingAutoNome no localStorage)
+  // e agora já apareceu na lista com esse nome, seleciona ela automaticamente
+  // — ela não sabe o próprio id, só o nome que digitou.
+  const pendingNome=localStorage.getItem('tn_pendingAutoNome');
+  if(pendingNome&&!selTesterId){
+    const norm=s=>(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+    const match=testers.find(t=>norm(t.name)===norm(pendingNome));
+    if(match){
+      selTesterId=match.id;
+      localStorage.setItem('tn_testerId',match.id);
+      localStorage.removeItem('tn_pendingAutoNome');
+    }
+  }
+  if(!testers.length&&!pendingNome){
+    content.innerHTML=`<div class="warn-box">Nenhum tester cadastrado ainda — peça pra gestora te criar no Mapeamento dos Novos antes de preencher as tarefas.</div>${autoinclusaoHtml()}`;
+    attachAutoinclusaoHandlers();
     return;
   }
   if(selTesterId&&!testers.some(t=>t.id===selTesterId))selTesterId='';
@@ -246,10 +263,50 @@ function renderAll(){
         </select>
       </div>
     </div>
+    ${pendingNome?'<div class="warn-box">⏳ Aguardando a gestora confirmar sua inclusão — isso pode levar alguns minutos. Deixe essa página aberta ou volte daqui a pouco.</div>':autoinclusaoHtml()}
     <div id="tester-days"></div>
   `;
+  attachAutoinclusaoHandlers();
   if(selTesterId)subscribeMyTarefas(selTesterId);
 }
+function autoinclusaoHtml(){
+  return`<div class="card" id="autoinclusao-card">
+    <div style="font-size:12.5px;color:var(--text3)">Não achei meu nome na lista?</div>
+    <a href="javascript:void(0)" id="autoinclusao-link" style="font-size:13px;font-weight:700;color:var(--accent-strong)">Não achei meu nome →</a>
+    <div id="autoinclusao-form" style="display:none;margin-top:10px">
+      <div class="field">
+        <label class="flabel">Seu nome completo</label>
+        <input class="finput" id="autoinclusao-nome" placeholder="Digite seu nome completo">
+      </div>
+      <button class="btn btn-primary" id="autoinclusao-btn" onclick="enviarAutoinclusao()">Me incluir e continuar</button>
+    </div>
+  </div>`;
+}
+function attachAutoinclusaoHandlers(){
+  const link=document.getElementById('autoinclusao-link');
+  if(link)link.onclick=()=>{
+    document.getElementById('autoinclusao-form').style.display='block';
+    link.style.display='none';
+  };
+}
+window.enviarAutoinclusao=async function(){
+  const nome=(document.getElementById('autoinclusao-nome')?.value||'').trim();
+  if(!nome){alert('Digite seu nome completo antes de continuar.');return;}
+  const btn=document.getElementById('autoinclusao-btn');
+  btn.disabled=true;btn.textContent='Enviando...';
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'testerAutoInclusaoPendente',processado:false,
+      nome,criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    localStorage.setItem('tn_pendingAutoNome',nome);
+    renderAll();
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+    btn.disabled=false;btn.textContent='Me incluir e continuar';
+  }
+};
 window.onTesterChange=function(id){
   selTesterId=id;
   localStorage.setItem('tn_testerId',id);
@@ -295,16 +352,53 @@ function getStatusDia(fridayKey,diaN,dataDia,prazo){
   const reg=tarefas[fridayKey]&&tarefas[fridayKey]['dia'+diaN];
   if(reg&&reg.enviadoEm)return'enviado';
   const agora=new Date();
-  if(agora>=prazo)return'bloqueado';
+  if(agora>=prazo){
+    // Segunda chance aprovada pelo padrinho pra esse dia específico —
+    // volta a ficar "aberto" mesmo com o prazo já vencido.
+    const tester=chatters.find(t=>t.id===selTesterId);
+    const liberado=(tester?.segundaChanceAprovadas||[]).some(s=>s.fridayKey===fridayKey&&s.dia===diaN);
+    if(liberado)return'aberto';
+    return'bloqueado';
+  }
   const inicioDia=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate());
   if(agora>=inicioDia)return'aberto';
   return'futuro';
 }
+// Cache só desta sessão (a página não lê a ficha do tester, só o array de
+// chatters) — depois de pedir segunda chance, lembra que já pediu pra não
+// mostrar o botão de novo, até a página recarregar.
+const segundaChancePedida=new Set();
 function renderTesterDays(testerId){
   const el=document.getElementById('tester-days');
   if(!el)return;
+  const tester=chatters.find(t=>t.id===testerId);
+  if(tester&&tester.testerDecision==='reprovado'){
+    el.innerHTML=`<div class="card" style="text-align:center">
+      <div style="font-size:30px;margin-bottom:8px">😊</div>
+      <div style="font-size:14.5px">Obrigada pela participação! Seus resultados ainda não foram o suficiente para vaga no momento, mas pode tentar novamente quando quiser 😊</div>
+    </div>`;
+    return;
+  }
+  if(tester&&tester.testerDecision==='aprovado'){
+    el.innerHTML=`<div class="card">
+      <div style="font-size:15px;font-weight:800;margin-bottom:6px">🎉 Parabéns, você foi aprovado!</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Agora preencha os dados. (Precisamos de CNPJ para ingressar no teste)</div>
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Dados para cada colaborador PJ</div>
+      ${['razaoSocial::Razão Social','nickname::Nickname','cnpj::CNPJ','endereco::Endereço de sede','bairro::Bairro','cep::Cep','telefone::Telefone/Celular','email::E-mail','pix::Pix','bancoChave::Banco e chave'].map(p=>{
+        const[id,label]=p.split('::');
+        return`<div class="field"><label class="flabel">${label}</label><input class="finput" id="pj-${id}"></div>`;
+      }).join('')}
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin:14px 0 4px">Não obrigatório</div>
+      ${['trelloEmail::Email do Trello','telegramNumero::Número do Telegram','telegramNome::Nome no Telegram'].map(p=>{
+        const[id,label]=p.split('::');
+        return`<div class="field"><label class="flabel">${label}</label><input class="finput" id="pj-${id}"></div>`;
+      }).join('')}
+      <button class="btn btn-primary" id="btn-enviar-pj" onclick="enviarDadosPJ()">Enviar dados</button>
+    </div>`;
+    return;
+  }
   const ciclo=getCicloAtual();
-  el.innerHTML=ciclo.dias.map(d=>{
+  el.innerHTML=meusDadosHtml()+ciclo.dias.map(d=>{
     const status=getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
     const tarefas=getMinhasTarefas();
     const reg=tarefas[ciclo.fridayKey]&&tarefas[ciclo.fridayKey]['dia'+d.dia];
@@ -314,7 +408,18 @@ function renderTesterDays(testerId){
       bodyHtml=`<div class="done-box"><div class="emoji">✅</div>Tarefa enviada em ${new Date(reg.enviadoEm).toLocaleString('pt-BR')}.</div>
         ${reg.ppmImage?`<img class="ppm-img" src="${reg.ppmImage}" onclick="openLightbox(this.src)">`:''}`;
     }else if(status==='bloqueado'){
-      bodyHtml=`<div class="error-box" style="margin-bottom:0">Indisponível — o prazo desse dia (00h) já passou sem envio. Isso conta como critério de eliminação.</div>`;
+      const chave=ciclo.fridayKey+'_'+d.dia;
+      const jaPediu=segundaChancePedida.has(chave);
+      bodyHtml=`<div class="error-box">Indisponível — o prazo desse dia (00h) já passou sem envio. Isso conta como critério de eliminação.</div>
+        ${jaPediu?'<div class="warn-box" style="margin-bottom:0">🙏 Pedido de segunda chance enviado — aguarde a decisão do padrinho.</div>':`
+          <a href="javascript:void(0)" onclick="mostrarFormSegundaChance(${d.dia},'${ciclo.fridayKey}')" style="font-size:13px;font-weight:700;color:var(--accent-strong)">🙏 Solicitar segunda chance</a>
+          <div id="sc-form-${d.dia}" style="display:none;margin-top:10px">
+            <div class="field">
+              <label class="flabel">Justificativa</label>
+              <textarea class="ftext" id="sc-justificativa-${d.dia}" placeholder="O que aconteceu?"></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="enviarSegundaChance(${d.dia},'${ciclo.fridayKey}')">Enviar pedido</button>
+          </div>`}`;
     }else if(status==='futuro'){
       bodyHtml=`<div class="warn-box" style="margin-bottom:0">Disponível a partir de ${d.label.toLowerCase()} (${fmtBR(d.dataDia)}).</div>`;
     }else{
@@ -348,6 +453,83 @@ function renderTesterDays(testerId){
     </div>`;
   }).join('')+`<div class="warn-box">⚠️ Envie todas as tarefas até às 00h de cada dia — o envio é obrigatório e faz parte dos critérios de eliminação.</div>`;
 }
+window.mostrarFormSegundaChance=function(diaN,fridayKey){
+  const f=document.getElementById('sc-form-'+diaN);
+  if(f)f.style.display='block';
+};
+window.enviarSegundaChance=async function(diaN,fridayKey){
+  const texto=(document.getElementById('sc-justificativa-'+diaN)?.value||'').trim();
+  if(!texto){alert('Escreva a justificativa antes de enviar.');return;}
+  const tester=chatters.find(t=>t.id===selTesterId);
+  if(!tester)return;
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'segundaChancePendente',processado:false,
+      testerId:tester.id,testerNome:tester.name,fridayKey,dia:diaN,justificativa:texto,
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    segundaChancePedida.add(fridayKey+'_'+diaN);
+    renderTesterDays(selTesterId);
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+  }
+};
+function meusDadosHtml(){
+  return`<div class="card">
+    <a href="javascript:void(0)" onclick="document.getElementById('meus-dados-form').style.display='block';this.style.display='none'" style="font-size:13px;font-weight:700;color:var(--accent-strong)">📋 Preencher meus dados (idade, cidade, experiência, pretensão salarial)</a>
+    <div id="meus-dados-form" style="display:none;margin-top:10px">
+      <div class="field"><label class="flabel">Idade</label><input class="finput" id="md-idade"></div>
+      <div class="field"><label class="flabel">Cidade</label><input class="finput" id="md-cidade"></div>
+      <div class="field"><label class="flabel">Experiência</label><textarea class="ftext" id="md-experiencia" placeholder="Sua experiência profissional"></textarea></div>
+      <div class="field"><label class="flabel">Pretensão salarial</label><input class="finput" id="md-pretensao"></div>
+      <button class="btn btn-primary" onclick="enviarMeusDados()">Salvar meus dados</button>
+    </div>
+  </div>`;
+}
+window.enviarMeusDados=async function(){
+  const tester=chatters.find(t=>t.id===selTesterId);
+  if(!tester)return;
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'testerDadosPendente',processado:false,
+      testerId:tester.id,
+      idade:(document.getElementById('md-idade')?.value||'').trim(),
+      cidade:(document.getElementById('md-cidade')?.value||'').trim(),
+      experiencia:(document.getElementById('md-experiencia')?.value||'').trim(),
+      pretensaoSalarial:(document.getElementById('md-pretensao')?.value||'').trim(),
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('Dados enviados, obrigada!');
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+  }
+};
+window.enviarDadosPJ=async function(){
+  const tester=chatters.find(t=>t.id===selTesterId);
+  if(!tester)return;
+  const val=id=>(document.getElementById('pj-'+id)?.value||'').trim();
+  if(!val('cnpj')){alert('O CNPJ é obrigatório pra ingressar no teste.');return;}
+  const btn=document.getElementById('btn-enviar-pj');
+  btn.disabled=true;btn.textContent='Enviando...';
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'dadosPjPendente',processado:false,
+      testerId:tester.id,
+      razaoSocial:val('razaoSocial'),nickname:val('nickname'),cnpj:val('cnpj'),
+      endereco:val('endereco'),bairro:val('bairro'),cep:val('cep'),
+      telefone:val('telefone'),email:val('email'),pix:val('pix'),bancoChave:val('bancoChave'),
+      trelloEmail:val('trelloEmail'),telegramNumero:val('telegramNumero'),telegramNome:val('telegramNome'),
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    document.getElementById('tester-days').innerHTML='<div class="card" style="text-align:center"><div class="emoji" style="font-size:30px;margin-bottom:8px">✅</div>Dados enviados! A gestora já pode ver tudo.</div>';
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+    btn.disabled=false;btn.textContent='Enviar dados';
+  }
+};
 window.enviarTarefaDia=async function(diaN){
   const testerId=selTesterId;
   if(!testerId){alert('Selecione seu nome primeiro.');return;}

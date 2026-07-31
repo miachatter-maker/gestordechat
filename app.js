@@ -416,6 +416,11 @@ function initFirebase(){
     listenToRelatoriosSemanaisPendentes();
     listenToTarefasNovatoPendentes();
     listenToAfilhadoClaimsPendentes();
+    listenToTesterAutoInclusaoPendentes();
+    listenToTesterDadosPendentes();
+    listenToDadosPjPendentes();
+    listenToSegundaChancePendentes();
+    listenToSegundaChanceDecisoesPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -4374,15 +4379,26 @@ function renderRevenueTable(){
   let dayTotal=0;
   allChatters.forEach(c=>{
     const scheduled=getChatterModelsForDate(c.id,dateKey);
-    let modelCell='',rowVal=0,fixedAttr='';
+    let modelCell='',valueCell='',rowVal=0,fixedAttr='';
     if(scheduled.length===1){
       const m=scheduled[0];
       fixedAttr=`data-fixed-model="${m.id}"`;
       rowVal=parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0;
       modelCell=`<div style="font-size:12.5px">${m.emoji||'🧩'} ${m.name}</div>`;
+      valueCell=`<input type="number" inputmode="decimal" class="rinput" value="${rowVal||''}" placeholder="—"
+          oninput="saveRevenueRow('${c.id}','${dateKey}',this)">`;
+    } else if(scheduled.length===2){
+      // Trabalhou com 2 modelos dentro do turno normal dele hoje (não é hora
+      // extra) — conta faturamento de AMBAS pra meta dele, então mostra os
+      // dois campos lado a lado em vez de forçar escolher só uma no seletor.
+      const vals=scheduled.map(m=>parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0);
+      rowVal=vals[0]+vals[1];
+      modelCell=scheduled.map(m=>`<div style="font-size:11.5px;padding:3px 0">${m.emoji||'🧩'} ${m.name}</div>`).join('');
+      valueCell=scheduled.map((m,i)=>`<div style="padding:2px 0"><input type="number" inputmode="decimal" class="rinput" value="${vals[i]||''}" placeholder="—"
+          oninput="saveRevenue('${c.id}','${m.id}',this.value,'${dateKey}');renderRevenueTable()"></div>`).join('');
     } else {
-      // 0 modelos escalados (folga/sem turno hoje) ou 2+ (troca/hora extra no
-      // mesmo dia) — só nesses casos aparece um seletor manual.
+      // 0 modelos escalados (folga/sem turno hoje) ou 3+ (bem raro) — só
+      // nesses casos aparece um seletor manual escolhendo 1 modelo por vez.
       const options=scheduled.length?scheduled:S.models;
       const withRev=options.find(m=>(parseFloat(S.revenues[`${c.id}_${m.id}_${dateKey}`])||0)>0);
       const selectedModel=withRev||options[0];
@@ -4390,6 +4406,8 @@ function renderRevenueTable(){
       modelCell=`<select data-fat-model onchange="renderRevenueTable()" style="font-size:11.5px;padding:3px 5px;border-radius:6px;border:1px solid var(--line);background:var(--bg-soft);color:var(--text)">
         ${options.map(m=>`<option value="${m.id}" ${selectedModel&&m.id===selectedModel.id?'selected':''}>${m.emoji||'🧩'} ${m.name}</option>`).join('')}
       </select>${!scheduled.length?'<div style="font-size:9px;color:var(--text3);margin-top:2px">sem escala hoje</div>':''}`;
+      valueCell=`<input type="number" inputmode="decimal" class="rinput" value="${rowVal||''}" placeholder="—"
+          oninput="saveRevenueRow('${c.id}','${dateKey}',this)">`;
     }
     dayTotal+=rowVal;
     const rowColor=rowVal>0?'':'opacity:0.5';
@@ -4397,8 +4415,7 @@ function renderRevenueTable(){
       <td><div style="font-weight:700;font-size:13px">${c.name}</div></td>
       <td>${modelCell}</td>
       <td style="text-align:right">
-        <input type="number" inputmode="decimal" class="rinput" value="${rowVal||''}" placeholder="—"
-          oninput="saveRevenueRow('${c.id}','${dateKey}',this)">
+        ${valueCell}
       </td>
     </tr>`;
   });
@@ -6126,6 +6143,7 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem \`\`\`, sem nenhu
     "sobre": "resumo curto (1-2 frases) de outras informações pessoais reais ditas na entrevista (ex: o que fazia antes, situação familiar, contexto de vida) — só o que foi realmente dito, nunca invente nem deduza além do que está na transcrição"
   },
   "resumoHistoria": "resumo objetivo em 2-4 frases, como se fosse a sinopse de um filme sobre a trajetória da pessoa: de onde veio, o que já trabalhou, o que aprendeu no caminho e o que estava buscando até chegar aqui",
+  "respostaDesafioGpt": "se a pessoa fez o Desafio GPT (levou uma resposta de uma IA sobre o próprio talento/metodologia de aprendizagem), TRANSCREVA a resposta da IA de forma COMPLETA e LITERAL, exatamente como a pessoa contou na entrevista — NUNCA resuma, parafraseie ou corte, é um dos sinais mais relevantes do mapeamento. Se ela não fez o desafio ou não trouxe uma resposta de IA, use 'não fez o Desafio GPT'.",
   "comunicacao": (número de 0 a 100),
   "inteligenciaEmocional": (número de 0 a 100),
   "aprendizagem": "vendo" | "fazendo" | "ouvindo" | "repetindo" | "explorando",
@@ -7170,6 +7188,10 @@ function renderMapeamentoPanel(chatterId){
       </div>
     </div>
     <div class="panel-note" style="margin-bottom:12px;text-align:center">⬅️ Arraste esse card pra direita pra excluir ou trocar de pessoa</div>
+    ${(m.respostaDesafioGpt&&!/^n[ãa]o fez/i.test(m.respostaDesafioGpt))?`<div style="background:var(--bg-soft);border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid var(--line)">
+      <div class="panel-note" style="margin-bottom:6px">🤖 Desafio GPT — resposta completa</div>
+      <div style="font-size:12.5px;color:var(--text2);line-height:1.6;white-space:pre-wrap">${m.respostaDesafioGpt}</div>
+    </div>`:''}
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
       <div style="text-align:center;background:var(--bg-soft);border-radius:8px;padding:8px">
@@ -7680,15 +7702,11 @@ function renderDemandas2(){
   if(!el)return;
   const items=Array.isArray(S.demandas2)?S.demandas2:[];
   if(!items.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhuma demanda</div>';return;}
-  const today=todayKey();
   el.innerHTML=items.map(item=>{
-    const overdue=item.date&&item.date<today;
-    const near=item.date&&!overdue&&isWithin48h(item.date);
     return`<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
       <button onclick="toggleDemanda2('${item.id}')" style="width:22px;height:22px;border-radius:5px;border:2px solid ${item.done?'var(--ok)':'var(--line)'};background:${item.done?'var(--ok)':'transparent'};cursor:pointer;flex-shrink:0;margin-top:2px;display:flex;align-items:center;justify-content:center">${item.done?'<span style="color:#fff;font-size:11px">✓</span>':''}</button>
       <div style="flex:1">
         <div style="font-size:13.5px;${item.done?'text-decoration:line-through;color:var(--text3)':''}">${item.text}</div>
-        ${item.date?`<div style="font-size:11px;color:${overdue?'var(--bad)':near?'var(--warn)':'var(--text3)'};margin-top:2px">${overdue?'⚠️ vencida':'📅'} ${item.date}</div>`:''}
       </div>
       <button onclick="removeDemanda2('${item.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px">✕</button>
     </div>`;
@@ -7701,10 +7719,9 @@ function isWithin48h(dateStr){
 }
 function addDemanda2(){
   const text=document.getElementById('demandas2-text')?.value.trim();
-  const date=document.getElementById('demandas2-date')?.value||'';
   if(!text)return;
   if(!Array.isArray(S.demandas2))S.demandas2=[];
-  S.demandas2.push({id:'d2'+Date.now(),text,date,done:false});
+  S.demandas2.push({id:'d2'+Date.now(),text,done:false});
   const el=document.getElementById('demandas2-text');if(el)el.value='';
   save();renderDemandas2();
 }
@@ -7715,6 +7732,16 @@ function toggleDemanda2(id){
 function removeDemanda2(id){
   if(Array.isArray(S.demandas2))S.demandas2=S.demandas2.filter(x=>x.id!==id);
   save();renderDemandas2();
+}
+// Botão único do quadro (em vez de data por item): joga um lembrete pronto
+// na Agenda de hoje pra gestora repassar as questões pendentes ao financeiro.
+function incluirFinanceiroNaAgenda(){
+  const dk=todayKey();
+  if(!S.dailyTasksByDay[dk])S.dailyTasksByDay[dk]=[];
+  S.dailyTasksByDay[dk].push({id:'tk'+Date.now()+Math.random().toString(36).slice(2,4),text:'Repassar questões pendentes ao setor financeiro',time:'',date:'',urgent:false,done:false});
+  save();
+  renderTaskBoards();
+  toast('✅ Adicionado na agenda de hoje');
 }
 
 /* ===========================================================
@@ -9454,7 +9481,7 @@ Como usar na prática: quando o lead sinalizar um fetiche da lista, não tratar 
 // limite de uso". Agora o copiloto vem EMBUTIDO na mesma resposta da análise
 // completa, como um bloco ```copiloto no início (ver montarPromptAnaliseChatLab
 // / rodarChatLab) — só 1 pedido à IA por análise.
-const CHATLAB_COPILOTO_SCHEMA='{"temperatura":{"nivel":0,"label":""},"etapaFunil":{"numero":0,"nome":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}';
+const CHATLAB_COPILOTO_SCHEMA='{"temperatura":{"nivel":0,"label":""},"etapaFunil":{"numero":0,"nome":""},"arquetipo":{"tipo":"","confianca":"baixa|media|alta","evidencia":""},"feticheIdentificado":{"tipo":"","focoPsicologico":"","evidencia":""},"tomRecomendado":"","gatilhoRecomendado":{"tecnica":"","comoAplicar":""},"proximaAcao":"","alerta":"","sinalDeWhale":""}';
 // A infra de IA (AI_PROXY_URL) às vezes corta a resposta no meio (flaky —
 // varia de tentativa pra tentativa, não é sempre no mesmo ponto) — por
 // isso tenta de novo automaticamente antes de mostrar erro pro chatter.
@@ -9482,7 +9509,7 @@ function renderClCopilotoResult(state,obj){
     if(obj?.quota){renderAIWaitCountdown('cl-copiloto',obj.waitSeconds,{prefix:'⏳ Copiloto tático — limite de uso da IA',panel:true});return;}
     el.innerHTML=`<div class="panel" style="border-color:var(--bad)"><div style="color:var(--bad);font-size:12.5px">❌ Copiloto tático: ${obj?.message||'erro'}</div></div>`;return;
   }
-  const t=obj.temperatura||{},a=obj.arquetipo||{},g=obj.gatilhoRecomendado||{},ef=obj.etapaFunil||{};
+  const t=obj.temperatura||{},a=obj.arquetipo||{},g=obj.gatilhoRecomendado||{},ef=obj.etapaFunil||{},fi=obj.feticheIdentificado||{};
   const tCol=t.nivel>=9?'var(--ok)':t.nivel>=7?'var(--warn)':'var(--text3)';
   el.innerHTML=`<div class="panel" style="border-left:3px solid var(--accent)">
     <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px">🎯 COPILOTO TÁTICO — o que fazer agora</div>
@@ -9499,8 +9526,13 @@ function renderClCopilotoResult(state,obj){
         <div style="font-size:9.5px;color:var(--text3)">MOMENTO</div>
         <div style="font-size:13px;font-weight:800">${ef.numero??'—'} · ${ef.nome||''}</div>
       </div>`:''}
+      ${fi.tipo?`<div style="background:var(--bg-soft);border-radius:8px;padding:8px 12px;text-align:center">
+        <div style="font-size:9.5px;color:var(--text3)">FETICHE</div>
+        <div style="font-size:13px;font-weight:800">${fi.tipo}</div>
+      </div>`:''}
     </div>
     <div style="font-size:12.5px;margin-bottom:6px"><strong>Tom recomendado:</strong> ${obj.tomRecomendado||'—'}</div>
+    ${fi.tipo?`<div style="font-size:12.5px;margin-bottom:6px"><strong>Foco do fetiche:</strong> ${fi.focoPsicologico||'—'}</div>`:''}
     <div style="font-size:12.5px;margin-bottom:6px"><strong>Gatilho agora:</strong> ${g.tecnica||'—'}${g.comoAplicar?' — '+g.comoAplicar:''}</div>
     <div style="font-size:13px;font-weight:700;color:var(--ok);margin-bottom:6px">👉 ${obj.proximaAcao||'—'}</div>
     ${obj.alerta?`<div style="font-size:12.5px;color:var(--bad);margin-top:6px">⚠️ ${obj.alerta}</div>`:''}
@@ -9710,7 +9742,7 @@ function limparNomesDeRespostaCitada(conv){
 function montarPromptAnaliseChatLab(c,conv,ctx,prevCount,correcaoPapeis){
   conv=limparNomesDeRespostaCitada(conv);
   const aviso=correcaoPapeis?`⚠️ CORREÇÃO IMPORTANTE: a gestora CONFIRMOU que a análise anterior dessa mesma conversa inverteu os papéis. Ou seja, quem você tratou como CHATTER na análise anterior é, na verdade, o LEAD/CLIENTE — e quem você tratou como LEAD/CLIENTE é, na verdade, o CHATTER **${c.name}**. Inverta essa identificação, não repita a mesma leitura. Ignore a posição/ordem das mensagens e identifique pelo COMPORTAMENTO: quem conduz a conversa, oferece mídia, aplica técnica de venda e cobra preço é sempre o CHATTER **${c.name}** — mesmo que antes tenha sido lido como o lado que compra.\n\n`:'';
-  return`${aviso}Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prevCount?'\nAnálise nº '+(prevCount+1)+' — compare evolução quando relevante.':''}\n\nANTES DE ANALISAR: identifique com cuidado qual lado da conversa é o CHATTER (${c.name}) e qual é o LEAD/CLIENTE — nunca inverta os dois. O CHATTER é quem está atendendo/vendendo: geralmente conduz a conversa, oferece mídia, aplica técnica de venda, cobra preço, mantém o tom de uma persona. O LEAD é quem está comprando/consumindo: geralmente pede coisas, reage, pergunta preço, decide comprar.\n\nIDIOMA: a conversa colada pode estar em inglês (ou outro idioma que não português) — nesse caso, entenda e avalie normalmente, mas escreva TODA a análise em português como sempre. Sempre que citar ou reescrever um trecho literal da conversa (evidências, "Mensagens Desperdiçadas", exemplos), inclua a tradução em português logo em seguida entre parênteses. Se a conversa não estiver em português, comece a análise com a linha "🌐 Conversa em [idioma] — traduzida automaticamente nesta análise." (sem essa linha se já estiver em português).\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
+  return`${aviso}Analise a conversa do chatter **${c.name}** (nível: ${c.level||'—'}).${ctx?'\nContexto: '+ctx:''}${prevCount?'\nAnálise nº '+(prevCount+1)+' — compare evolução quando relevante.':''}\n\nANTES DE ANALISAR: identifique com cuidado qual lado da conversa é o CHATTER (${c.name}) e qual é o LEAD/CLIENTE — nunca inverta os dois. O CHATTER é quem está atendendo/vendendo: geralmente conduz a conversa, oferece mídia, aplica técnica de venda, cobra preço, mantém o tom de uma persona. O LEAD é quem está comprando/consumindo: geralmente pede coisas, reage, pergunta preço, decide comprar.\n\nIDIOMA: a conversa colada pode estar em inglês (ou outro idioma que não português) — nesse caso, entenda e avalie normalmente, mas escreva TODA a análise em português como sempre. Sempre que citar ou reescrever um trecho literal da conversa (evidências, "Mensagens Desperdiçadas", exemplos), inclua a tradução em português logo em seguida entre parênteses. Se a conversa não estiver em português, comece a análise com a linha "🌐 Conversa em [idioma] — traduzida automaticamente nesta análise." (sem essa linha se já estiver em português).\n\n---\nCONVERSA:\n${conv}\n---\n\nGere análise em Markdown com: notas X/10 e evidências para Conexão Emocional, Conversão e Timing, Leitura de Sinais de Compra, Condução, Inteligência Emocional, Perfil do Lead, Qualificação, Inteligência Comercial, Criatividade, Gestão do Tempo e Retenção — usando a escala de temperatura, o arquétipo e as técnicas do playbook acima como base de cada avaliação, não critério genérico. Em "Perfil do Lead" especificamente: nomeie o arquétipo (10 ARQUÉTIPOS DE LEAD) citando a evidência real que embasa a escolha (nunca um rótulo sem prova), e se houver sinal claro de algum item do CATÁLOGO DE FETICHES, nomeie o fetiche identificado + seu foco psicológico e avalie se o chatter direcionou o roteiro/PPV storytelling pra esse foco específico ou perdeu a oportunidade. Se não houver sinal de fetiche específico, não force — diga que não identificou um fetiche claro em vez de inventar. Depois:\n\n## 🔴 Maiores Erros (graves → leves, com impacto — classifique cada um usando só o catálogo de erros do playbook)\n## 🟢 O Que Não Deve Mudar\n## 💬 Mensagens Desperdiçadas (reescreva 2-3 usando a técnica/gatilho certo do playbook)\n## 📋 Plano de Treinamento (3 prioridades: objetivo — como treinar — resultado)\n## 📊 Dashboard (tabela indicador × nota)\n**IGP: XX/100** (pesos: Conversão 20%, Conexão 15%, Condução 15%, Sinais 10%, Comercial 10%, demais 5% cada)\n## 🎯 Resumo Executivo\n- Ponto forte / Maior oportunidade / Erro crítico / Foco da semana / Parecer (Promoveria / Manteria com treinamento / Acompanhamento intensivo)\n\nPor fim, numa linha separada ao final, depois de tudo, inclua um bloco \`\`\`json com exatamente: {"temperaturaFinal":0,"arquetipo":"","converteu":"sim|nao|andamento","valor":0,"principalErro":"","sinalDeWhale":false} — baseado só no catálogo acima, pra virar dado estruturado do ranking (não aparece pro chatter, é só pro dashboard).`;
 }
 async function rodarChatLab(){
   const cid=document.getElementById('cl-chatter')?.value;
@@ -9729,7 +9761,7 @@ async function rodarChatLab(){
 
   const prev=S.chatlabAnalyses.filter(a=>a.chatterId===cid);
   const system=`Você é a Gerente Sênior de Performance de uma operação de vendas por chat. Analisa conversas de chatters usando EXATAMENTE o playbook interno da agência abaixo — não critérios genéricos de vendas. Seja crítica, objetiva e didática. Nunca elogie sem evidência. Nunca critique sem ensinar. Toda nota deve ter justificativa baseada na conversa real.\n\n${PLAYBOOK_CATALOGO}`;
-  const copilotoInstrucao=`Antes de mais nada, gere um bloco \`\`\`copiloto contendo APENAS um JSON válido (nada de texto fora dele) com exatamente estas chaves — isso é o COPILOTO TÁTICO, lido em segundos no meio do atendimento real, então precisa ser o direcionamento mais assertivo e específico possível (nunca genérico, nunca teórico, nunca uma frase pronta pro chatter mandar):\n${CHATLAB_COPILOTO_SCHEMA}\n\nPra preencher esse JSON, identifique primeiro (com o mesmo cuidado descrito na instrução "ANTES DE ANALISAR" abaixo) qual lado da conversa é o CHATTER (${c.name}) e qual é o LEAD — nunca inverta os dois nesse bloco do copiloto; se inverter aqui, todo o direcionamento tático sai errado mesmo que a análise completa abaixo esteja correta.\n\n"etapaFunil.numero" deve ser 0 a 6 conforme o FUNIL DE CHATTING do playbook acima (0 Validação Visual, 1 Aquecimento do Lead, 2 Conversa Intencional, 3 Pitch de Venda, 4 Compra, 5 LTV, 6 Conexão Extrema/Fidelização) e "etapaFunil.nome" o nome curto dessa etapa — ela precisa ser COERENTE com a temperatura: nunca marque etapa 4 (Compra) ou 5 (LTV) a menos que já tenha havido pagamento CONFIRMADO na conversa; um PPV enviado que o lead não abriu/pagou NÃO avança a etapa (continua Aquecimento/Conversa Intencional) e isso vira item em "erros" (vender antes de aquecer), não motivo pra pular a etapa à frente.\n"proximaAcao" (o campo mais importante) precisa combinar a etapa do funil identificada + a temperatura + as REGRAS DE OURO DE ALTA PERFORMANCE do playbook (nunca soar comercial, sempre posicionamento de conquista, rapport entre mídias) — diga o que fazer AGORA e por quê, ligado a um sinal específico da conversa, nunca um conselho genérico tipo "aprofunde a conexão". Se a regra "não pagou = silêncio" se aplicar, "proximaAcao" deve ser SÓ sobre recuar (curtar resposta/limitar atenção/ego) — nunca misture com "continue escalando desejo/oferta pro próximo passo", são instruções contraditórias.\n"alerta" é pra risco em TEMPO REAL, não observação genérica: priorize sinalizar se a conversa já passou de ~10-12 mensagens sem nenhuma tentativa de monetização, se o lead está tentando sair da plataforma, ou se a próxima mensagem do chatter corre risco de soar robótica/comercial demais — deixe em branco ("") se nada disso se aplica, não force um alerta à toa.\n"erros": no máximo 3, só do catálogo ERROS CLÁSSICOS DO PLAYBOOK, priorizando os que dá pra corrigir JÁ na próxima mensagem (não observações só retrospectivas de fechamento de conversa) — pode vir vazio.\nSe a conversa for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" no campo em vez de inventar.\n\nDepois desse bloco, continue com a análise completa pedida abaixo — são DUAS coisas na mesma resposta, não pule nenhuma das duas.\n\n`;
+  const copilotoInstrucao=`Antes de mais nada, gere um bloco \`\`\`copiloto contendo APENAS um JSON válido (nada de texto fora dele) com exatamente estas chaves — isso é o COPILOTO TÁTICO, lido em segundos no meio do atendimento real, então precisa ser o direcionamento mais assertivo e específico possível (nunca genérico, nunca teórico, nunca uma frase pronta pro chatter mandar):\n${CHATLAB_COPILOTO_SCHEMA}\n\nPra preencher esse JSON, identifique primeiro (com o mesmo cuidado descrito na instrução "ANTES DE ANALISAR" abaixo) qual lado da conversa é o CHATTER (${c.name}) e qual é o LEAD — nunca inverta os dois nesse bloco do copiloto; se inverter aqui, todo o direcionamento tático sai errado mesmo que a análise completa abaixo esteja correta.\n\n"arquetipo" precisa vir de evidência real da conversa, nunca de achismo: "evidencia" cita a(s) mensagem(ns) ou padrão específico do lead que embasa a escolha (ex: "pediu foto 3x sem nunca falar de preço" = Curioso), e "confianca" só é "alta" quando há 2+ sinais confirmando o mesmo arquétipo do catálogo — com só 1 sinal fraco, use "baixa" em vez de forçar uma leitura confiante.\n"feticheIdentificado" só deve ser preenchido se houver sinal real e específico na conversa (palavra-chave, pedido, reação a determinado tipo de mídia) batendo com algum item do CATÁLOGO DE FETICHES do playbook acima — "tipo" é o nome exato do catálogo, "focoPsicologico" é o foco psicológico daquele fetiche (copiado do catálogo, não inventado) que deve guiar o próximo PPV storytelling, e "evidencia" cita o sinal específico. Se não houver nenhum sinal claro de fetiche ainda, deixe os 3 campos em branco ("") — nunca chute um fetiche genérico tipo "convencional" só pra preencher.\n"gatilhoRecomendado" deve combinar os gatilhos do arquétipo identificado (ver 10 ARQUÉTIPOS DE LEAD) com o focoPsicologico do fetiche identificado quando houver um — "comoAplicar" é a ação concreta (não teoria) ligando os dois.\n\n"etapaFunil.numero" deve ser 0 a 6 conforme o FUNIL DE CHATTING do playbook acima (0 Validação Visual, 1 Aquecimento do Lead, 2 Conversa Intencional, 3 Pitch de Venda, 4 Compra, 5 LTV, 6 Conexão Extrema/Fidelização) e "etapaFunil.nome" o nome curto dessa etapa — ela precisa ser COERENTE com a temperatura: nunca marque etapa 4 (Compra) ou 5 (LTV) a menos que já tenha havido pagamento CONFIRMADO na conversa; um PPV enviado que o lead não abriu/pagou NÃO avança a etapa (continua Aquecimento/Conversa Intencional) e isso vira item em "erros" (vender antes de aquecer), não motivo pra pular a etapa à frente.\n"proximaAcao" (o campo mais importante) precisa combinar a etapa do funil identificada + a temperatura + as REGRAS DE OURO DE ALTA PERFORMANCE do playbook (nunca soar comercial, sempre posicionamento de conquista, rapport entre mídias) — diga o que fazer AGORA e por quê, ligado a um sinal específico da conversa, nunca um conselho genérico tipo "aprofunde a conexão". Se a regra "não pagou = silêncio" se aplicar, "proximaAcao" deve ser SÓ sobre recuar (curtar resposta/limitar atenção/ego) — nunca misture com "continue escalando desejo/oferta pro próximo passo", são instruções contraditórias.\n"alerta" é pra risco em TEMPO REAL, não observação genérica: priorize sinalizar se a conversa já passou de ~10-12 mensagens sem nenhuma tentativa de monetização, se o lead está tentando sair da plataforma, ou se a próxima mensagem do chatter corre risco de soar robótica/comercial demais — deixe em branco ("") se nada disso se aplica, não force um alerta à toa.\n"erros": no máximo 3, só do catálogo ERROS CLÁSSICOS DO PLAYBOOK, priorizando os que dá pra corrigir JÁ na próxima mensagem (não observações só retrospectivas de fechamento de conversa) — pode vir vazio.\nSe a conversa for curta demais pra avaliar algo com segurança, escreva "Não foi possível determinar" no campo em vez de inventar.\n\nDepois desse bloco, continue com a análise completa pedida abaixo — são DUAS coisas na mesma resposta, não pule nenhuma das duas.\n\n`;
   const prompt=copilotoInstrucao+montarPromptAnaliseChatLab(c,conv,ctx,prev.length,false);
 
   try{
@@ -10705,11 +10737,11 @@ function renderEstudos(){
 }
 
 function renderEstrategia(){
-  checkMedalAchievements();
-  renderMedalNotice('estrategia-medal-notice');
+  // A pedido da gestora, a aba Estratégia mostra só Estratégias de Liderança
+  // e Diagnóstico da equipe — Prioridades do dia, Gargalos, aviso de medalha
+  // e Conselheiro Executivo saíram desta tela (funções continuam existindo,
+  // só não são mais chamadas/exibidas aqui).
   renderLiderancaEstrategica();
-  renderConselheiroSemanal();
-  renderConselheiroPessoalHistorico();
   renderEstrategiaDiagnostico();
 }
 
@@ -11301,12 +11333,81 @@ function setAfilhadoClaimDecision(claimId,decision){
   save();
   renderAfilhadoClaims();
 }
+// Visibilidade da gestora sobre tudo que se passa com os padrinhos: pedidos
+// de segunda chance (decididos por ELES no Documento dos Padrinhos, mas
+// visíveis aqui) e dados de PJ recebidos (com botão de copiar).
+function renderSegundaChancePanel(){
+  const el=document.getElementById('segunda-chance-content');
+  if(!el)return;
+  const rows=[];
+  S.chatters.forEach(c=>{
+    const reqs=S.chatterFichas?.[c.id]?.segundaChanceRequests||[];
+    reqs.forEach(r=>rows.push({...r,chatterName:c.name}));
+  });
+  if(!rows.length){
+    el.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Nenhum pedido ainda — aparece aqui quando um tester pedir segunda chance no link de tarefas.</div>';
+    return;
+  }
+  rows.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
+  const meta={pendente:{label:'⏳ Aguardando padrinho',color:'var(--warn)'},aprovado:{label:'✅ Aprovado',color:'var(--ok)'},recusado:{label:'❌ Recusado',color:'var(--bad)'}};
+  el.innerHTML=rows.map(r=>{
+    const m=meta[r.status]||meta.pendente;
+    return`<div style="border:1px solid var(--line);border-left:3px solid ${m.color};border-radius:9px;padding:11px 13px;margin-bottom:9px">
+      <div style="font-weight:700;font-size:13.5px">${r.chatterName} — Dia ${r.dia}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">${r.justificativa||'—'}</div>
+      <div style="font-size:11px;color:${m.color};font-weight:700;margin-top:6px">${m.label}${r.padrinhoNome?' · '+r.padrinhoNome:''}</div>
+    </div>`;
+  }).join('');
+}
+function renderDadosPjPanel(){
+  const el=document.getElementById('dados-pj-content');
+  if(!el)return;
+  const withData=S.chatters.filter(c=>S.chatterFichas?.[c.id]?.dadosPJ);
+  if(!withData.length){
+    el.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Nenhum dado de PJ recebido ainda — aparece aqui quando um tester aprovado preencher no link de tarefas.</div>';
+    return;
+  }
+  el.innerHTML=withData.map(c=>{
+    const d=S.chatterFichas[c.id].dadosPJ;
+    const linhas=[
+      ['Razão Social',d.razaoSocial],['Nickname',d.nickname],['CNPJ',d.cnpj],
+      ['Endereço de sede',d.endereco],['Bairro',d.bairro],['CEP',d.cep],
+      ['Telefone/Celular',d.telefone],['E-mail',d.email],['Pix',d.pix],['Banco e chave',d.bancoChave],
+      ['Email do Trello',d.trelloEmail],['Número do Telegram',d.telegramNumero],['Nome no Telegram',d.telegramNome]
+    ].filter(([,v])=>v);
+    return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-weight:700;font-size:13.5px">${c.name}</div>
+        <button data-noaccordion onclick="copiarDadosPJ('${c.id}')" title="Copiar dados" style="background:none;border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:13px">📋</button>
+      </div>
+      ${linhas.map(([lb,v])=>`<div style="font-size:12px;color:var(--text2);margin-bottom:2px"><strong>${lb}:</strong> ${v}</div>`).join('')}
+    </div>`;
+  }).join('');
+}
+function copiarDadosPJ(chatterId){
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  const d=S.chatterFichas?.[chatterId]?.dadosPJ;
+  if(!c||!d){toast('⚠️ Sem dados pra copiar');return;}
+  const texto=[
+    `Razão Social: ${d.razaoSocial||''}`,`Nickname: ${d.nickname||''}`,`CNPJ: ${d.cnpj||''}`,
+    `Endereço de sede: ${d.endereco||''}`,`Bairro: ${d.bairro||''}`,`Cep: ${d.cep||''}`,
+    `Telefone/Celular: ${d.telefone||''}`,`E-mail: ${d.email||''}`,`Pix: ${d.pix||''}`,`Banco e chave: ${d.bancoChave||''}`,
+    `Email do Trello: ${d.trelloEmail||''}`,`Número do Telegram: ${d.telegramNumero||''}`,`Nome no Telegram: ${d.telegramNome||''}`
+  ].join('\n');
+  navigator.clipboard?.writeText(texto).then(()=>toast('✅ Dados copiados')).catch(()=>toast('⚠️ Não consegui copiar'));
+}
 function setTesterDecision(chatterId,decision){
   const c=S.chatters.find(ch=>ch.id===chatterId);
   if(!c)return;
   if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
   S.chatterFichas[chatterId].testerDecision=decision;
   S.chatterFichas[chatterId].testerDecisionDate=todayKey();
+  // Espelha no próprio chatter (não só na ficha) porque o link público de
+  // tarefas (tarefas-novato.html) só recebe o array "chatters" via
+  // central-dados, nunca as fichas inteiras — é assim que a página sabe
+  // mostrar a tela de aprovado/reprovado pra pessoa certa.
+  c.testerDecision=decision;
+  c.testerDecisionDate=todayKey();
   if(decision==='aprovado'){
     c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
     if(c.level==='teste'||c.level==='treinamento')c.level='junior'; // promove o nível também, senão fica filtrado de fora em quadros que checam nível separado do cargo
@@ -11329,6 +11430,8 @@ function renderTesters(){
   renderMapTranscricoes();
   renderMapeamentoNovosPool();
   renderAfilhadoClaims();
+  renderSegundaChancePanel();
+  renderDadosPjPanel();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Tester AGORA e já foi aprovado (não é mais só
   // pendente de aprovação da solicitação de Afilhado), + quem já teve
@@ -11811,6 +11914,217 @@ function aplicarAfilhadoClaimPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar solicitação de afilhado como processada',e));
   }catch(e){
     console.error('Erro ao aplicar solicitação de afilhado pendente',e);
+  }
+}
+
+/* ===========================================================
+   AUTOINCLUSÃO SEM MAPEAMENTO — botão "Não achei meu nome" no link
+   de tarefas (tarefas-novato.html), pra quem devia ter Mapeamento
+   feito mas por algum motivo não está na lista. Cria um tester
+   pendente de aprovação do padrinho, igual qualquer outro caminho de
+   criação de tester (nunca pula a aprovação).
+   =========================================================== */
+function listenToTesterAutoInclusaoPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','testerAutoInclusaoPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarTesterAutoInclusaoPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir autoinclusões de tester pendentes',err);
+    });
+}
+function aplicarTesterAutoInclusaoPendente(docId,data){
+  try{
+    const nome=(data.nome||'').trim();
+    if(!nome){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'nome vazio'});
+      return;
+    }
+    const chatterId='c'+Date.now()+Math.random().toString(36).slice(2,4);
+    S.chatters.push({
+      id:chatterId,name:nome,discord:'',level:'teste',time:'tester',pendenteAprovacao:true,
+      notes:'Autoincluído pelo link de tarefas (sem Mapeamento) — confirme com o padrinho responsável antes de aprovar.',
+      watchtime:'',createdAt:new Date().toISOString()
+    });
+    save();
+    toast(`🙋 ${nome} se autoincluiu no link de tarefas (sem Mapeamento) — aguardando aprovação do padrinho.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true,chatterId}).catch(e=>console.error('Erro ao marcar autoinclusão como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar autoinclusão de tester pendente',e);
+  }
+}
+
+/* ===========================================================
+   DADOS INFORMADOS PELO PRÓPRIO TESTER — nome/idade/cidade/
+   experiência/pretensão salarial, preenchidos no link de tarefas por
+   QUALQUER pessoa respondendo (veio de Mapeamento ou autoinclusão).
+   Guardado no próprio chatter (visível no link também, sem precisar
+   ler fichas) — nunca sobrescreve o que já veio de Mapeamento real,
+   só complementa quando estiver vazio.
+   =========================================================== */
+function listenToTesterDadosPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','testerDadosPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarTesterDadosPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir dados de tester pendentes',err);
+    });
+}
+function aplicarTesterDadosPendente(docId,data){
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    c.dadosAutoInformados={
+      idade:data.idade||'',cidade:data.cidade||'',
+      experiencia:data.experiencia||'',pretensaoSalarial:data.pretensaoSalarial||'',
+      atualizadoEm:new Date().toISOString()
+    };
+    save();
+    toast(`📝 Dados pessoais de ${c.name} atualizados via link de tarefas.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar dados de tester como processados',e));
+  }catch(e){
+    console.error('Erro ao aplicar dados de tester pendente',e);
+  }
+}
+
+/* ===========================================================
+   DADOS PJ — coletados no link de tarefas SÓ depois que a pessoa é
+   aprovada (testerDecision==='aprovado'). Fica na ficha (não no
+   chatter) porque é dado sensível (CNPJ, pix, endereço) e só a
+   gestora precisa ver — nunca volta pro link público depois de salvo.
+   =========================================================== */
+function listenToDadosPjPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','dadosPjPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarDadosPjPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir dados PJ pendentes',err);
+    });
+}
+function aplicarDadosPjPendente(docId,data){
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    if(!S.chatterFichas[c.id])S.chatterFichas[c.id]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    S.chatterFichas[c.id].dadosPJ={
+      razaoSocial:data.razaoSocial||'',nickname:data.nickname||'',cnpj:data.cnpj||'',
+      endereco:data.endereco||'',bairro:data.bairro||'',cep:data.cep||'',
+      telefone:data.telefone||'',email:data.email||'',pix:data.pix||'',bancoChave:data.bancoChave||'',
+      trelloEmail:data.trelloEmail||'',telegramNumero:data.telegramNumero||'',telegramNome:data.telegramNome||'',
+      recebidoEm:new Date().toISOString()
+    };
+    save();
+    toast(`📋 Dados de PJ de ${c.name} recebidos via link.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar dados PJ como processados',e));
+  }catch(e){
+    console.error('Erro ao aplicar dados PJ pendente',e);
+  }
+}
+
+/* ===========================================================
+   SEGUNDA CHANCE — tester perdeu o prazo de um dia por imprevisto,
+   pede justificativa; padrinho aprova/recusa no Documento dos
+   Padrinhos. Se aprovar, o dia volta a ficar liberado pro tester
+   enviar (espelhado no chatter em segundaChanceAprovadas, porque o
+   link de tarefas só recebe o array de chatters, não as fichas).
+   =========================================================== */
+function listenToSegundaChancePendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','segundaChancePendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarSegundaChancePendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir pedidos de segunda chance pendentes',err);
+    });
+}
+function aplicarSegundaChancePendente(docId,data){
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    if(!c||!data.fridayKey||!data.dia){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester ou dia ausente'});
+      return;
+    }
+    if(!S.chatterFichas[c.id])S.chatterFichas[c.id]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    if(!Array.isArray(S.chatterFichas[c.id].segundaChanceRequests))S.chatterFichas[c.id].segundaChanceRequests=[];
+    S.chatterFichas[c.id].segundaChanceRequests.push({
+      id:'sc'+Date.now(),fridayKey:data.fridayKey,dia:data.dia,
+      justificativa:data.justificativa||'',status:'pendente',criadoEm:new Date().toISOString()
+    });
+    save();
+    toast(`🙏 ${c.name} pediu segunda chance no Dia ${data.dia} — padrinho decide no Documento dos Padrinhos.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar pedido de segunda chance como processado',e));
+  }catch(e){
+    console.error('Erro ao aplicar pedido de segunda chance pendente',e);
+  }
+}
+function listenToSegundaChanceDecisoesPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','segundaChanceDecisaoPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarSegundaChanceDecisaoPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir decisões de segunda chance pendentes',err);
+    });
+}
+function aplicarSegundaChanceDecisaoPendente(docId,data){
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    const reqs=c&&S.chatterFichas[c.id]?S.chatterFichas[c.id].segundaChanceRequests||[]:[];
+    const req=reqs.find(r=>r.fridayKey===data.fridayKey&&r.dia===data.dia&&r.status==='pendente');
+    if(!c||!req){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester ou solicitação não encontrada'});
+      return;
+    }
+    req.status=data.decisao==='aprovado'?'aprovado':'recusado';
+    req.decididoEm=new Date().toISOString();
+    req.padrinhoNome=data.padrinhoNome||'';
+    if(data.decisao==='aprovado'){
+      if(!Array.isArray(c.segundaChanceAprovadas))c.segundaChanceAprovadas=[];
+      c.segundaChanceAprovadas.push({fridayKey:data.fridayKey,dia:data.dia});
+    }
+    save();
+    toast(`${data.decisao==='aprovado'?'✅':'❌'} Segunda chance do Dia ${data.dia} de ${c.name} ${data.decisao==='aprovado'?'aprovada':'recusada'} por ${data.padrinhoNome||'padrinho'}.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar decisão de segunda chance como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar decisão de segunda chance pendente',e);
   }
 }
 

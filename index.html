@@ -1153,9 +1153,9 @@ body{
     <div id="demandas2-list"></div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <input class="finput" id="demandas2-text" placeholder="O que verificar..." style="flex:1" onkeydown="if(event.key==='Enter')addDemanda2()">
-      <input type="date" class="finput" id="demandas2-date" style="flex:0 0 auto;width:130px">
       <button class="btn btn-primary btn-sm" onclick="addDemanda2()">+</button>
     </div>
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:10px" onclick="incluirFinanceiroNaAgenda()">📅 Incluir na agenda de hoje</button>
   </div>
 
   <!-- REQUISIÇÕES POR MODELO -->
@@ -1241,24 +1241,10 @@ body{
   <div class="view-title">Estratégia</div>
   <div style="font-size:12.5px;font-weight:600;color:var(--accent);font-style:italic;margin:-6px 0 14px">O que eu deveria fazer hoje?</div>
 
-  <div id="estrategia-medal-notice"></div>
-
-  <!-- PRIORIDADES DO DIA -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">🎯 Prioridades de hoje</div><div class="panel-note">Gerado automaticamente a partir do ChatLab, Métricas e metas da semana</div></div></div>
-    <div id="estrategia-prioridades"></div>
-  </div>
-
   <!-- DIAGNÓSTICO DA EQUIPE -->
   <div class="panel">
     <div class="panel-head"><div><div class="panel-title">🩺 Diagnóstico da equipe</div><div class="panel-note">🟢 Em evolução · 🟡 Estagnado · 🔴 Em queda · ⚫ Alto risco de sair</div></div></div>
     <div id="estrategia-diagnostico"></div>
-  </div>
-
-  <!-- GARGALOS -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">🚧 Gargalos identificados</div><div class="panel-note">Com base nos dados disponíveis — alguns gargalos exigem observação manual</div></div></div>
-    <div id="estrategia-gargalos"></div>
   </div>
 
   <!-- ESTRATÉGIAS DE LIDERANÇA -->
@@ -1321,37 +1307,10 @@ body{
     </div>
   </div>
 
-  <!-- CONSELHEIRO EXECUTIVO (discreto, collapsible) -->
-  <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
-    <button onclick="toggleConselheiro()" style="width:100%;padding:11px 14px;background:var(--bg-soft);border:none;cursor:pointer;font-family:var(--font-display);display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--text2)">
-      <span>🧠 Conselheiro Executivo</span>
-      <span id="conselheiro-ic" style="font-size:11px;color:var(--text3)">▸</span>
-    </button>
-    <div id="conselheiro-body" style="display:none;padding:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase">📊 Leitura da semana</div>
-        <button class="btn btn-ghost btn-xs" onclick="gerarConselheiroSemanal(true)">🔄 Gerar de novo</button>
-      </div>
-      <div id="conselheiro-semanal" style="font-size:12.5px;margin-bottom:18px"></div>
-
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">💬 Perguntar sobre a operação</div>
-      <div class="field">
-        <textarea class="ftext" id="conselheiro-input" style="min-height:100px" placeholder="Descreva a situação — ex: um chatter com queda de performance, conflito na equipe, decisão difícil..."></textarea>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="conselheiro-btn" onclick="rodarConselheiro()">💬 Consultar</button>
-      <div id="conselheiro-out" style="margin-top:12px"></div>
-
-      <div style="border-top:1px solid var(--line);margin:22px 0 16px"></div>
-      <div style="font-size:11px;font-weight:700;color:var(--pink);text-transform:uppercase;margin-bottom:4px">💙 Como você está</div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Um espaço separado, só pra você — não é terapia, não usa nenhum dado da operação, e o que você escrever aqui fica só aqui.</div>
-      <div class="field">
-        <textarea class="ftext" id="conselheiro-pessoal-input" style="min-height:90px" placeholder="Como você está de verdade hoje?"></textarea>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="conselheiro-pessoal-btn" onclick="conversarConselheiroPessoal()">💙 Conversar</button>
-      <div id="conselheiro-pessoal-out" style="margin-top:12px"></div>
-      <div id="conselheiro-pessoal-historico"></div>
-    </div>
-  </div>
+  <!-- Conselheiro Executivo removido desta aba a pedido da gestora (mantém
+       só Estratégias de Liderança + Diagnóstico da equipe aqui). Funções em
+       app.js (renderConselheiroSemanal, rodarConselheiro, etc.) continuam
+       intactas, só sem esse painel na tela. -->
 </section>
 
 <!-- ===================== FICHAS ===================== -->
@@ -1499,6 +1458,16 @@ body{
       <button class="btn btn-ghost btn-xs" onclick="gerarLinkDocumentoPadrinhos()">🔗 Link do Documento</button>
     </div>
     <div id="afilhado-claims-content"></div>
+  </div>
+
+  <!-- SEGUNDA CHANCE + DADOS PJ — tudo que se passa com os padrinhos, visível pra gestora também -->
+  <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
+    <div class="panel-head"><div><div class="panel-title">🙏 Segunda Chance</div><div class="panel-note">Pedidos de justificativa por atraso — decididos pelo padrinho no Documento dos Padrinhos, mas visíveis aqui também</div></div></div>
+    <div id="segunda-chance-content"></div>
+  </div>
+  <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
+    <div class="panel-head"><div class="panel-title">📋 Dados de PJ recebidos</div></div>
+    <div id="dados-pj-content"></div>
   </div>
 
   <div style="margin-bottom:12px">

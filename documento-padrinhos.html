@@ -301,11 +301,38 @@ function renderDocumentoPadrinhos(testers){
             ${(reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:''}
           </div>`;
         }).join('')}
+        ${segundaChanceHtml(t.id)}
         ${claimBoxHtml}
       </div>
     </div>`;
   }).join('');
 }
+function segundaChanceHtml(testerId){
+  const reqs=((chatterFichasLive[testerId]&&chatterFichasLive[testerId].segundaChanceRequests)||[]).filter(r=>r.status==='pendente');
+  if(!reqs.length)return'';
+  return reqs.map(r=>`<div class="claimbox" style="border-color:var(--warn)">
+    🙏 Pediu segunda chance — Dia ${r.dia}
+    <div style="font-size:12px;color:var(--text2);margin:6px 0">${r.justificativa||''}</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" style="flex:1;background:var(--ok)" onclick="decidirSegundaChance('${testerId}','${r.fridayKey}',${r.dia},'aprovado')">✅ Aprovar</button>
+      <button class="btn btn-primary" style="flex:1;background:var(--bad)" onclick="decidirSegundaChance('${testerId}','${r.fridayKey}',${r.dia},'recusado')">❌ Recusar</button>
+    </div>
+  </div>`).join('');
+}
+window.decidirSegundaChance=async function(testerId,fridayKey,dia,decisao){
+  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
+  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'segundaChanceDecisaoPendente',processado:false,
+      testerId,fridayKey,dia,decisao,padrinhoNome:padrinho?.name||'',
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar decisão: '+e.message);
+  }
+};
 window.reivindicarAfilhado=async function(testerId,testerNome){
   if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
   const padrinho=chatters.find(c=>c.id===selPadrinhoId);
