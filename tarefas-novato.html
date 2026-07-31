@@ -18,6 +18,12 @@
   --font:'Inter',system-ui,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+/* A pedido da gestora: dificulta um tester copiar a resposta do outro (o
+   link é o mesmo pra todos, só troca o nome no seletor). Não é à prova de
+   tudo (quem sabe usar o devtools do navegador sempre consegue contornar),
+   mas bloqueia cópia por mouse/teclado no uso normal. */
+*{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
+input,textarea{-webkit-user-select:text;user-select:text;} /* precisa selecionar o próprio texto pra editar/corrigir enquanto digita */
 html,body{background:var(--bg-soft);}
 body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;padding:18px 14px 60px;}
 .wrap{max-width:620px;margin:0 auto;}
@@ -106,6 +112,20 @@ let unsubMyTarefas=null;
 // print do PPM: sem Firebase Storage — comprimido no navegador e enviado
 // como base64 dentro do próprio documento do Firestore. diaN -> dataURL.
 const pendingImages={};
+
+// A pedido da gestora: bloqueia copiar/colar de texto por mouse ou teclado
+// nessa página, pra dificultar um tester copiar a resposta de outro (o link
+// é compartilhado — só troca o nome no seletor). Bloqueia botão direito
+// (menu de copiar), Ctrl/Cmd+C e Ctrl/Cmd+X, e os eventos de copy/cut
+// direto. Colar (Ctrl+V / paste) continua liberado só na zona de colar o
+// print do PPM, que precisa disso pra funcionar.
+document.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('copy',e=>e.preventDefault());
+document.addEventListener('cut',e=>e.preventDefault());
+document.addEventListener('keydown',e=>{
+  const k=(e.key||'').toLowerCase();
+  if((e.ctrlKey||e.metaKey)&&(k==='c'||k==='x')){e.preventDefault();}
+});
 
 function p2(n){return String(n).padStart(2,'0');}
 function fmt(d){return`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
@@ -248,7 +268,11 @@ function renderAll(){
     }
   }
   if(!testers.length&&!pendingNome){
-    content.innerHTML=`<div class="warn-box">Nenhum tester cadastrado ainda — peça pra gestora te criar no Mapeamento dos Novos antes de preencher as tarefas.</div>${autoinclusaoHtml()}`;
+    // Não é preciso Mapeamento nenhum pra se cadastrar aqui — o mapeamento é
+    // uma ferramenta interna que só a gestora/padrinhos usam depois, pra
+    // avaliar quem já está no processo. Quem chega aqui e não acha o nome se
+    // inclui direto, sem esperar ninguém.
+    content.innerHTML=`<div class="warn-box">Nenhum tester cadastrado ainda — use "Não achei meu nome" abaixo pra se incluir direto, sem precisar de ninguém.</div>${autoinclusaoHtml()}`;
     attachAutoinclusaoHandlers();
     return;
   }
