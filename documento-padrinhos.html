@@ -222,7 +222,11 @@ function getMapeamentoInfo(nome){
 
 /* ---------- render ---------- */
 function renderAll(){
-  const testers=chatters.filter(c=>c.time==='tester');
+  // Inclui quem já teve decisão (aprovado/reprovado) também — senão a
+  // pessoa some da lista assim que é aprovada (vira time==='basico') e o
+  // padrinho perde o acesso à avaliação/mapeamento dela bem na hora que
+  // isso passa a importar mais (mesmo ajuste feito em tarefas-novato.html).
+  const testers=chatters.filter(c=>c.time==='tester'||c.testerDecision);
   // Padrinho é um CARGO à parte do nível principal (ex: alguém pode ser
   // Sênior e Padrinho ao mesmo tempo, ver task de "2 cargos por chatter") —
   // por isso considera tanto level==='padrinho' quanto a flag isPadrinho,
@@ -248,8 +252,8 @@ function renderAll(){
   `;
   renderDocumentoPadrinhos(testers);
 }
-window.onPadrinhoChange=function(id){selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'));};
-window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'));};
+window.onPadrinhoChange=function(id){selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'||c.testerDecision));};
+window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'||c.testerDecision));};
 function renderDocumentoPadrinhos(testers){
   const el=document.getElementById('padrinho-doc');
   if(!el)return;
@@ -284,7 +288,7 @@ function renderDocumentoPadrinhos(testers){
     return`<div class="tester-row">
       <div class="tester-row-head" onclick="toggleTesterDetail('${t.id}')">
         <div>
-          <div class="tester-name">${t.name}</div>
+          <div class="tester-name">${t.name}${t.testerDecision==='aprovado'?' <span style="font-size:11px;font-weight:700;color:var(--ok)">✅ Aprovado</span>':t.testerDecision==='reprovado'?' <span style="font-size:11px;font-weight:700;color:var(--bad)">❌ Reprovado</span>':''}</div>
           ${map?`<div class="tester-mapinfo">"${map.personalidadeUmaFrase||''}" ${map.pontuacaoGeral?`· 🎯 ${map.pontuacaoGeral}/100`:''}</div>`:''}
           ${map?.experienciaProfissional?`<div class="tester-mapinfo">💼 Experiência profissional: <strong style="color:${expColor};text-transform:uppercase">${map.experienciaProfissional}</strong></div>`:''}
           <div class="badges-row">${badges}</div>

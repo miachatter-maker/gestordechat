@@ -158,6 +158,7 @@ function migrateState(s){
   if(!s.creativityWeekly)s.creativityWeekly={}; // weekKey(seg) -> {done, review:{...}} — desafio semanal + revisão
   if(!s.mapRecordings)s.mapRecordings=[]; // [{id,name,transcript,date,mapped}] — gravações rápidas do novo Mapeamento (6 slots)
   if(!s.mapSlotDrafts)s.mapSlotDrafts={}; // '1'..'6' -> texto em andamento (recuperação se travar no meio da gravação)
+  if(!s.mapSlotNames)s.mapSlotNames={}; // '1'..'6' -> nome digitado antes/durante a gravação (a pedido da gestora, em vez de depender só do reconhecimento automático)
   if(!s.mapeamentoBatches)s.mapeamentoBatches=[]; // [{id,date,results:[{id,name,recordingId,...campos da IA}]}] — MAPEAMENTO DOS NOVOS
   if(!s.afilhadoClaims)s.afilhadoClaims=[]; // [{id,testerId,testerNome,padrinhoId,padrinhoNome,status:'pendente'|'aprovado'|'reprovado'|'reservado',criadoEm}] — quadro SOLICITAÇÃO DE AFILHADO (Testers)
   if(!s.weekGoals)s.weekGoals={};
@@ -6750,15 +6751,24 @@ function renderMapSlots(){
   el.innerHTML=[1].map(slotId=>{
     const recording=!!_mapSlotRecording[slotId];
     const draft=S.mapSlotDrafts[slotId]||'';
+    const nome=S.mapSlotNames[slotId]||'';
     return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px;${recording?'border-color:var(--bad)':''}">
+      <div class="field" style="margin-bottom:8px">
+        <label class="flabel">Nome da pessoa (dá pra preencher ou trocar antes ou durante a gravação)</label>
+        <input class="finput" id="map-slot-name-${slotId}" placeholder="Digite o nome — se deixar em branco, tenta reconhecer pela fala" value="${nome.replace(/"/g,'&quot;')}" oninput="onMapSlotNameInput(${slotId},this.value)">
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
         <div style="font-size:11px;font-weight:700;color:var(--text3)">🎙️ GRAVAR CANDIDATO${draft&&!recording?' · rascunho recuperado':''}</div>
         <button class="btn ${recording?'btn-danger':'btn-primary'} btn-xs" onclick="toggleMapSlotRecording(${slotId})">${recording?'⏹️ Terminar gravação':'🎙️ Gravar'}</button>
       </div>
-      ${recording?`<div style="font-size:11.5px;color:var(--bad);margin-top:6px">🔴 Gravando… fale perto do microfone. Peça pra pessoa se apresentar pelo nome.</div>`:''}
+      ${recording?`<div style="font-size:11.5px;color:var(--bad);margin-top:6px">🔴 Gravando… fale perto do microfone. Se não digitou o nome acima, peça pra pessoa se apresentar.</div>`:''}
       ${draft&&!recording?`<div style="font-size:11.5px;color:var(--text3);margin-top:6px">Tem um rascunho aqui — clique em Gravar pra continuar ou vai se perder ao gravar a próxima pessoa.</div>`:''}
     </div>`;
   }).join('');
+}
+function onMapSlotNameInput(slotId,val){
+  S.mapSlotNames[slotId]=val;
+  save();
 }
 function toggleMapSlotRecording(slotId){
   if(_mapSlotRecording[slotId])stopMapSlotRecording(slotId);else startMapSlotRecording(slotId);
@@ -6815,11 +6825,16 @@ function stopMapSlotRecording(slotId){
   if(stream){try{stream.getTracks().forEach(t=>t.stop());}catch(e){} delete _mapSlotStream[slotId];}
   const transcript=(S.mapSlotDrafts[slotId]||'').trim();
   delete S.mapSlotDrafts[slotId];
-  if(!transcript){save();renderMapSlots();return;}
-  const name=detectNameFromTranscript(transcript)||('Pessoa sem nome '+(S.mapRecordings.filter(r=>/^Pessoa sem nome/.test(r.name)).length+1));
+  const nomeDigitado=(S.mapSlotNames[slotId]||'').trim();
+  if(!transcript){delete S.mapSlotNames[slotId];save();renderMapSlots();return;}
+  // Prioriza o nome digitado à mão (antes ou durante a gravação) — só cai
+  // pro reconhecimento automático pela fala se a gestora não tiver digitado
+  // nada, e só vira "Pessoa sem nome" em último caso.
+  const name=nomeDigitado||detectNameFromTranscript(transcript)||('Pessoa sem nome '+(S.mapRecordings.filter(r=>/^Pessoa sem nome/.test(r.name)).length+1));
   S.mapRecordings.push({id:'mr'+Date.now()+Math.random().toString(36).slice(2,5),name,transcript,date:todayKey(),mapped:false});
+  delete S.mapSlotNames[slotId];
   save();
-  toast(`✅ Gravação salva em Transcrições — reconhecido como "${name}"`);
+  toast(`✅ Gravação salva em Transcrições — "${name}"`);
   renderMapSlots();
   renderMapTranscricoes();
 }
