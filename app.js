@@ -16,7 +16,14 @@ const AI_PROXY_URL='/api/claude';
 // genérico) e sinalizar que o texto já digitado/gravado continua salvo.
 function aiQuotaError(data){
   const raw=typeof data?.error==='string'?data.error:(data?.error?.message||'');
-  if(/quota|rate.?limit/i.test(raw)){
+  // Além de "quota"/rate-limit (limite da NOSSA chave), o Gemini também
+  // devolve "high demand"/"overloaded" quando o MODELO em si está sobrecarregado
+  // do lado do Google (fora do nosso controle) — antes isso caía no erro
+  // genérico "Resposta vazia da IA", confuso pra quem está usando (foi a causa
+  // real do Mapeamento dos Novos "falhando sem gerar nada" num pico de uso).
+  // Trata os dois casos como a mesma situação transitória: mostra a mesma
+  // contagem regressiva de espera em vez de um erro seco.
+  if(/quota|rate.?limit|high demand|overloaded|sobrecarregad/i.test(raw)){
     // O proxy (api/claude.js) já calcula o tempo real de espera (extraído da
     // própria resposta do Gemini) e manda numa frase tipo "espere cerca de
     // 47s" — extrai esse número aqui pra alimentar uma contagem regressiva
@@ -24,7 +31,7 @@ function aiQuotaError(data){
     const m=raw.match(/(\d+)\s*s\b/i);
     const err=new Error(raw||'Limite de uso da IA no momento — costuma voltar sozinho em cerca de 1 minuto.');
     err.quota=true;
-    err.waitSeconds=m?parseInt(m[1],10):60;
+    err.waitSeconds=m?parseInt(m[1],10):(/high demand|overloaded|sobrecarregad/i.test(raw)?20:60);
     return err;
   }
   return null;
@@ -11462,6 +11469,16 @@ function setTesterDecision(chatterId,decision){
   // mostrar a tela de aprovado/reprovado pra pessoa certa.
   c.testerDecision=decision;
   c.testerDecisionDate=todayKey();
+  // A pedido da gestora: as tarefas enviadas pelo link (com print em base64
+  // de cada dia) só servem pra guiar a escolha dos padrinhos — depois que a
+  // decisão é FINAL (aprovado ou reprovado) elas não têm mais função e são
+  // apagadas, senão os prints ficam acumulando pra sempre no mesmo documento
+  // sharded (shard-fichas) que guarda a Ficha de todo mundo, arriscando
+  // estourar o limite de 1MB do Firestore. "Espera"/Reservas não é decisão
+  // final — continua guardando, já que a pessoa ainda pode ser decidida.
+  if((decision==='aprovado'||decision==='reprovado')&&S.chatterFichas[chatterId]){
+    delete S.chatterFichas[chatterId].tarefasNovato;
+  }
   if(decision==='aprovado'){
     c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
     if(c.level==='teste'||c.level==='treinamento')c.level='junior'; // promove o nível também, senão fica filtrado de fora em quadros que checam nível separado do cargo
