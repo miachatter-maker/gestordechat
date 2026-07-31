@@ -347,6 +347,25 @@ function pruneHeavyData(s){
         }
       });
     }
+    // Fichas órfãs (achado em 31/07/2026): uma limpeza feita direto no estado
+    // (fora do deleteChatter, que já cuida disso sozinho) deixou fichas de
+    // gente que não existe mais em s.chatters, incluindo prints de PPM em
+    // tarefasNovato — pura sobra que nunca aparece pra ninguém (toda função
+    // que lê isso já busca o chatter primeiro) mas continuava ocupando
+    // espaço no documento sharded. Remove sozinho a cada save(), pra nunca
+    // mais precisar caçar isso na mão.
+    if(s.chatterFichas&&Array.isArray(s.chatters)){
+      const idsValidos=new Set(s.chatters.map(c=>c.id));
+      Object.keys(s.chatterFichas).forEach(fid=>{
+        if(!idsValidos.has(fid))delete s.chatterFichas[fid];
+      });
+    }
+    if(s.testerLogs&&Array.isArray(s.chatters)){
+      const idsValidos=new Set(s.chatters.map(c=>c.id));
+      Object.keys(s.testerLogs).forEach(tid=>{
+        if(!idsValidos.has(tid))delete s.testerLogs[tid];
+      });
+    }
   }catch(e){console.error('Erro ao limpar dados pesados',e);}
   return s;
 }
