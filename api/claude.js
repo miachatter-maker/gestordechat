@@ -119,16 +119,24 @@ export default async function handler(req, res) {
     const startIdx = (roundRobinCounter++) % API_KEYS.length;
     let upstream, data;
 
+    // 503 ("model is currently experiencing high demand") é tão transitório
+    // quanto o 429 de cota — é uma sobrecarga momentânea do lado do Google,
+    // não um problema da nossa chave. Antes só o 429 entrava no loop de
+    // retry; um 503 quebrava o loop na hora e virava um "Resposta vazia da
+    // IA" confuso pra quem está usando (ex: Mapeamento dos Novos falhando
+    // sem motivo aparente). Agora os dois entram no mesmo retry.
+    const isRetryable = (status) => status === 429 || status === 503;
+
     for (let round = 0; round < MAX_ROUNDS; round++) {
       if (round > 0) await sleep(RETRY_DELAY_MS);
-      let allRateLimited = true;
+      let allRetryable = true;
       for (let i = 0; i < API_KEYS.length; i++) {
         const key = API_KEYS[(startIdx + i) % API_KEYS.length];
         ({ upstream, data } = await callGemini(key, geminiBody));
-        if (upstream.status !== 429) { allRateLimited = false; break; } // sucesso OU erro de outro tipo — não adianta tentar outra chave
+        if (!isRetryable(upstream.status)) { allRetryable = false; break; } // sucesso OU erro de outro tipo — não adianta tentar outra chave
       }
-      if (!allRateLimited) break; // já achou uma chave que respondeu (com sucesso ou erro real)
-      // todas as chaves vieram 429 nessa rodada — só vale tentar de novo se sobrar rodada
+      if (!allRetryable) break; // já achou uma chave que respondeu (com sucesso ou erro real)
+      // todas as chaves vieram 429/503 nessa rodada — só vale tentar de novo se sobrar rodada
     }
 
     if (!upstream.ok) {
@@ -143,6 +151,11 @@ export default async function handler(req, res) {
         friendly = waitS
           ? `Limite de uso da IA no momento (${API_KEYS.length} chave${API_KEYS.length > 1 ? 's' : ''} configurada${API_KEYS.length > 1 ? 's' : ''}, todas ocupadas) — espere cerca de ${waitS}s e tente de novo.`
           : 'Limite de uso da IA no momento — espere cerca de 1 minuto e tente de novo.';
+      } else if (upstream.status === 503 || /high demand|overloaded|sobrecarregad/i.test(msg)) {
+        // Sobrecarga momentânea do modelo no Google — mesmo depois das
+        // tentativas automáticas. Mensagem clara em vez de "quota" (não é
+        // limite da nossa chave) pra não confundir com o aviso de cota.
+        friendly = 'O Gemini está com alta demanda no momento (fora do nosso controle) — espere cerca de 20s e tente gerar de novo.';
       }
       res.status(upstream.status).json({ error: friendly });
       return;
