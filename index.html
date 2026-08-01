@@ -1467,6 +1467,10 @@ body{
     <div class="panel-head"><div><div class="panel-title">🤝 Solicitação de Afilhado</div><div class="panel-note">Padrinhos reivindicam quem querem apadrinhar no Documento dos Padrinhos — decisão separada da aprovação do tester</div></div>
       <button class="btn btn-ghost btn-xs" onclick="gerarLinkDocumentoPadrinhos()">🔗 Link do Documento</button>
     </div>
+    <div class="field" style="margin-top:6px">
+      <label class="flabel">📢 Recado da Gestão (aparece pra todos os padrinhos)</label>
+      <textarea class="ftext" id="recado-padrinhos-text" placeholder="Escreva um aviso/recado que vai aparecer no topo do link dos padrinhos..." onblur="saveRecadoPadrinhos()"></textarea>
+    </div>
     <div id="afilhado-claims-content"></div>
   </div>
 

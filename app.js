@@ -148,6 +148,7 @@ function migrateState(s){
   if(!s.geradorCanal)s.geradorCanal='PRIVACY FREE';
   if(!s.geradorElite)s.geradorElite=[];
   if(!s.testerLogs)s.testerLogs={};
+  if(s.recadoPadrinhos==null)s.recadoPadrinhos='';
   if(!s.melhoras)s.melhoras=[];
   else{const wk=getWeekKey();s.melhoras=s.melhoras.filter(m=>!m.done||m.doneWeek===wk);}
   if(!s.melhoraHistory)s.melhoraHistory=[];
@@ -11507,7 +11508,22 @@ function renderReservas(){
    libera o botão "Avalie seu afiliado" pro padrinho no mesmo link);
    reprovar remove a solicitação; reservar guarda pra decidir depois.
    =========================================================== */
+// Recado da Gestão — texto livre que a gestora escreve aqui e aparece em
+// destaque no topo do link dos padrinhos, pra todos eles verem (tipo um
+// aviso/comunicado geral, sem precisar mandar mensagem um por um).
+function renderRecadoPadrinhos(){
+  const el=document.getElementById('recado-padrinhos-text');
+  if(el&&document.activeElement!==el)el.value=S.recadoPadrinhos||'';
+}
+function saveRecadoPadrinhos(){
+  const el=document.getElementById('recado-padrinhos-text');
+  if(!el)return;
+  S.recadoPadrinhos=el.value;
+  save();
+  toast('✅ Recado salvo — já aparece pros padrinhos');
+}
 function renderAfilhadoClaims(){
+  renderRecadoPadrinhos();
   const el=document.getElementById('afilhado-claims-content');
   if(!el)return;
   const claims=S.afilhadoClaims||[];
@@ -11555,8 +11571,11 @@ function setAfilhadoClaimDecision(claimId,decision){
       testerChatter.pendenteAprovacao=false; // sai do limbo — agora conta como Tester de verdade
       // Espelha no próprio chatter (mesmo motivo do testerDecision acima):
       // tarefas-novato.html só recebe o array de chatters, nunca a ficha —
-      // é assim que ela sabe se mostra a mensagem de "sem padrinho" no fim do ciclo.
+      // é assim que ela sabe se mostra a mensagem de "sem padrinho" no fim do ciclo,
+      // e também consegue citar o nome do padrinho na mensagem pós-cadastro PJ.
       testerChatter.temPadrinho=true;
+      const padrinhoChatter=S.chatters.find(ch=>ch.id===cl.padrinhoId);
+      testerChatter.padrinhoNome=padrinhoChatter?padrinhoChatter.name:(cl.padrinhoNome||'');
     }
     // aprovado: sai do quadro de solicitações (mesmo comportamento de reprovado)
     S.afilhadoClaims=S.afilhadoClaims.filter(c=>c.id!==claimId);
@@ -11884,7 +11903,11 @@ function setPadrinhoResponsavel(cid,padrinhoId){
   if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
   S.chatterFichas[cid].padrinhoId=padrinhoId||'';
   const c=S.chatters.find(ch=>ch.id===cid);
-  if(c)c.temPadrinho=!!padrinhoId;
+  if(c){
+    c.temPadrinho=!!padrinhoId;
+    const padrinhoChatter=padrinhoId?S.chatters.find(ch=>ch.id===padrinhoId):null;
+    c.padrinhoNome=padrinhoChatter?padrinhoChatter.name:'';
+  }
   save();
   renderTesterDetail(cid);
 }
@@ -12527,6 +12550,7 @@ function aplicarDeserdarPendente(docId,data){
     }
     ficha.padrinhoId='';
     c.temPadrinho=false;
+    c.padrinhoNome='';
     save();
     toast(`💔 ${data.padrinhoNome||'Um padrinho'} deserdou "${c.name}" — volta pra lista de quem ainda não tem padrinho.`);
     if(currentViewName()==='testers')renderTesters();

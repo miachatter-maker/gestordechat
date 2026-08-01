@@ -614,7 +614,11 @@ window.enviarDadosPJ=async function(){
       trelloEmail:val('trelloEmail'),telegramNumero:val('telegramNumero'),telegramNome:val('telegramNome'),
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
-    document.getElementById('tester-days').innerHTML='<div class="card" style="text-align:center"><div class="emoji" style="font-size:30px;margin-bottom:8px">✅</div>Dados enviados! A gestora já pode ver tudo.</div>';
+    const padrinhoNome=tester.padrinhoNome||'seu padrinho';
+    document.getElementById('tester-days').innerHTML=`<div class="card" style="text-align:center">
+      <div class="emoji" style="font-size:30px;margin-bottom:8px">🎉</div>
+      <div style="font-size:14.5px;line-height:1.6">Você agora é um chatter teste, está bem pertinho de entrar pro time. Entraremos em contato para alinhar horários disponíveis para você iniciar. Seu padrinho é <strong>${padrinhoNome}</strong> e ele vai te auxiliar em todo o processo. Boa sorte!</div>
+    </div>`;
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
