@@ -316,13 +316,28 @@ function renderAll(){
     return;
   }
   if(selTesterId&&!testers.some(t=>t.id===selTesterId))selTesterId='';
+  const testerAtual=selTesterId?testers.find(t=>t.id===selTesterId):null;
+  if(testerAtual){
+    // A pedido da gestora: assim que a pessoa já tem nome cadastrado (guardado
+    // neste navegador), some a opção de selecionar/cadastrar nome de novo — a
+    // página já carrega direto no nome dela, pra evitar cadastro duplicado.
+    content.innerHTML=`
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div style="font-size:14.5px;font-weight:800">👤 ${testerAtual.name}</div>
+        <a href="javascript:void(0)" onclick="trocarTester()" style="font-size:11px;color:var(--text3);font-weight:700;white-space:nowrap">Não é você? trocar</a>
+      </div>
+      <div id="tester-days"></div>
+    `;
+    subscribeMyTarefas(selTesterId);
+    return;
+  }
   content.innerHTML=`
     <div class="card">
       <div class="field" style="margin-bottom:0">
         <label class="flabel">Selecione seu nome</label>
         <select class="fselect" id="tester-select" onchange="onTesterChange(this.value)">
           <option value="">— selecionar —</option>
-          ${testers.map(t=>`<option value="${t.id}" ${selTesterId===t.id?'selected':''}>${t.name}</option>`).join('')}
+          ${testers.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -332,6 +347,12 @@ function renderAll(){
   attachAutoinclusaoHandlers();
   if(selTesterId)subscribeMyTarefas(selTesterId);
 }
+window.trocarTester=function(){
+  if(unsubMyTarefas){unsubMyTarefas();unsubMyTarefas=null;}
+  localStorage.removeItem('tn_testerId');
+  selTesterId='';
+  renderAll();
+};
 function autoinclusaoHtml(){
   return`<div class="card" id="autoinclusao-card">
     <div style="font-size:12.5px;color:var(--text3)">Não achei meu nome na lista?</div>
@@ -477,7 +498,7 @@ function renderTesterDays(testerId){
     return;
   }
   const ciclo=getCicloAtual();
-  el.innerHTML=meusDadosHtml()+ciclo.dias.map(d=>{
+  el.innerHTML=meusDadosHtml(tester)+ciclo.dias.map(d=>{
     const status=getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
     const tarefas=getMinhasTarefas();
     const reg=tarefas[ciclo.fridayKey]&&tarefas[ciclo.fridayKey]['dia'+d.dia];
@@ -485,7 +506,9 @@ function renderTesterDays(testerId){
     let bodyHtml='';
     if(status==='enviado'){
       bodyHtml=`<div class="done-box"><div class="emoji">✅</div>Tarefa enviada em ${new Date(reg.enviadoEm).toLocaleString('pt-BR')}.</div>
-        ${reg.ppmImage?`<img class="ppm-img" src="${reg.ppmImage}" onclick="openLightbox(this.src)">`:''}`;
+        ${reg.ppmImage?`<img class="ppm-img" src="${reg.ppmImage}" onclick="openLightbox(this.src)">`:''}
+        <a href="javascript:void(0)" onclick="mostrarEdicaoTarefa(${d.dia},'${ciclo.fridayKey}')" id="edit-link-${d.dia}" style="display:block;text-align:center;margin-top:8px;font-size:12.5px;font-weight:700;color:var(--accent-strong)">✏️ Editar essa tarefa</a>
+        ${editFormHtml(d.dia,ciclo.fridayKey,reg)}`;
     }else if(status==='bloqueado'){
       const chave=ciclo.fridayKey+'_'+d.dia;
       const jaPediu=segundaChancePedida.has(chave);
@@ -532,6 +555,108 @@ function renderTesterDays(testerId){
     </div>`;
   }).join('')+`<div class="warn-box">⚠️ Envie todas as tarefas até às 00h de cada dia — o envio é obrigatório e faz parte dos critérios de eliminação.</div>`;
 }
+// ---------- Edição de tarefa já enviada ----------
+// A pedido da gestora: depois de enviada, a pessoa pode corrigir o texto ou
+// trocar o print. Usa o MESMO id de documento da tarefa original (em vez de
+// criar um novo com .add()) — ao salvar a edição, o documento é totalmente
+// sobrescrito (.set, não .update), então o print antigo nunca fica guardado
+// em lugar nenhum (nem aqui, nem na fatia central da gestora, que também
+// sobrescreve o dia inteiro ao processar). Sem isso o sistema ia acumular um
+// print morto por edição — o que a gestora pediu pra evitar.
+const pendingEditImages={};
+function tarefaDocId(testerId,fridayKey,diaN){return'tnp_'+testerId+'_'+fridayKey+'_'+diaN;}
+function editFormHtml(diaN,fridayKey,reg){
+  const campos=TAREFAS_DIA[diaN].campos;
+  return`<div id="edit-form-${diaN}" style="display:none;margin-top:10px;border-top:1px dashed var(--line-strong);padding-top:10px">
+    ${campos.map(c=>`
+      <div class="field">
+        <label class="flabel">${c.label}</label>
+        <textarea class="ftext" id="edit-${c.id}-${diaN}">${(reg&&reg[c.id])||''}</textarea>
+      </div>
+    `).join('')}
+    <div class="field">
+      <label class="flabel">📎 Print do resultado do PPM</label>
+      <div class="pastezone filled" id="edit-pastezone-${diaN}" tabindex="0" onpaste="handlePastePPMEdit(event,${diaN})">
+        ${reg&&reg.ppmImage?`<img src="${reg.ppmImage}">`:''}
+        <div style="margin-top:6px;font-weight:700;color:var(--ok)">Print atual — clique aqui e cole (Ctrl+V) pra trocar</div>
+      </div>
+      <div class="or-sep">ou</div>
+      <input type="file" accept="image/*" id="edit-ppm-file-${diaN}" class="finput" style="padding:8px" onchange="handleFilePPMEdit(event,${diaN})">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" id="btn-salvar-edit-${diaN}" onclick="salvarEdicaoTarefa(${diaN},'${fridayKey}')">💾 Salvar edição</button>
+      <button class="btn" style="background:var(--bg-soft);color:var(--text2)" onclick="document.getElementById('edit-form-${diaN}').style.display='none'">Cancelar</button>
+    </div>
+  </div>`;
+}
+window.mostrarEdicaoTarefa=function(diaN,fridayKey){
+  const f=document.getElementById('edit-form-'+diaN);
+  const link=document.getElementById('edit-link-'+diaN);
+  if(!f)return;
+  const tarefas=getMinhasTarefas();
+  const reg=tarefas[fridayKey]&&tarefas[fridayKey]['dia'+diaN];
+  pendingEditImages[diaN]=(reg&&reg.ppmImage)||'';
+  f.style.display='block';
+  if(link)link.style.display='none';
+};
+window.handlePastePPMEdit=async function(e,diaN){
+  e.preventDefault();
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  let file=null;
+  for(const it of items){if(it.kind==='file'&&it.type&&it.type.startsWith('image/')){file=it.getAsFile();break;}}
+  if(!file){alert('Não encontrei nenhuma imagem colada — copie o print (Ctrl+C / botão direito → copiar imagem) e cole aqui de novo (Ctrl+V).');return;}
+  await setPendingEditPPM(diaN,file);
+};
+window.handleFilePPMEdit=async function(e,diaN){
+  const file=e.target.files&&e.target.files[0];
+  if(!file)return;
+  await setPendingEditPPM(diaN,file);
+};
+async function setPendingEditPPM(diaN,file){
+  try{
+    const dataUrl=await fileToCompressedDataUrl(file);
+    pendingEditImages[diaN]=dataUrl;
+    const zone=document.getElementById('edit-pastezone-'+diaN);
+    if(zone){
+      zone.innerHTML=`<img src="${dataUrl}"><div style="margin-top:6px;font-weight:700;color:var(--ok)">✅ Novo print anexado — clique aqui pra trocar de novo</div>`;
+    }
+  }catch(err){
+    console.error(err);
+    alert('Não consegui processar essa imagem, tente outra.');
+  }
+}
+window.salvarEdicaoTarefa=async function(diaN,fridayKey){
+  const testerId=selTesterId;
+  if(!testerId)return;
+  const tester=chatters.find(c=>c.id===testerId);
+  if(!tester)return;
+  const resumo=(document.getElementById('edit-resumo-'+diaN)?.value||'').trim();
+  if(!resumo){alert('O resumo não pode ficar vazio.');return;}
+  const ppmImage=pendingEditImages[diaN];
+  if(!ppmImage){alert('Anexe (ou mantenha) o print do resultado do PPM antes de salvar.');return;}
+  const btn=document.getElementById('btn-salvar-edit-'+diaN);
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+  try{
+    const payload={
+      type:'tarefaNovatoPendente',processado:false,
+      testerId,testerNome:tester.name,
+      fridayKey,dia:diaN,
+      resumo,ppmImage,
+      editadoEm:firebase.firestore.FieldValue.serverTimestamp(),
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if(diaN===1)payload.disponibilidade=(document.getElementById('edit-disponibilidade-'+diaN)?.value||'').trim();
+    if(diaN===2)payload.cincoNotadas=(document.getElementById('edit-cincoNotadas-'+diaN)?.value||'').trim();
+    await fbDb.collection('gestorpro').doc(tarefaDocId(testerId,fridayKey,diaN)).set(payload);
+    delete pendingEditImages[diaN];
+    const f=document.getElementById('edit-form-'+diaN);
+    if(f)f.style.display='none';
+  }catch(e){
+    console.error(e);
+    alert('Erro ao salvar edição: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='💾 Salvar edição';}
+  }
+};
 window.mostrarFormSegundaChance=function(diaN,fridayKey){
   const f=document.getElementById('sc-form-'+diaN);
   if(f)f.style.display='block';
@@ -554,16 +679,15 @@ window.enviarSegundaChance=async function(diaN,fridayKey){
     alert('Erro ao enviar: '+e.message);
   }
 };
-function meusDadosHtml(){
-  return`<div class="card">
-    <a href="javascript:void(0)" id="meus-dados-link" onclick="document.getElementById('meus-dados-form').style.display='block';this.style.display='none'" style="font-size:13px;font-weight:700;color:var(--accent-strong)">📋 Preencher meus dados (cidade, sobre você, pretensão salarial)</a>
-    <div id="meus-dados-msg" style="display:none;font-size:13px;font-weight:600;color:var(--ok,#177350)">✅ Dados enviados, obrigada!</div>
-    <div id="meus-dados-form" style="display:none;margin-top:10px">
-      <div class="field"><label class="flabel">Cidade</label><input class="finput" id="md-cidade"></div>
-      <div class="field"><label class="flabel">Se seu futuro padrinho pudesse te conhecer melhor e saber o que você procura no trabalho, o que você contaria para ele? *</label><textarea class="ftext" id="md-sobre-voce" placeholder="Conte um pouco sobre você e o que procura..."></textarea></div>
-      <div class="field"><label class="flabel">Pretensão salarial</label><input class="finput" id="md-pretensao"></div>
-      <button class="btn btn-primary" id="md-salvar-btn" onclick="enviarMeusDados()">Salvar meus dados</button>
+function meusDadosHtml(tester){
+  // Já preencheu antes (confirmado no servidor) — não pede de novo.
+  if(tester&&tester.dadosAutoInformados&&tester.dadosAutoInformados.sobreVoce)return'';
+  return`<div class="card" id="meus-dados-card">
+    <div class="field" style="margin-bottom:8px">
+      <label class="flabel">Se seu futuro padrinho pudesse te conhecer melhor e saber o que você procura com o trabalho, o que você contaria para ele? *</label>
+      <textarea class="ftext" id="md-sobre-voce" placeholder="Conte um pouco sobre você e o que procura..."></textarea>
     </div>
+    <button class="btn btn-primary" id="md-salvar-btn" onclick="enviarMeusDados()">Salvar</button>
   </div>`;
 }
 window.enviarMeusDados=async function(){
@@ -577,24 +701,22 @@ window.enviarMeusDados=async function(){
     await fbDb.collection('gestorpro').add({
       type:'testerDadosPendente',processado:false,
       testerId:tester.id,
-      cidade:(document.getElementById('md-cidade')?.value||'').trim(),
       sobreVoce,
-      pretensaoSalarial:(document.getElementById('md-pretensao')?.value||'').trim(),
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
-    // Minimiza o form sozinho depois de salvar (a pedido da gestora) — em vez
-    // de só alertar e deixar o form aberto, esconde o form e mostra uma
-    // confirmação simpática no lugar do link.
-    const form=document.getElementById('meus-dados-form');
-    const link=document.getElementById('meus-dados-link');
-    const msg=document.getElementById('meus-dados-msg');
-    if(form)form.style.display='none';
-    if(link)link.style.display='none';
-    if(msg)msg.style.display='block';
+    // Some o form e mostra a mensagem pedida pela gestora no lugar dele.
+    const card=document.getElementById('meus-dados-card');
+    if(card){
+      const padrinhoNome=tester.padrinhoNome||'seu padrinho';
+      card.innerHTML=`<div style="text-align:center">
+        <div style="font-size:26px;margin-bottom:6px">🎉</div>
+        <div style="font-size:14px;line-height:1.6">Você agora é um chatter teste, está bem pertinho de entrar pro time. Entraremos em contato para alinhar horários disponíveis para você iniciar. Seu padrinho é <strong>${padrinhoNome}</strong> e ele vai te auxiliar em todo o processo. Boa sorte!</div>
+      </div>`;
+    }
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
-    if(btn){btn.disabled=false;btn.textContent='Salvar meus dados';}
+    if(btn){btn.disabled=false;btn.textContent='Salvar';}
   }
 };
 window.enviarDadosPJ=async function(){
@@ -650,7 +772,7 @@ window.enviarTarefaDia=async function(diaN){
     };
     if(diaN===1)payload.disponibilidade=(document.getElementById('campo-disponibilidade-1')?.value||'').trim();
     if(diaN===2)payload.cincoNotadas=(document.getElementById('campo-cincoNotadas-2')?.value||'').trim();
-    await fbDb.collection('gestorpro').add(payload);
+    await fbDb.collection('gestorpro').doc(tarefaDocId(testerId,ciclo.fridayKey,diaN)).set(payload);
     delete pendingImages[diaN];
   }catch(e){
     console.error(e);
