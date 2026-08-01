@@ -1484,11 +1484,12 @@ function renderWeeklyRanking(){
     const htTotal=getChatterWeekHighTicket(c.id,weekOffset).htTotal;
     // Whales criados essa semana, segundo o diagnóstico do ChatLab (tags.sinalDeWhale).
     const whaleCount=calcMetricasSemana(coletarAnalisesDaSemana(c.id,weekOffset)).whaleCount||0;
-    // Melhor conexão da semana, segundo a nota de Conexão (0-10) que o
-    // ChatLab dá em cada análise de conversa — pedido da gestora pro
-    // ranking semanal.
-    const conexaoAnalises=coletarAnalisesDaSemana(c.id,weekOffset).filter(a=>a.conexao!=null);
-    const avgConexao=conexaoAnalises.length?Math.round(conexaoAnalises.reduce((s,a)=>s+(a.conexao||0),0)/conexaoAnalises.length*10)/10:0;
+    // Melhor conexão da semana — nota de "Conexão Emocional" (0-10) que já
+    // fica no Dashboard de cada análise do ChatLab (mesma fonte usada na
+    // aba Métricas via getChatLabCategoryAverages/parseChatLabDashboard,
+    // lendo o texto salvo — nenhuma chamada nova de IA).
+    const conexaoAvg=getChatLabCategoryAverages(coletarAnalisesDaSemana(c.id,weekOffset)).conexao;
+    const avgConexao=conexaoAvg!=null?Math.round(conexaoAvg*10)/10:0;
     return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal,whaleCount,avgConexao};
   });
   // Produto mais vendido da semana (time inteiro): tally por tipo de high
@@ -1758,12 +1759,12 @@ function getWeekAvailableWindows(){
 function timeToMin(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+(m||0);}
 function minToTimeLabel(m){if(m>=1440)return'24:00';m=((m%1440)+1440)%1440;const h=Math.floor(m/60),mm=m%60;return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0');}
 function getModelCoverageGaps(){
-  // A pedido da gestora: só mostra buracos da escala dos PRÓXIMOS 2 dias,
-  // rolando dia a dia — ex: hoje domingo mostra segunda+terça; virou
-  // segunda, os buracos de segunda somem e mostra terça+quarta. Antes
+  // A pedido da gestora: só mostra buracos da escala de HOJE e AMANHÃ,
+  // rolando dia a dia — ex: hoje sábado mostra sábado+domingo; virou
+  // domingo, os buracos de sábado somem e mostra domingo+segunda. Antes
   // mostrava a semana inteira, o que ficava longo demais pra decidir.
   const hoje=new Date();
-  const wd=[1,2].map(n=>new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+n));
+  const wd=[0,1].map(n=>new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+n));
   const gaps=[];
   wd.forEach(day=>{
     const dayKey=DAY_KEYS[day.getDay()];
@@ -7094,24 +7095,31 @@ async function gerarMapeamentoBatch(){
     window._mapBatchLastErrMsg=null;window._mapBatchLastErrQuota=false;window._mapBatchLastErrWait=null;
   }
 }
+let mapeamentoNovosOpenBatches=null;
 function renderMapeamentoNovosPool(){
   const el=document.getElementById('map-novos-list');
   if(!el)return;
+  if(!mapeamentoNovosOpenBatches)mapeamentoNovosOpenBatches=new Set();
   const batches=[...S.mapeamentoBatches].reverse();
   if(!batches.length){el.innerHTML='<div style="color:var(--text3);font-size:12.5px">Nenhum mapeamento gerado ainda — grave em Mapeamento e clique em Gerar Mapeamento em Transcrições.</div>';return;}
   el.innerHTML=batches.map(b=>{
     const dateBR=b.date.split('-').reverse().join('/');
     const top=[...b.results].sort((a,b2)=>(b2.pontuacaoGeral||0)-(a.pontuacaoGeral||0))[0];
     const riscoCount=b.results.filter(r=>r.riscoDetectado).length;
+    // Guarda se o card estava aberto antes de re-renderizar — sem isso, toda
+    // vez que a gestora vincula um mapeamento a um tester (o que chama essa
+    // função de novo), o card fechava sozinho e dava a impressão de que o
+    // mapeamento tinha sumido.
+    const isOpen=mapeamentoNovosOpenBatches.has(b.id);
     return`<div style="border:1px solid var(--line);border-radius:9px;margin-bottom:9px;overflow:hidden">
       <div style="padding:11px 13px;background:var(--bg-soft);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleMapeamentoNovosBatch('${b.id}')">
         <div>
           <div style="font-size:13px;font-weight:700">${dateBR} · ${b.results.length} pessoa${b.results.length>1?'s':''}</div>
           <div style="font-size:11px;color:var(--text3)">${top?`🌟 destaque: ${top.nome}`:''}${riscoCount?` · ⚠️ ${riscoCount} com risco`:''}</div>
         </div>
-        <span style="font-size:10px;color:var(--text3)" id="map-novos-ic-${b.id}">▼</span>
+        <span style="font-size:10px;color:var(--text3)" id="map-novos-ic-${b.id}">${isOpen?'▲':'▼'}</span>
       </div>
-      <div id="map-novos-body-${b.id}" style="display:none;padding:12px">
+      <div id="map-novos-body-${b.id}" style="display:${isOpen?'block':'none'};padding:12px">
         ${[...b.results].sort((a,c)=>(c.pontuacaoGeral||0)-(a.pontuacaoGeral||0)).map((r,idx)=>{
           const isTopPick=idx<3&&!r.riscoDetectado&&(r.pontuacaoGeral||0)>=60;
           const recColor=r.recomendacao==='forte candidato'?'var(--ok)':r.recomendacao==='candidato razoável'?'var(--warn)':'var(--bad)';
@@ -7153,9 +7161,11 @@ function renderMapeamentoNovosPool(){
   }).join('');
 }
 function toggleMapeamentoNovosBatch(id){
+  if(!mapeamentoNovosOpenBatches)mapeamentoNovosOpenBatches=new Set();
   const b=document.getElementById('map-novos-body-'+id),ic=document.getElementById('map-novos-ic-'+id);
   if(!b)return;
   const open=b.style.display!=='none';
+  if(open)mapeamentoNovosOpenBatches.delete(id);else mapeamentoNovosOpenBatches.add(id);
   b.style.display=open?'none':'block';
   if(ic)ic.textContent=open?'▼':'▲';
 }
@@ -13118,11 +13128,26 @@ function parseChatLabDashboard(raw){
   const scores={};
   const dashM=raw.match(/##\s*📊?\s*Dashboard[\s\S]*?(?=\n##\s|$)/i);
   const section=dashM?dashM[0]:raw;
-  const lineRe=/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ /]{2,40}?)\s*[:|]\s*\**(\d{1,2})\s*\/\s*10/g;
   let m;
-  while((m=lineRe.exec(section))){
+  // Formato atual da IA: tabela markdown dentro do Dashboard —
+  // "| Conexão Emocional (Peso 15%) | 6.5 |" (sem "/10" na tabela, só o
+  // número puro na 2ª coluna). Esse era o formato real e o parser antigo
+  // nunca reconhecia isso, por isso as médias (inclusive Conexão no
+  // ranking semanal) sempre saíam vazias mesmo com Dashboard presente.
+  const tableRe=/\|\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ /]{2,50}?)(?:\s*\([^)]*\))?\s*\|\s*(\d{1,2}(?:[.,]\d+)?)\s*\|/g;
+  while((m=tableRe.exec(section))){
     const nome=m[1].trim();
-    const nota=parseInt(m[2],10);
+    const nota=parseFloat(String(m[2]).replace(',','.'));
+    if(isNaN(nota)||nota<0||nota>10)continue;
+    const cat=CHATLAB_CATEGORIAS.find(c=>c.match.test(nome));
+    if(cat&&scores[cat.key]==null)scores[cat.key]=nota;
+  }
+  // Reserva: formato em prosa "Nome: NN/10" (relatórios antigos, ou texto
+  // fora da tabela do Dashboard) — só preenche quem não veio da tabela.
+  const lineRe=/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ /]{2,40}?)\s*[:|]\s*\**(\d{1,2}(?:[.,]\d+)?)\s*\/\s*10/g;
+  while((m=lineRe.exec(raw))){
+    const nome=m[1].trim();
+    const nota=parseFloat(String(m[2]).replace(',','.'));
     if(isNaN(nota)||nota<0||nota>10)continue;
     const cat=CHATLAB_CATEGORIAS.find(c=>c.match.test(nome));
     if(cat&&scores[cat.key]==null)scores[cat.key]=nota;
