@@ -230,10 +230,26 @@ function getMergedClaimForTester(testerId){
   if(raws.length)return{testerId,testerNome:raws[0].testerNome,padrinhoId:raws[0].padrinhoId,padrinhoNome:raws[0].padrinhoNome,status:'pendente'};
   return null;
 }
-function getMapeamentoInfo(nome){
-  let found=null;
-  [...mapeamentoBatches].forEach(b=>(b.results||[]).forEach(r=>{if(normNome(r.nome)===normNome(nome))found=r;}));
-  return found;
+function getMapeamentoInfo(testerId,nome){
+  // Casa primeiro pelo ID do tester (mais confiável — evita mostrar o
+  // mapeamento da pessoa errada quando há nomes repetidos/duplicados),
+  // e só cai pro nome como reserva pra entradas antigas que ainda não
+  // tinham esse vínculo salvo.
+  let byId=null,byName=null;
+  [...mapeamentoBatches].forEach(b=>(b.results||[]).forEach(r=>{
+    if(testerId&&r.chatterId===testerId)byId=r;
+    else if(!byName&&normNome(r.nome)===normNome(nome))byName=r;
+  }));
+  return byId||byName;
+}
+function hasAnyTarefaEnviada(testerId){
+  // Verifica em TODOS os ciclos (não só o atual) se essa pessoa já
+  // enviou alguma tarefa — usado pra só liberar a exclusão de nomes que
+  // realmente nunca fizeram nada, nunca de quem já participou.
+  const base=tarefasNovatoLive[testerId]||{};
+  const temNaFatia=Object.keys(base).some(fk=>Object.keys(base[fk]||{}).some(k=>base[fk][k]&&base[fk][k].enviadoEm));
+  if(temNaFatia)return true;
+  return rawTarefaDocs.some(d=>d.testerId===testerId);
 }
 
 /* ---------- render ---------- */
@@ -276,8 +292,9 @@ function renderDocumentoPadrinhos(testers){
   if(!testers.length){el.innerHTML='<div class="warn-box">Nenhum tester ativo no momento.</div>';return;}
   const ciclo=getCicloAtual();
   el.innerHTML=testers.map(t=>{
-    const map=getMapeamentoInfo(t.name);
+    const map=getMapeamentoInfo(t.id,t.name);
     const claim=getMergedClaimForTester(t.id);
+    const podeExcluir=!t.testerDecision&&!hasAnyTarefaEnviada(t.id);
     const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
     const isMine=selPadrinhoId&&padrinhoId===selPadrinhoId;
     const badges=ciclo.dias.map(d=>{
@@ -327,6 +344,7 @@ function renderDocumentoPadrinhos(testers){
         }).join('')}
         ${segundaChanceHtml(t.id)}
         ${claimBoxHtml}
+        ${podeExcluir?`<button class="btn" style="margin-top:10px;background:var(--bad-soft);color:var(--bad)" onclick="event.stopPropagation();excluirNomeDuplicado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🗑️ Excluir esse nome (duplicado, nunca enviou tarefa)</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -355,6 +373,28 @@ window.decidirSegundaChance=async function(testerId,fridayKey,dia,decisao){
   }catch(e){
     console.error(e);
     alert('Erro ao enviar decisão: '+e.message);
+  }
+};
+window.excluirNomeDuplicado=async function(testerId,testerNome){
+  // Só chega até aqui um botão que já checou (podeExcluir) que essa pessoa
+  // nunca teve decisão nem tarefa enviada. Mesmo assim, quem realmente
+  // executa a exclusão é o app principal (aplicarExclusaoTesterPendente),
+  // que confere tudo de novo antes de apagar — pedido da gestora pra nunca
+  // arriscar apagar algo real por engano.
+  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
+  if(!confirm(`Excluir "${testerNome}"? Use só pra nomes duplicados que nunca enviaram nenhuma tarefa — isso será checado de novo antes de apagar de verdade.`))return;
+  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'excluirTesterPendente',processado:false,
+      testerId,testerNome,
+      padrinhoId:selPadrinhoId,padrinhoNome:padrinho?padrinho.name:'',
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('Pedido enviado — some da lista em instantes se realmente não tiver nenhuma tarefa registrada.');
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
   }
 };
 window.reivindicarAfilhado=async function(testerId,testerNome){

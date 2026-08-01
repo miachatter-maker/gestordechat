@@ -486,6 +486,7 @@ function initFirebase(){
     listenToDadosPjPendentes();
     listenToSegundaChancePendentes();
     listenToSegundaChanceDecisoesPendentes();
+    listenToExclusoesTesterPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -7117,7 +7118,7 @@ function renderMapeamentoNovosPool(){
             ${r.riscoDetectado?`<div style="font-size:12.5px;color:var(--bad);font-weight:700;margin-top:6px">⚠️ RISCO: ${r.motivoRisco||''}</div>`:''}
             <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">${r.resumo||''}</div>
             <div style="display:flex;gap:8px;margin-top:9px">
-              <button class="btn btn-primary btn-xs" style="flex:1" onclick="criarTesterDoMapeamentoNovo('${r.nome.replace(/'/g,"\\'")}')">➕ Criar tester com esse nome</button>
+              ${r.chatterId&&S.chatters.some(c=>c.id===r.chatterId)?`<button class="btn btn-ghost btn-xs" style="flex:1" disabled>✅ Já é tester</button>`:`<button class="btn btn-primary btn-xs" style="flex:1" onclick="criarTesterDoMapeamentoNovo('${b.id}','${r.id}','${r.nome.replace(/'/g,"\\'")}')">➕ Criar tester com esse nome</button>`}
               <button class="btn btn-ghost btn-xs" title="Eliminar esse candidato do mapeamento" onclick="event.stopPropagation();removerMapeamentoNovoResultado('${b.id}','${r.id}')" style="color:var(--bad);flex-shrink:0">✕</button>
             </div>
           </div>`;
@@ -7133,13 +7134,26 @@ function toggleMapeamentoNovosBatch(id){
   b.style.display=open?'none':'block';
   if(ic)ic.textContent=open?'▼':'▲';
 }
-function criarTesterDoMapeamentoNovo(nome){
+function criarTesterDoMapeamentoNovo(batchId,resultId,nome){
+  const batch=S.mapeamentoBatches.find(b=>b.id===batchId);
+  const r=batch&&(batch.results||[]).find(x=>x.id===resultId);
+  // Evita duplicar: se esse resultado do mapeamento já foi convertido antes
+  // (e o tester ainda existe), não cria um segundo chatter com o mesmo nome.
+  if(r&&r.chatterId&&S.chatters.some(c=>c.id===r.chatterId)){
+    toast('Esse candidato já virou tester.');
+    return;
+  }
   const chatterId='c'+Date.now();
   // Ainda não é Tester "oficial" — só aparece nas Tarefas (tarefas-novato.html,
   // que filtra por time==='tester') pra começar a fazer Sexta/Sábado/Domingo e
   // ser reivindicado por um padrinho. Só vira Tester de fato (aparece aqui em
   // Testers/Equipe) quando a gestora aprovar a solicitação de Afilhado.
   S.chatters.push({id:chatterId,name:nome||'Novo candidato',discord:'',level:'teste',time:'tester',pendenteAprovacao:true,notes:'',watchtime:'',createdAt:new Date().toISOString()});
+  // Alinha o mapeamento dos novos a essa pessoa por ID — casar só pelo nome
+  // falha quando existem nomes repetidos (2 pessoas com nome parecido, ou o
+  // mesmo nome gravado 2x), e é exatamente esse o cenário que gera
+  // desalinhamento no Documento dos Padrinhos.
+  if(r)r.chatterId=chatterId;
   save();
   toast('✅ '+(nome||'Candidato')+' adicionado às Tarefas — vira Tester quando o padrinho for aprovado!');
   renderTesters();
@@ -12317,6 +12331,62 @@ function aplicarSegundaChanceDecisaoPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar decisão de segunda chance como processada',e));
   }catch(e){
     console.error('Erro ao aplicar decisão de segunda chance pendente',e);
+  }
+}
+
+/* ===========================================================
+   EXCLUSÃO DE TESTER PELO LINK DOS PADRINHOS — pedido da gestora pra
+   os próprios padrinhos organizarem o site e apagarem nomes duplicados
+   que nunca chegaram a fazer nenhuma tarefa (sobras de autoinclusão
+   repetida). O link dos padrinhos nunca apaga nada sozinho: ele só
+   registra o PEDIDO (excluirTesterPendente) e é o app principal quem
+   decide se aplica — e só aplica se, de fato, essa pessoa nunca teve
+   nenhuma decisão (aprovado/reprovado/espera) nem nenhuma tarefa nem
+   registro real. Assim um padrinho nunca consegue apagar histórico de
+   verdade por engano ou clique errado — pedido explícito da gestora
+   pra tomar cuidado extremo aqui.
+   =========================================================== */
+function listenToExclusoesTesterPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','excluirTesterPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarExclusaoTesterPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir exclusões de tester pendentes',err);
+    });
+}
+function aplicarExclusaoTesterPendente(docId,data){
+  try{
+    const id=data.testerId;
+    const c=id?S.chatters.find(ch=>ch.id===id):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado (talvez já excluído)'});
+      return;
+    }
+    const temDecisao=!!c.testerDecision;
+    const tarefas=(S.tarefasNovatoPorTester&&S.tarefasNovatoPorTester[id])||{};
+    const temTarefaEnviada=Object.keys(tarefas).some(fk=>Object.keys(tarefas[fk]||{}).some(k=>tarefas[fk][k]&&tarefas[fk][k].enviadoEm));
+    const temLog=((S.testerLogs&&S.testerLogs[id])||[]).length>0;
+    if(temDecisao||temTarefaEnviada||temLog){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'bloqueado: já tem tarefa/decisão/registro real — não apaguei por segurança'});
+      toast(`⚠️ ${data.padrinhoNome||'Um padrinho'} tentou excluir "${c.name}" pelo link, mas já tem tarefa/decisão registrada — bloqueei por segurança.`);
+      return;
+    }
+    S.chatters=S.chatters.filter(ch=>ch.id!==id);
+    delete S.chatterFichas[id];
+    delete S.testerLogs[id];
+    if(S.tarefasNovatoPorTester)delete S.tarefasNovatoPorTester[id];
+    save();
+    toast(`🗑️ ${data.padrinhoNome||'Um padrinho'} removeu "${data.testerNome||c.name}" (nome duplicado, sem tarefa) pelo link dos padrinhos.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar exclusão de tester como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar exclusão de tester pendente',e);
   }
 }
 
