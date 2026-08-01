@@ -305,14 +305,23 @@ function renderDocumentoPadrinhos(testers){
     const open=expandedTester===t.id;
     const tarefas=getMergedTarefas(t.id)[ciclo.fridayKey]||{};
     const expColor=map?.experienciaProfissional==='boa'?'var(--ok)':map?.experienciaProfissional==='média'?'var(--warn)':'var(--bad)';
+    const ehDomingo=new Date().getDay()===0; // reivindicação só abre aos domingos, pedido da gestora
     const claimBoxHtml=(()=>{
       if(padrinhoId){
         const padrinhoAtual=chatters.find(c=>c.id===padrinhoId);
-        return`<div class="claimbox">👑 Padrinho aprovado: <strong>${padrinhoAtual?padrinhoAtual.name:'—'}</strong>${isMine?`<div style="margin-top:8px"><a class="btn btn-primary" style="text-decoration:none" href="avaliacao.html?id=${encodeURIComponent(t.id)}&nome=${encodeURIComponent(t.name)}">📜 Avalie seu afiliado</a></div>`:''}</div>`;
+        return`<div class="claimbox">👑 Padrinho aprovado: <strong>${padrinhoAtual?padrinhoAtual.name:'—'}</strong>
+          ${isMine?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+            <a class="btn btn-primary" style="text-decoration:none;flex:1;min-width:140px" href="avaliacao.html?id=${encodeURIComponent(t.id)}&nome=${encodeURIComponent(t.name)}">📜 Avalie seu afiliado</a>
+            <button class="btn" style="background:var(--bad-soft);color:var(--bad);flex:0 0 auto;padding:13px 14px" title="Liberar esse afilhado pra outro padrinho" onclick="deserdarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">💔 Deserdar</button>
+          </div>`:''}
+        </div>`;
       }
       if(claim){
         const meta={pendente:['⏳ Solicitação pendente de decisão da gestora','var(--warn)'],reservado:['🔵 Solicitação reservada pela gestora','var(--text2)']}[claim.status]||['⏳ Pendente','var(--warn)'];
         return`<div class="claimbox">👑 Reivindicado por: <strong>${claim.padrinhoNome}</strong><div style="margin-top:4px;color:${meta[1]};font-weight:700;font-size:11.5px">${meta[0]}</div></div>`;
+      }
+      if(!ehDomingo){
+        return`<div class="claimbox">Ninguém reivindicou esse tester ainda.<div style="margin-top:6px;color:var(--text3)">🗓️ Reivindicações só abrem aos domingos.</div></div>`;
       }
       return`<div class="claimbox">Ninguém reivindicou esse tester ainda.
         ${selPadrinhoId?`<button class="btn btn-primary" style="margin-top:8px" onclick="reivindicarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🙋 Quero apadrinhar</button>`:'<div style="margin-top:6px;color:var(--text3)">Selecione seu nome de padrinho acima pra poder reivindicar.</div>'}
@@ -392,6 +401,22 @@ window.excluirNomeDuplicado=async function(testerId,testerNome){
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
     alert('Pedido enviado — some da lista em instantes se realmente não tiver nenhuma tarefa registrada.');
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+  }
+};
+window.deserdarAfilhado=async function(testerId,testerNome){
+  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
+  if(!confirm(`Deserdar "${testerNome}"? Ele volta pra lista de quem ainda não tem padrinho, disponível pra qualquer padrinho reivindicar num próximo domingo.`))return;
+  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'deserdarPendente',processado:false,
+      testerId,testerNome,
+      padrinhoId:selPadrinhoId,padrinhoNome:padrinho?padrinho.name:'',
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);

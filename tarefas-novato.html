@@ -442,10 +442,26 @@ function renderTesterDays(testerId){
     </div>`;
     return;
   }
+  // Ciclo fechado (prazo do Domingo já passou) e ninguém apadrinhou essa
+  // pessoa ainda — a pedido da gestora, mostra o agradecimento e convite
+  // pra tentar de novo, em vez de deixar a tela de tarefas aberta pra
+  // sempre pra quem já não vai mais ser chamado desse ciclo.
+  if(tester&&!tester.testerDecision&&!tester.temPadrinho){
+    const cicloCheck=getCicloAtual();
+    const domingoInfo=cicloCheck.dias.find(d=>d.dia===3);
+    if(domingoInfo&&new Date()>=domingoInfo.prazo){
+      el.innerHTML=`<div class="card" style="text-align:center">
+        <div style="font-size:30px;margin-bottom:8px">🙏</div>
+        <div style="font-size:14.5px">Obrigada pela participação! Seus resultados ainda não foram suficiente para começo do teste, mas pode retornar e repetir quando quiser.</div>
+      </div>`;
+      return;
+    }
+  }
   if(tester&&tester.testerDecision==='aprovado'){
     el.innerHTML=`<div class="card">
       <div style="font-size:15px;font-weight:800;margin-bottom:6px">🎉 Parabéns, você foi aprovado!</div>
-      <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Agora preencha os dados. (Precisamos de CNPJ para ingressar no teste)</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:10px">Agora preencha os dados abaixo.</div>
+      <div class="error-box" style="font-weight:800;text-align:center">⚠️ NECESSÁRIO ABRIR CNPJ PARA PARTICIPAR DO TESTE</div>
       <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Dados para cada colaborador PJ</div>
       ${['razaoSocial::Razão Social','nickname::Nickname','cnpj::CNPJ','endereco::Endereço de sede','bairro::Bairro','cep::Cep','telefone::Telefone/Celular','email::E-mail','pix::Pix','bancoChave::Banco e chave'].map(p=>{
         const[id,label]=p.split('::');

@@ -1155,7 +1155,11 @@ body{
       <input class="finput" id="demandas2-text" placeholder="O que verificar..." style="flex:1" onkeydown="if(event.key==='Enter')addDemanda2()">
       <button class="btn btn-primary btn-sm" onclick="addDemanda2()">+</button>
     </div>
-    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:10px" onclick="incluirFinanceiroNaAgenda()">📅 Incluir na agenda de hoje</button>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="date" class="finput" id="demandas2-agenda-date" style="flex:0 0 auto;width:130px">
+      <input type="time" class="finput" id="demandas2-agenda-time" style="flex:0 0 auto;width:90px">
+    </div>
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="incluirFinanceiroNaAgenda()">📅 Incluir na agenda (data/hora acima, ou hoje se vazio)</button>
   </div>
 
   <!-- REQUISIÇÕES POR MODELO -->
@@ -1167,6 +1171,11 @@ body{
       <input class="finput" id="model-req-text" placeholder="Pedido..." style="flex:1">
       <button class="btn btn-primary btn-sm" onclick="addModelRequest()">+</button>
     </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="date" class="finput" id="modelreq-agenda-date" style="flex:0 0 auto;width:130px">
+      <input type="time" class="finput" id="modelreq-agenda-time" style="flex:0 0 auto;width:90px">
+    </div>
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="incluirModelRequestsNaAgenda()">📅 Incluir na agenda (data/hora acima, ou hoje se vazio)</button>
   </div>
 
   <!-- REQUISIÇÕES DE HORÁRIOS -->
@@ -1241,12 +1250,6 @@ body{
   <div class="view-title">Estratégia</div>
   <div style="font-size:12.5px;font-weight:600;color:var(--accent);font-style:italic;margin:-6px 0 14px">O que eu deveria fazer hoje?</div>
 
-  <!-- DIAGNÓSTICO DA EQUIPE -->
-  <div class="panel">
-    <div class="panel-head"><div><div class="panel-title">🩺 Diagnóstico da equipe</div><div class="panel-note">🟢 Em evolução · 🟡 Estagnado · 🔴 Em queda · ⚫ Alto risco de sair</div></div></div>
-    <div id="estrategia-diagnostico"></div>
-  </div>
-
   <!-- ESTRATÉGIAS DE LIDERANÇA -->
   <div class="panel">
     <div class="panel-head"><div class="panel-title">🧭 Estratégias de Liderança</div></div>
@@ -1305,6 +1308,12 @@ body{
         <button class="lid-addbtn" onclick="toggleLidAddForm('estrutural')">+ adicionar ação</button>
       </div>
     </div>
+  </div>
+
+  <!-- DIAGNÓSTICO DA EQUIPE (a pedido da gestora, agora abaixo de Estratégias de Liderança) -->
+  <div class="panel">
+    <div class="panel-head"><div><div class="panel-title">🩺 Diagnóstico da equipe</div><div class="panel-note">🟢 Em evolução · 🟡 Estagnado · 🔴 Em queda · ⚫ Alto risco de sair</div></div></div>
+    <div id="estrategia-diagnostico"></div>
   </div>
 
   <!-- Conselheiro Executivo removido desta aba a pedido da gestora (mantém
@@ -1461,11 +1470,8 @@ body{
     <div id="afilhado-claims-content"></div>
   </div>
 
-  <!-- SEGUNDA CHANCE + DADOS PJ — tudo que se passa com os padrinhos, visível pra gestora também -->
-  <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
-    <div class="panel-head"><div><div class="panel-title">🙏 Segunda Chance</div><div class="panel-note">Pedidos de justificativa por atraso — decididos pelo padrinho no Documento dos Padrinhos, mas visíveis aqui também</div></div></div>
-    <div id="segunda-chance-content"></div>
-  </div>
+  <!-- DADOS PJ — a gestora pede pra Segunda Chance ficar só com os padrinhos
+       decidindo no Documento dos Padrinhos, sem duplicar visibilidade aqui. -->
   <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
     <div class="panel-head"><div class="panel-title">📋 Dados de PJ recebidos</div></div>
     <div id="dados-pj-content"></div>

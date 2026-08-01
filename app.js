@@ -487,6 +487,7 @@ function initFirebase(){
     listenToSegundaChancePendentes();
     listenToSegundaChanceDecisoesPendentes();
     listenToExclusoesTesterPendentes();
+    listenToDeserdarPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -1483,7 +1484,12 @@ function renderWeeklyRanking(){
     const htTotal=getChatterWeekHighTicket(c.id,weekOffset).htTotal;
     // Whales criados essa semana, segundo o diagnóstico do ChatLab (tags.sinalDeWhale).
     const whaleCount=calcMetricasSemana(coletarAnalisesDaSemana(c.id,weekOffset)).whaleCount||0;
-    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal,whaleCount};
+    // Melhor conexão da semana, segundo a nota de Conexão (0-10) que o
+    // ChatLab dá em cada análise de conversa — pedido da gestora pro
+    // ranking semanal.
+    const conexaoAnalises=coletarAnalisesDaSemana(c.id,weekOffset).filter(a=>a.conexao!=null);
+    const avgConexao=conexaoAnalises.length?Math.round(conexaoAnalises.reduce((s,a)=>s+(a.conexao||0),0)/conexaoAnalises.length*10)/10:0;
+    return{c,avgTicket,avgVph,extraBonus,pct,vendasSum,melhora,prevPct,htTotal,whaleCount,avgConexao};
   });
   // Produto mais vendido da semana (time inteiro): tally por tipo de high
   // ticket (Personalizado/Foto/Vídeo/Mimo) detectado nos relatórios colados.
@@ -1531,6 +1537,7 @@ function renderWeeklyRanking(){
     {label:'🚀 Vende mais rápido',data:top('avgVph',v=>money(v)+'/h')},
     {label:'💎 Mais high ticket',data:top('htTotal',v=>money(v))},
     {label:'🐋 Criou mais whales',data:topWhales},
+    {label:'💞 Melhor conexão',data:top('avgConexao',v=>`${v}/10`)},
     {label:'🏆 Produto mais vendido',data:produtoMaisVendido},
     {label:'📈 Melhora da semana',data:topMelhora},
   ].filter(x=>x.data);
@@ -1751,7 +1758,12 @@ function getWeekAvailableWindows(){
 function timeToMin(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+(m||0);}
 function minToTimeLabel(m){if(m>=1440)return'24:00';m=((m%1440)+1440)%1440;const h=Math.floor(m/60),mm=m%60;return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0');}
 function getModelCoverageGaps(){
-  const wd=getWeekDates(0);
+  // A pedido da gestora: só mostra buracos da escala dos PRÓXIMOS 2 dias,
+  // rolando dia a dia — ex: hoje domingo mostra segunda+terça; virou
+  // segunda, os buracos de segunda somem e mostra terça+quarta. Antes
+  // mostrava a semana inteira, o que ficava longo demais pra decidir.
+  const hoje=new Date();
+  const wd=[1,2].map(n=>new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+n));
   const gaps=[];
   wd.forEach(day=>{
     const dayKey=DAY_KEYS[day.getDay()];
@@ -7117,8 +7129,21 @@ function renderMapeamentoNovosPool(){
             ${Array.isArray(r.motivadores)&&r.motivadores.length?`<div style="font-size:12px;color:var(--text2);margin-bottom:4px">🎯 Motivadores: ${r.motivadores.join(', ')}</div>`:''}
             ${r.riscoDetectado?`<div style="font-size:12.5px;color:var(--bad);font-weight:700;margin-top:6px">⚠️ RISCO: ${r.motivoRisco||''}</div>`:''}
             <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">${r.resumo||''}</div>
-            <div style="display:flex;gap:8px;margin-top:9px">
-              ${r.chatterId&&S.chatters.some(c=>c.id===r.chatterId)?`<button class="btn btn-ghost btn-xs" style="flex:1" disabled>✅ Já é tester</button>`:`<button class="btn btn-primary btn-xs" style="flex:1" onclick="criarTesterDoMapeamentoNovo('${b.id}','${r.id}','${r.nome.replace(/'/g,"\\'")}')">➕ Criar tester com esse nome</button>`}
+            <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
+              ${(()=>{
+                const linked=r.chatterId&&S.chatters.find(c=>c.id===r.chatterId);
+                if(linked)return`<div style="flex:1;font-size:12px;color:var(--ok);font-weight:700">✅ Vinculado a ${linked.name}</div>`;
+                // Lista os testers já existentes (inclusive quem se autoincluiu
+                // pelo link de tarefas) pra gestora escolher a quem esse
+                // mapeamento pertence de verdade, em vez de sempre criar um
+                // chatter novo (raiz de boa parte dos nomes duplicados).
+                const candidatos=S.chatters.filter(c=>c.time==='tester'||c.pendenteAprovacao).slice().sort((a,c2)=>(a.name||'').localeCompare(c2.name||''));
+                return`<select class="fselect" style="flex:1;font-size:12.5px;padding:8px" onchange="vincularMapeamentoNovo('${b.id}','${r.id}',this.value,'${r.nome.replace(/'/g,"\\'")}')">
+                  <option value="">— vincular a um tester —</option>
+                  ${candidatos.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+                  <option value="__novo__">➕ Criar tester novo com esse nome</option>
+                </select>`;
+              })()}
               <button class="btn btn-ghost btn-xs" title="Eliminar esse candidato do mapeamento" onclick="event.stopPropagation();removerMapeamentoNovoResultado('${b.id}','${r.id}')" style="color:var(--bad);flex-shrink:0">✕</button>
             </div>
           </div>`;
@@ -7157,6 +7182,21 @@ function criarTesterDoMapeamentoNovo(batchId,resultId,nome){
   save();
   toast('✅ '+(nome||'Candidato')+' adicionado às Tarefas — vira Tester quando o padrinho for aprovado!');
   renderTesters();
+}
+function vincularMapeamentoNovo(batchId,resultId,value,nomeFallback){
+  if(!value)return; // "— vincular a um tester —" selecionado, não faz nada
+  if(value==='__novo__'){
+    criarTesterDoMapeamentoNovo(batchId,resultId,nomeFallback);
+    return;
+  }
+  const batch=S.mapeamentoBatches.find(b=>b.id===batchId);
+  const r=batch&&(batch.results||[]).find(x=>x.id===resultId);
+  const c=S.chatters.find(ch=>ch.id===value);
+  if(!r||!c)return;
+  r.chatterId=value;
+  save();
+  toast(`🔗 Mapeamento vinculado a ${c.name} — já aparece pros padrinhos.`);
+  renderMapeamentoNovosPool();
 }
 function removerMapeamentoNovoResultado(batchId,resultId){
   const batch=S.mapeamentoBatches.find(b=>b.id===batchId);
@@ -7901,14 +7941,30 @@ function removeDemanda2(id){
   save();renderDemandas2();
 }
 // Botão único do quadro (em vez de data por item): joga um lembrete pronto
-// na Agenda de hoje pra gestora repassar as questões pendentes ao financeiro.
+// na Agenda pra gestora repassar as questões pendentes ao financeiro — pode
+// escolher data e horário nos campos ao lado, ou deixar vazio pra hoje.
 function incluirFinanceiroNaAgenda(){
-  const dk=todayKey();
+  const dateInput=document.getElementById('demandas2-agenda-date');
+  const timeInput=document.getElementById('demandas2-agenda-time');
+  const dk=(dateInput&&dateInput.value)||todayKey();
+  const time=(timeInput&&timeInput.value)||'';
   if(!S.dailyTasksByDay[dk])S.dailyTasksByDay[dk]=[];
-  S.dailyTasksByDay[dk].push({id:'tk'+Date.now()+Math.random().toString(36).slice(2,4),text:'Repassar questões pendentes ao setor financeiro',time:'',date:'',urgent:false,done:false});
+  S.dailyTasksByDay[dk].push({id:'tk'+Date.now()+Math.random().toString(36).slice(2,4),text:'Repassar questões pendentes ao setor financeiro',time,date:'',urgent:false,done:false});
   save();
   renderTaskBoards();
-  toast('✅ Adicionado na agenda de hoje');
+  toast(dk===todayKey()?'✅ Adicionado na agenda de hoje':`✅ Adicionado na agenda de ${dk.split('-').reverse().join('/')}`);
+}
+// Mesmo mecanismo, agora pro quadro de Requisições para modelos.
+function incluirModelRequestsNaAgenda(){
+  const dateInput=document.getElementById('modelreq-agenda-date');
+  const timeInput=document.getElementById('modelreq-agenda-time');
+  const dk=(dateInput&&dateInput.value)||todayKey();
+  const time=(timeInput&&timeInput.value)||'';
+  if(!S.dailyTasksByDay[dk])S.dailyTasksByDay[dk]=[];
+  S.dailyTasksByDay[dk].push({id:'tk'+Date.now()+Math.random().toString(36).slice(2,4),text:'Revisar requisições pendentes para os modelos',time,date:'',urgent:false,done:false});
+  save();
+  renderTaskBoards();
+  toast(dk===todayKey()?'✅ Adicionado na agenda de hoje':`✅ Adicionado na agenda de ${dk.split('-').reverse().join('/')}`);
 }
 
 /* ===========================================================
@@ -8304,7 +8360,9 @@ const SCORE_WORD={1:'Fraco',2:'Regular',3:'Bom',4:'Ótimo',5:'Excelente'};
    =========================================================== */
 const DAY_LABELS_FULL={dom:'Domingo',seg:'Segunda',ter:'Terça',qua:'Quarta',qui:'Quinta',sex:'Sexta',sab:'Sábado'};
 function getWeeklyAnalysisAssignment(){
-  const chatters=S.chatters.filter(c=>c.time!=='elite'&&!isChatterTerminated(c));
+  // A pedido da gestora: Análise de Hoje é só da equipe já contratada —
+  // testers (ainda em período de teste) não entram aqui.
+  const chatters=S.chatters.filter(c=>c.time!=='elite'&&c.time!=='tester'&&!isChatterTerminated(c));
   const byDay={};
   DAY_KEYS.forEach(dk=>byDay[dk]=[]);
   chatters.forEach((c,i)=>{byDay[DAY_KEYS[i%7]].push(c);});
@@ -11485,6 +11543,10 @@ function setAfilhadoClaimDecision(claimId,decision){
     if(testerChatter){
       testerChatter.time='tester'; // confirma/promove pra área de Tester
       testerChatter.pendenteAprovacao=false; // sai do limbo — agora conta como Tester de verdade
+      // Espelha no próprio chatter (mesmo motivo do testerDecision acima):
+      // tarefas-novato.html só recebe o array de chatters, nunca a ficha —
+      // é assim que ela sabe se mostra a mensagem de "sem padrinho" no fim do ciclo.
+      testerChatter.temPadrinho=true;
     }
     // aprovado: sai do quadro de solicitações (mesmo comportamento de reprovado)
     S.afilhadoClaims=S.afilhadoClaims.filter(c=>c.id!==claimId);
@@ -11526,6 +11588,15 @@ function renderSegundaChancePanel(){
     </div>`;
   }).join('');
 }
+function textoDadosPJ(c,d){
+  return[
+    `${c.name}`,
+    `Razão Social: ${d.razaoSocial||''}`,`Nickname: ${d.nickname||''}`,`CNPJ: ${d.cnpj||''}`,
+    `Endereço de sede: ${d.endereco||''}`,`Bairro: ${d.bairro||''}`,`Cep: ${d.cep||''}`,
+    `Telefone/Celular: ${d.telefone||''}`,`E-mail: ${d.email||''}`,`Pix: ${d.pix||''}`,`Banco e chave: ${d.bancoChave||''}`,
+    `Email do Trello: ${d.trelloEmail||''}`,`Número do Telegram: ${d.telegramNumero||''}`,`Nome no Telegram: ${d.telegramNome||''}`
+  ].join('\n');
+}
 function renderDadosPjPanel(){
   const el=document.getElementById('dados-pj-content');
   if(!el)return;
@@ -11534,7 +11605,10 @@ function renderDadosPjPanel(){
     el.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Nenhum dado de PJ recebido ainda — aparece aqui quando um tester aprovado preencher no link de tarefas.</div>';
     return;
   }
-  el.innerHTML=withData.map(c=>{
+  // Botão "copiar todos" — a pedido da gestora, pra colar tudo de uma vez em
+  // vez de ter que copiar pessoa por pessoa.
+  el.innerHTML=`<button class="btn btn-ghost btn-sm" style="margin-bottom:10px" onclick="copiarTodosDadosPJ()">📋 Copiar todos juntos</button>`+
+  withData.map(c=>{
     const d=S.chatterFichas[c.id].dadosPJ;
     const linhas=[
       ['Razão Social',d.razaoSocial],['Nickname',d.nickname],['CNPJ',d.cnpj],
@@ -11542,26 +11616,39 @@ function renderDadosPjPanel(){
       ['Telefone/Celular',d.telefone],['E-mail',d.email],['Pix',d.pix],['Banco e chave',d.bancoChave],
       ['Email do Trello',d.trelloEmail],['Número do Telegram',d.telegramNumero],['Nome no Telegram',d.telegramNome]
     ].filter(([,v])=>v);
-    return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
+    return`<div class="dadospj-swipe-row" data-key="${c.id}" style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div style="font-weight:700;font-size:13.5px">${c.name}</div>
         <button data-noaccordion onclick="copiarDadosPJ('${c.id}')" title="Copiar dados" style="background:none;border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:13px">📋</button>
       </div>
       ${linhas.map(([lb,v])=>`<div style="font-size:12px;color:var(--text2);margin-bottom:2px"><strong>${lb}:</strong> ${v}</div>`).join('')}
+      <div style="font-size:10.5px;color:var(--text3);margin-top:6px">⟵ arraste pra remover daqui</div>
     </div>`;
   }).join('');
+  attachSwipeToDelete(el,'.dadospj-swipe-row',id=>removerDadosPJ(id),renderDadosPjPanel);
 }
 function copiarDadosPJ(chatterId){
   const c=S.chatters.find(ch=>ch.id===chatterId);
   const d=S.chatterFichas?.[chatterId]?.dadosPJ;
   if(!c||!d){toast('⚠️ Sem dados pra copiar');return;}
-  const texto=[
-    `Razão Social: ${d.razaoSocial||''}`,`Nickname: ${d.nickname||''}`,`CNPJ: ${d.cnpj||''}`,
-    `Endereço de sede: ${d.endereco||''}`,`Bairro: ${d.bairro||''}`,`Cep: ${d.cep||''}`,
-    `Telefone/Celular: ${d.telefone||''}`,`E-mail: ${d.email||''}`,`Pix: ${d.pix||''}`,`Banco e chave: ${d.bancoChave||''}`,
-    `Email do Trello: ${d.trelloEmail||''}`,`Número do Telegram: ${d.telegramNumero||''}`,`Nome no Telegram: ${d.telegramNome||''}`
-  ].join('\n');
-  navigator.clipboard?.writeText(texto).then(()=>toast('✅ Dados copiados')).catch(()=>toast('⚠️ Não consegui copiar'));
+  navigator.clipboard?.writeText(textoDadosPJ(c,d)).then(()=>toast('✅ Dados copiados')).catch(()=>toast('⚠️ Não consegui copiar'));
+}
+function copiarTodosDadosPJ(){
+  const withData=S.chatters.filter(c=>S.chatterFichas?.[c.id]?.dadosPJ);
+  if(!withData.length){toast('⚠️ Sem dados pra copiar');return;}
+  const texto=withData.map(c=>textoDadosPJ(c,S.chatterFichas[c.id].dadosPJ)).join('\n\n———\n\n');
+  navigator.clipboard?.writeText(texto).then(()=>toast(`✅ Dados de ${withData.length} pessoa${withData.length>1?'s':''} copiados juntos`)).catch(()=>toast('⚠️ Não consegui copiar'));
+}
+function removerDadosPJ(chatterId){
+  // Remove só os dados de PJ desse quadro (não apaga o chatter nem mais
+  // nada dele) — sempre com confirmação antes, pedido explícito da gestora
+  // pra nunca apagar nada sem checar.
+  const c=S.chatters.find(ch=>ch.id===chatterId);
+  if(!confirm(`Remover os dados de PJ de ${c?c.name:'essa pessoa'} desse quadro? Já deve ter copiado/colado o que precisava — isso não apaga o chatter, só tira daqui.`))return;
+  if(S.chatterFichas?.[chatterId])delete S.chatterFichas[chatterId].dadosPJ;
+  save();
+  renderDadosPjPanel();
+  toast('Removido do quadro de Dados PJ.');
 }
 function setTesterDecision(chatterId,decision){
   const c=S.chatters.find(ch=>ch.id===chatterId);
@@ -11605,7 +11692,6 @@ function renderTesters(){
   renderMapTranscricoes();
   renderMapeamentoNovosPool();
   renderAfilhadoClaims();
-  renderSegundaChancePanel();
   renderDadosPjPanel();
   const sel=document.getElementById('tester-select');
   // Pool: quem está marcado Tester AGORA e já foi aprovado (não é mais só
@@ -11614,7 +11700,15 @@ function renderTesters(){
   // Enquanto pendenteAprovacao=true, a pessoa só aparece nas Tarefas
   // (tarefas-novato.html) — vira Tester aqui só quando a gestora aprovar
   // a solicitação do padrinho em Solicitação de Afilhado.
-  const testers=S.chatters.filter(c=>(c.time==='tester'&&!c.pendenteAprovacao)||S.chatterFichas?.[c.id]?.testerDecision);
+  // A pedido da gestora: só quem já foi apadrinhado (claim aprovado por um
+  // padrinho) aparece aqui pra ela decidir aprovado/reprovado e iniciar o
+  // teste — quem ainda não tem padrinho fica só no link dos padrinhos, onde
+  // eles reivindicam. Quem já teve alguma decisão continua aparecendo
+  // (histórico), mesmo que por algum motivo não tenha mais padrinhoId.
+  const testers=S.chatters.filter(c=>{
+    const ficha=S.chatterFichas?.[c.id];
+    return!!(ficha&&(ficha.padrinhoId||ficha.testerDecision));
+  });
   if(sel){
     const cur=sel.value;
     sel.innerHTML='<option value="">— ver todos —</option>'+
@@ -11779,6 +11873,8 @@ function saveMandamentoNota(cid,critId,val){
 function setPadrinhoResponsavel(cid,padrinhoId){
   if(!S.chatterFichas[cid])S.chatterFichas[cid]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
   S.chatterFichas[cid].padrinhoId=padrinhoId||'';
+  const c=S.chatters.find(ch=>ch.id===cid);
+  if(c)c.temPadrinho=!!padrinhoId;
   save();
   renderTesterDetail(cid);
 }
@@ -12387,6 +12483,46 @@ function aplicarExclusaoTesterPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar exclusão de tester como processada',e));
   }catch(e){
     console.error('Erro ao aplicar exclusão de tester pendente',e);
+  }
+}
+
+/* ===========================================================
+   DESERDAR — o padrinho aprovado pode liberar um afilhado que já
+   apadrinhou (pra outro assumir num próximo domingo, ou porque não vai
+   mais acompanhar). Mesmo padrão dos outros pedidos vindos do link dos
+   padrinhos: só registra o pedido, quem aplica é o app principal.
+   =========================================================== */
+function listenToDeserdarPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','deserdarPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarDeserdarPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir pedidos de deserdar pendentes',err);
+    });
+}
+function aplicarDeserdarPendente(docId,data){
+  try{
+    const id=data.testerId;
+    const c=id?S.chatters.find(ch=>ch.id===id):null;
+    const ficha=id?S.chatterFichas?.[id]:null;
+    if(!c||!ficha||ficha.padrinhoId!==data.padrinhoId){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado ou padrinho não confere mais'});
+      return;
+    }
+    ficha.padrinhoId='';
+    c.temPadrinho=false;
+    save();
+    toast(`💔 ${data.padrinhoNome||'Um padrinho'} deserdou "${c.name}" — volta pra lista de quem ainda não tem padrinho.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar deserdar como processado',e));
+  }catch(e){
+    console.error('Erro ao aplicar pedido de deserdar pendente',e);
   }
 }
 
