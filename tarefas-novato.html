@@ -684,8 +684,22 @@ window.enviarSegundaChance=async function(diaN,fridayKey){
   }
 };
 function meusDadosHtml(tester){
-  // Já preencheu antes (confirmado no servidor) — não pede de novo.
-  if(tester&&tester.dadosAutoInformados&&tester.dadosAutoInformados.sobreVoce)return'';
+  if(!tester)return'';
+  // "Já enviou" precisa ser uma verdade PERSISTENTE (localStorage), não só um
+  // innerHTML trocado na hora — sem isso, qualquer atualização vinda do app
+  // da gestora (o que acontece o tempo todo, é uma tela ao vivo) disparava
+  // renderAll() de novo antes do servidor confirmar o envio, e esse
+  // re-render reconstruía o formulário do zero por cima da mensagem de
+  // parabéns, fazendo ela sumir. Checando local + servidor, a mensagem fica
+  // definitiva assim que enviada, não pisca mais de volta pro formulário.
+  const jaEnviou=(tester.dadosAutoInformados&&tester.dadosAutoInformados.sobreVoce)||localStorage.getItem('tn_meusDadosEnviado_'+tester.id)==='1';
+  if(jaEnviou){
+    const padrinhoNome=tester.padrinhoNome||'seu padrinho';
+    return`<div class="card" id="meus-dados-card"><div style="text-align:center">
+      <div style="font-size:26px;margin-bottom:6px">🎉</div>
+      <div style="font-size:14px;line-height:1.6">Você agora é um chatter teste, está bem pertinho de entrar pro time. Entraremos em contato para alinhar horários disponíveis para você iniciar. Seu padrinho é <strong>${padrinhoNome}</strong> e ele vai te auxiliar em todo o processo. Boa sorte!</div>
+    </div></div>`;
+  }
   return`<div class="card" id="meus-dados-card">
     <div class="field" style="margin-bottom:8px">
       <label class="flabel">Se seu futuro padrinho pudesse te conhecer melhor e saber o que você procura com o trabalho, o que você contaria para ele? *</label>
@@ -708,15 +722,9 @@ window.enviarMeusDados=async function(){
       sobreVoce,
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
-    // Some o form e mostra a mensagem pedida pela gestora no lugar dele.
+    localStorage.setItem('tn_meusDadosEnviado_'+tester.id,'1');
     const card=document.getElementById('meus-dados-card');
-    if(card){
-      const padrinhoNome=tester.padrinhoNome||'seu padrinho';
-      card.innerHTML=`<div style="text-align:center">
-        <div style="font-size:26px;margin-bottom:6px">🎉</div>
-        <div style="font-size:14px;line-height:1.6">Você agora é um chatter teste, está bem pertinho de entrar pro time. Entraremos em contato para alinhar horários disponíveis para você iniciar. Seu padrinho é <strong>${padrinhoNome}</strong> e ele vai te auxiliar em todo o processo. Boa sorte!</div>
-      </div>`;
-    }
+    if(card)card.outerHTML=meusDadosHtml(tester);
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
