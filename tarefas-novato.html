@@ -395,7 +395,11 @@ window.onTesterChange=function(id){
   selTesterId=id;
   localStorage.setItem('tn_testerId',id);
   Object.keys(pendingImages).forEach(k=>delete pendingImages[k]);
-  subscribeMyTarefas(id);
+  // Sem isso, a tela ficava presa no seletor até a pessoa dar F5 na mão —
+  // renderAll() já troca pra tela com o nome dela automaticamente (e cuida de
+  // assinar as tarefas certas), sem precisar recarregar a página.
+  if(!id&&unsubMyTarefas){unsubMyTarefas();unsubMyTarefas=null;}
+  renderAll();
 };
 function subscribeMyTarefas(testerId){
   if(unsubMyTarefas){unsubMyTarefas();unsubMyTarefas=null;}
