@@ -12325,8 +12325,8 @@ function aplicarTesterDadosPendente(docId,data){
       return;
     }
     c.dadosAutoInformados={
-      idade:data.idade||'',cidade:data.cidade||'',
-      experiencia:data.experiencia||'',pretensaoSalarial:data.pretensaoSalarial||'',
+      cidade:data.cidade||'',
+      sobreVoce:data.sobreVoce||'',pretensaoSalarial:data.pretensaoSalarial||'',
       atualizadoEm:new Date().toISOString()
     };
     save();
@@ -12777,10 +12777,18 @@ function renderTesterDetail(cid){
     <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--bad);border-color:var(--bad)" onclick="excluirTriagemIA('${cid}')">🗑️ Excluir triagem</button>`
   ):'';
 
+  const dai=c.dadosAutoInformados;
+  const dadosAutoPanel=(dai&&(dai.sobreVoce||dai.cidade||dai.pretensaoSalarial))?`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
+    <div class="panel-head"><div class="panel-title">📋 Dados preenchidos pelo próprio tester</div></div>
+    ${dai.cidade?`<div class="field"><label class="flabel">Cidade</label><div style="font-size:12.5px;color:var(--text2)">${dai.cidade}</div></div>`:''}
+    ${dai.sobreVoce?`<div class="field"><label class="flabel">O que ele contaria para o padrinho</label><div style="font-size:12.5px;color:var(--text2);line-height:1.5">${dai.sobreVoce}</div></div>`:''}
+    ${dai.pretensaoSalarial?`<div class="field"><label class="flabel">Pretensão salarial</label><div style="font-size:12.5px;color:var(--text2)">${dai.pretensaoSalarial}</div></div>`:''}
+  </div>`:'';
+
   const mandamentosPanel=mandamentosPanelHtml(cid);
   const relatorioSemanalPanel=relatorioSemanalFichaHtml(cid);
   const conversasAnalisadasPanel=conversasAnalisadasFichaHtml(cid);
-  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+relatorioSemanalPanel+mandamentosPanel+conversasAnalisadasPanel+`
+  el.innerHTML=reservaPanel+triagemPanel+dadosAutoPanel+analysisPanel+relatorioSemanalPanel+mandamentosPanel+conversasAnalisadasPanel+`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-weight:800;font-size:16px">${c.name}</div>

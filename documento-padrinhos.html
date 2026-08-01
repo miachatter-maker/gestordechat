@@ -345,6 +345,9 @@ function renderDocumentoPadrinhos(testers){
       <div class="detail-body ${open?'open':''}">
         ${map?`<div class="tarefa-desc">${map.resumo||''}</div>`:''}
         ${map?.experienciaProfissionalMotivo?`<div class="tarefa-desc">💼 <strong>Experiência profissional:</strong> ${map.experienciaProfissionalMotivo}</div>`:''}
+        ${t.dadosAutoInformados?.sobreVoce?`<div class="tarefa-desc">💬 <strong>O que ele(a) contou pra te conhecer melhor:</strong> ${t.dadosAutoInformados.sobreVoce}</div>`:''}
+        ${t.dadosAutoInformados?.cidade?`<div class="tarefa-desc">📍 <strong>Cidade:</strong> ${t.dadosAutoInformados.cidade}</div>`:''}
+        ${t.dadosAutoInformados?.pretensaoSalarial?`<div class="tarefa-desc">💰 <strong>Pretensão salarial:</strong> ${t.dadosAutoInformados.pretensaoSalarial}</div>`:''}
         ${ciclo.dias.map(d=>{
           const reg=tarefas['dia'+d.dia];
           if(!reg)return'';

@@ -556,12 +556,11 @@ window.enviarSegundaChance=async function(diaN,fridayKey){
 };
 function meusDadosHtml(){
   return`<div class="card">
-    <a href="javascript:void(0)" id="meus-dados-link" onclick="document.getElementById('meus-dados-form').style.display='block';this.style.display='none'" style="font-size:13px;font-weight:700;color:var(--accent-strong)">📋 Preencher meus dados (idade, cidade, experiência, pretensão salarial)</a>
+    <a href="javascript:void(0)" id="meus-dados-link" onclick="document.getElementById('meus-dados-form').style.display='block';this.style.display='none'" style="font-size:13px;font-weight:700;color:var(--accent-strong)">📋 Preencher meus dados (cidade, sobre você, pretensão salarial)</a>
     <div id="meus-dados-msg" style="display:none;font-size:13px;font-weight:600;color:var(--ok,#177350)">✅ Dados enviados, obrigada!</div>
     <div id="meus-dados-form" style="display:none;margin-top:10px">
-      <div class="field"><label class="flabel">Idade</label><input class="finput" id="md-idade"></div>
       <div class="field"><label class="flabel">Cidade</label><input class="finput" id="md-cidade"></div>
-      <div class="field"><label class="flabel">Experiência</label><textarea class="ftext" id="md-experiencia" placeholder="Sua experiência profissional"></textarea></div>
+      <div class="field"><label class="flabel">Se seu futuro padrinho pudesse te conhecer melhor e saber o que você procura no trabalho, o que você contaria para ele? *</label><textarea class="ftext" id="md-sobre-voce" placeholder="Conte um pouco sobre você e o que procura..."></textarea></div>
       <div class="field"><label class="flabel">Pretensão salarial</label><input class="finput" id="md-pretensao"></div>
       <button class="btn btn-primary" id="md-salvar-btn" onclick="enviarMeusDados()">Salvar meus dados</button>
     </div>
@@ -570,15 +569,16 @@ function meusDadosHtml(){
 window.enviarMeusDados=async function(){
   const tester=chatters.find(t=>t.id===selTesterId);
   if(!tester)return;
+  const sobreVoce=(document.getElementById('md-sobre-voce')?.value||'').trim();
+  if(!sobreVoce){alert('Esse campo é obrigatório: conte pro seu futuro padrinho o que você procura no trabalho.');return;}
   const btn=document.getElementById('md-salvar-btn');
   if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   try{
     await fbDb.collection('gestorpro').add({
       type:'testerDadosPendente',processado:false,
       testerId:tester.id,
-      idade:(document.getElementById('md-idade')?.value||'').trim(),
       cidade:(document.getElementById('md-cidade')?.value||'').trim(),
-      experiencia:(document.getElementById('md-experiencia')?.value||'').trim(),
+      sobreVoce,
       pretensaoSalarial:(document.getElementById('md-pretensao')?.value||'').trim(),
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
