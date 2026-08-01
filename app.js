@@ -6172,7 +6172,17 @@ function startMapeamentoRecording(){
         let finalTxt='';let interimTxt='';
         for(let i=ev.resultIndex;i<ev.results.length;i++){
           const t=ev.results[i][0].transcript;
-          if(ev.results[i].isFinal)finalTxt+=t+' ';else interimTxt+=t;
+          if(ev.results[i].isFinal){
+            // O reconhecimento de voz do navegador não pontua sozinho —
+            // fecha cada trecho final com ponto e maiúscula (mesmo ajuste
+            // do Mapeamento dos Novos, achado em 31/07/2026).
+            let piece=(t||'').trim();
+            if(piece){
+              piece=piece.charAt(0).toUpperCase()+piece.slice(1);
+              if(!/[.!?…]$/.test(piece))piece+='.';
+              finalTxt+=piece+' ';
+            }
+          }else interimTxt+=t;
         }
         if(finalTxt){
           baseText+=finalTxt;
@@ -6637,7 +6647,15 @@ function startTriagemRecording(){
         let finalTxt='';let interimTxt='';
         for(let i=ev.resultIndex;i<ev.results.length;i++){
           const t=ev.results[i][0].transcript;
-          if(ev.results[i].isFinal)finalTxt+=t+' ';else interimTxt+=t;
+          if(ev.results[i].isFinal){
+            // Mesmo ajuste de pontuação do Mapeamento (achado em 31/07/2026).
+            let piece=(t||'').trim();
+            if(piece){
+              piece=piece.charAt(0).toUpperCase()+piece.slice(1);
+              if(!/[.!?…]$/.test(piece))piece+='.';
+              finalTxt+=piece+' ';
+            }
+          }else interimTxt+=t;
         }
         if(finalTxt){
           baseText+=finalTxt;
@@ -6864,7 +6882,17 @@ function startMapSlotRecording(slotId){
     rec.onresult=(ev)=>{
       let finalTxt='';
       for(let i=ev.resultIndex;i<ev.results.length;i++){
-        if(ev.results[i].isFinal)finalTxt+=ev.results[i][0].transcript+' ';
+        if(!ev.results[i].isFinal)continue;
+        // O reconhecimento de voz do navegador NÃO pontua sozinho — sem
+        // isso, tudo sai grudado numa frase só, ilegível (achado em
+        // 31/07/2026, a pedido da gestora). Cada resultado "final" já
+        // corresponde a uma pausa natural da fala, então é o lugar certo
+        // pra fechar com ponto e começar a próxima frase com maiúscula.
+        let piece=(ev.results[i][0].transcript||'').trim();
+        if(!piece)continue;
+        piece=piece.charAt(0).toUpperCase()+piece.slice(1);
+        if(!/[.!?…]$/.test(piece))piece+='.';
+        finalTxt+=piece+' ';
       }
       if(finalTxt){
         baseText+=finalTxt;
