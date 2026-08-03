@@ -612,29 +612,43 @@ function renderTesterDays(testerId){
     // sensível) espelhado no chatter — o CNPJ/pix/endereço em si continuam
     // só na Ficha (nunca voltam pro link público).
     const jaEnviouPJ=tester.dadosPjRecebidos||localStorage.getItem('tn_dadosPjEnviado_'+tester.id)==='1';
+    // Ordem combinada com a gestora (03/08/2026): 1) mensagem de parabéns +
+    // escolha de horário; 2) só depois de escolher horário, documentação
+    // (dados PJ); 3) só depois de enviar os dados PJ, tela final de
+    // boas-vindas. Victor tem horário fixo (não escolhe) — conta como já
+    // escolhido assim que aprovado, senão ficaria travado nessa etapa.
+    const jaEscolheuHorario=tester.id===VICTOR_HORARIO_FIXO_ID||!!(tester.horarioTeste&&tester.horarioTeste.slotId)||!!localStorage.getItem('tn_horarioSlot_'+tester.id);
     if(jaEnviouPJ){
       el.innerHTML=`<div class="card" style="text-align:center">
         <div style="font-size:30px;margin-bottom:8px">🎉</div>
-        <div style="font-size:14.5px;line-height:1.6">Você agora é um chatter teste, está bem pertinho de entrar pro time!${tester.padrinhoNome?` Seu padrinho é <strong>${tester.padrinhoNome}</strong> e ele vai te auxiliar em todo o processo.`:''} Boa sorte!</div>
-      </div>${horarioTesteHtml(tester)}`;
+        <div style="font-size:15px;font-weight:800;margin-bottom:6px">Seja bem-vindo, até o teste!</div>
+        <div style="font-size:14.5px;line-height:1.6">Já está tudo certo — nos vemos no seu horário combinado. Qualquer dúvida, seu padrinho${tester.padrinhoNome?` <strong>${tester.padrinhoNome}</strong>`:''} está por aqui pra te ajudar.</div>
+      </div>`;
       return;
     }
-    el.innerHTML=`<div class="card">
-      <div style="font-size:15px;font-weight:800;margin-bottom:6px">🎉 Parabéns, você foi aprovado!</div>
-      <div style="font-size:13px;color:var(--text2);margin-bottom:10px">Agora preencha os dados abaixo.</div>
-      <div class="error-box" style="font-weight:800;text-align:center">⚠️ NECESSÁRIO ABRIR CNPJ PARA PARTICIPAR DO TESTE</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Dados para cada colaborador PJ</div>
-      ${['razaoSocial::Razão Social','nickname::Nickname','cnpj::CNPJ','endereco::Endereço de sede','bairro::Bairro','cep::Cep','telefone::Telefone/Celular','email::E-mail','pix::Pix','bancoChave::Banco e chave'].map(p=>{
-        const[id,label]=p.split('::');
-        return`<div class="field"><label class="flabel">${label}</label><input class="finput" id="pj-${id}"></div>`;
-      }).join('')}
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin:14px 0 4px">Não obrigatório</div>
-      ${['trelloEmail::Email do Trello','telegramNumero::Número do Telegram','telegramNome::Nome no Telegram'].map(p=>{
-        const[id,label]=p.split('::');
-        return`<div class="field"><label class="flabel">${label}</label><input class="finput" id="pj-${id}"></div>`;
-      }).join('')}
-      <button class="btn btn-primary" id="btn-enviar-pj" onclick="enviarDadosPJ()">Enviar dados</button>
-    </div>`;
+    if(jaEscolheuHorario){
+      el.innerHTML=`<div class="card">
+        <div style="font-size:15px;font-weight:800;margin-bottom:6px">🎉 Parabéns, você foi aprovado!</div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:10px">Agora preencha os dados abaixo.</div>
+        <div class="error-box" style="font-weight:800;text-align:center">⚠️ NECESSÁRIO ABRIR CNPJ PARA PARTICIPAR DO TESTE</div>
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Dados para cada colaborador PJ</div>
+        ${['razaoSocial::Razão Social','nickname::Nickname','cnpj::CNPJ','endereco::Endereço de sede','bairro::Bairro','cep::Cep','telefone::Telefone/Celular','email::E-mail','pix::Pix','bancoChave::Banco e chave'].map(p=>{
+          const[id,label]=p.split('::');
+          return`<div class="field"><label class="flabel">${label}</label><input class="finput" id="pj-${id}"></div>`;
+        }).join('')}
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin:14px 0 4px">Não obrigatório</div>
+        ${['trelloEmail::Email do Trello','telegramNumero::Número do Telegram','telegramNome::Nome no Telegram'].map(p=>{
+          const[id,label]=p.split('::');
+          return`<div class="field"><label class="flabel">${label}</label><input class="finput" id="pj-${id}"></div>`;
+        }).join('')}
+        <button class="btn btn-primary" id="btn-enviar-pj" onclick="enviarDadosPJ()">Enviar dados</button>
+      </div>`;
+      return;
+    }
+    el.innerHTML=`<div class="card" style="text-align:center">
+      <div style="font-size:30px;margin-bottom:8px">🎉</div>
+      <div style="font-size:14.5px;line-height:1.6">Parabéns, você agora é um chatter teste. Tá muito perto de entrar no nosso time.${tester.padrinhoNome?` Fique ligado em tudo que seu padrinho <strong>${tester.padrinhoNome}</strong> vai te ensinar.`:''}</div>
+    </div>${horarioTesteHtml(tester)}`;
     return;
   }
   const ciclo=getCicloAtual();
