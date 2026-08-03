@@ -602,7 +602,14 @@ function renderTesterDays(testerId){
       return;
     }
   }
-  if(tester&&tester.testerDecision==='aprovado'){
+  if(tester&&tester.temPadrinho){
+    // Gatilho é o APADRINHAMENTO (padrinho aprovado pra essa pessoa), não o
+    // testerDecision — esse último é uma decisão SEPARADA e posterior
+    // (aprovado/reprovado/reservas depois dos 3 dias de tarefa, decidida na
+    // aba Testers). Achado em 03/08/2026: a gestora apadrinhou o Fred e
+    // nada mudou na página dele, porque essa tela só olhava testerDecision,
+    // que só é setado bem depois — o apadrinhamento sozinho nunca chegava
+    // a acionar essa tela.
     // "Já enviou os dados PJ" precisa ser uma verdade PERSISTENTE (server +
     // localStorage), não só a mensagem trocada na hora no DOM — mesmo bug já
     // corrigido antes no formulário de "meus dados" (ver comentário em
