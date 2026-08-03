@@ -122,6 +122,7 @@ function migrateState(s){
   if(!s.motivational)s.motivational={};
   if(!s.scheduleRequests)s.scheduleRequests={};
   if(!s.chatterFichas)s.chatterFichas={};
+  if(!s.chatterWeeklySummaries)s.chatterWeeklySummaries={}; // fatia própria/segura pro link myperformance (ver comentário em SHARD_FIELDS) — nunca leva Dados PJ
   if(!s.chatObservacoes)s.chatObservacoes={};
   if(!s.iaPerguntas||!Array.isArray(s.iaPerguntas))s.iaPerguntas=[];
   if(!s.estudosDraft)s.estudosDraft={};
@@ -579,8 +580,14 @@ function deepMergeState(local,remote){
 // mesmo tempo já quase estouravam o limite. Com fatia própria, os prints de
 // PPM de quem ainda está em teste têm um orçamento de ~1MB SÓ PRA ELES,
 // somando na prática mais que o dobro de espaço de sobra sem apagar nada.
-const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses','chatlabWeeklyReports','tarefasNovatoPorTester'];
-const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab',chatlabWeeklyReports:'shard-chatlab-semanal',tarefasNovatoPorTester:'shard-tarefas-tester'};
+// chatterWeeklySummaries (31/07/2026 [sic], pro link myperformance): fatia
+// PRÓPRIA e SEPARADA de chatterFichas de propósito — a Ficha guarda Dados PJ
+// (CNPJ, pix, endereço), que NUNCA pode chegar num link público. Essa fatia
+// nova só tem números já resumidos (faturamento, %HT, ticket médio etc. por
+// semana), seguro pra qualquer chatter buscar e ver a própria evolução sem
+// expor dado sensível de ninguém.
+const SHARD_FIELDS=['chatterFichas','revenues','chatlabAnalyses','chatlabWeeklyReports','tarefasNovatoPorTester','chatterWeeklySummaries'];
+const SHARD_DOC_IDS={chatterFichas:'shard-fichas',revenues:'shard-revenues',chatlabAnalyses:'shard-chatlab',chatlabWeeklyReports:'shard-chatlab-semanal',tarefasNovatoPorTester:'shard-tarefas-tester',chatterWeeklySummaries:'shard-weekly-summaries'};
 const ALL_SYNC_DOC_IDS=[FIREBASE_DOC_ID,...SHARD_FIELDS.map(f=>SHARD_DOC_IDS[f])];
 let fbDocsSeen=new Set();
 let fbDocsStatus={}; // docId -> 'ok'|'not-exists'|'error: ...' — pra diagnóstico
@@ -8172,6 +8179,7 @@ function dismissMedalAchievement(id){
   if(it){it.seen=true;save();}
   renderMedalNotice('home-medal-notice');
   renderMedalNotice('estrategia-medal-notice');
+  if(currentViewName()==='evolucao')renderEvolucao();
 }
 function renderMedalNotice(containerId){
   const el=document.getElementById(containerId);
@@ -9093,6 +9101,7 @@ function renderEvolucao(){
   }
 
   html+=`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Relatório individual por chatter</div>`;
+  let resumoSemanalMudou=false; // pro link myperformance — só salva se algo mudou de verdade
 
   const goals=S.chatterWeekGoals[wkey]||{};
   let teamTotal=0, teamDays=0, teamTicketSum=0, teamVphSum=0, teamHighSum=0;
@@ -9226,16 +9235,19 @@ function suggestTrainingText(chatterId){
     }
     if(!recs.length&&rev>0)recs.push(`Desempenho sólido (${money(rev)}, ${totalVendas} vendas) — manter ritmo e testar aumento de ticket`);
     if(!recs.length)recs.push('Sem dados suficientes — processe os relatórios de vendas desta semana');
-    // Cruza com a ficha e o diagnóstico do ChatLab pra não depender só de números
-    getFichaAndDiagnosisInsights(c.id).forEach(ins=>recs.push(ins));
+    // A pedido da gestora: essa lista fica só com comparações NUMÉRICAS —
+    // não cruza mais com anotações da Ficha (evolucaoNotes/risco/próximos
+    // passos). O diagnóstico do ChatLab continua, mas só no quadro próprio
+    // dele mais abaixo (🔬 DIAGNÓSTICO CHATLAB), não misturado aqui.
 
     const timeLabel=c.time==='tester'?'<span class="pill pill-bad" style="font-size:9px">🧪 Tester</span>':'';
 
     const evoHead=`<div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:6px">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <div style="font-weight:800;font-size:15px">${c.name}</div>${timeLabel}
           <span class="pill pill-flat" style="font-size:9px">${c.level}</span>
+          <a href="${location.origin}/myperformance.html?id=${encodeURIComponent(c.id)}&nome=${encodeURIComponent(c.name)}" target="_blank" data-noaccordion title="Link pra ${c.name} acompanhar a própria evolução semana a semana" style="font-size:10px;color:var(--accent-strong);font-weight:700;text-decoration:none;white-space:nowrap">📱 myperformance</a>
         </div>
         <div style="text-align:right">
           <div style="font-family:var(--font-mono);font-weight:800;font-size:15px;color:var(--ok)">${money(rev)}</div>
@@ -9246,7 +9258,63 @@ function suggestTrainingText(chatterId){
         <div style="height:5px;border-radius:4px;background:${pct>=100?'var(--ok)':pct>=60?'var(--warn)':'var(--bad)'};width:${Math.min(100,pct||0)}%"></div>
       </div>`:''}
     </div>`;
-    const evoBody=`${days>0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+    // Dia a dia da semana — a pedido da gestora, clicando no card (evoHead
+    // já é o cabeçalho do accordion) aparece isso: faturamento/vendas/%HT de
+    // cada dia trabalhado, e se a meta semanal já tinha sido batida
+    // (cumulativo) até aquele dia.
+    const diaADiaHtml=wkeys.length?(()=>{
+      let cumulativo=0;
+      const linhas=wkeys.map(dk=>{
+        const a=analytics[dk];
+        const diaRev=(a.chatterTotal||0)+(a.extraTotal||0);
+        cumulativo+=diaRev;
+        const bateuMeta=meta>0&&cumulativo>=meta;
+        return`<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px">
+          <div style="display:flex;align-items:center;gap:6px;min-width:70px">
+            <span style="font-weight:700">${dayName(dk)}</span>
+            ${meta>0?`<span title="${bateuMeta?'Meta semanal já batida até esse dia':'Ainda não batia a meta semanal'}">${bateuMeta?'✅':'⏳'}</span>`:''}
+          </div>
+          <div style="display:flex;gap:10px;color:var(--text2);font-family:var(--font-mono);font-size:11.5px">
+            <span title="Faturamento do dia">${money(diaRev)}</span>
+            <span title="Vendas do dia" style="font-family:var(--font);color:var(--info)">${a.totalVendas||0}v</span>
+            <span title="% high ticket do dia" style="font-family:var(--font)">${a.highTicketPct||0}%HT</span>
+          </div>
+        </div>`;
+      }).join('');
+      return`<div style="margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">📅 Dia a dia da semana</div>
+        ${linhas}
+      </div>`;
+    })():'';
+    // Meta mensal + aviso de medalha — reaproveita o mesmo cálculo já usado
+    // em Pagamento (categoria/medalha automática), só resumido aqui.
+    const savedCatEvo=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const manualMedalRawEvo=S.chatterFichas?.[c.id]?.manualMedal;
+    const weekRevNowEvo=getChatterWeekRevenue(c.id,0);
+    const autoMedalEvo=autoMedalForPct(weekRevNowEvo>0?weekRevNowEvo/PAG_CATS[savedCatEvo].n100*100:0);
+    const medalAtualEvo=(manualMedalRawEvo!==undefined&&manualMedalRawEvo!=='')?parseInt(manualMedalRawEvo,10):autoMedalEvo;
+    const monthEarnEvo=getChatterMonthEarnings(c.id,medalAtualEvo,savedCatEvo);
+    const metaMensalEvo=PAG_CATS[savedCatEvo].n100*(getDaysInCurrentMonth()/7);
+    const pctMesEvo=metaMensalEvo>0?Math.round((monthEarnEvo.monthRevenue+monthEarnEvo.monthExtra)/metaMensalEvo*100):0;
+    const medalPendenteEvo=(S.medalAchievements||[]).find(m=>m.chatterId===c.id&&!m.seen);
+    const metaMensalHtml=`<div style="background:var(--bg-soft);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase">📆 Meta mensal</div>
+        <div style="font-size:11px;color:var(--text2)">${PAG_MEDAL_LABEL[medalAtualEvo]}</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-family:var(--font-mono);font-weight:700;font-size:14px">${money(monthEarnEvo.monthRevenue+monthEarnEvo.monthExtra)}</span>
+        <span style="font-size:10.5px;color:var(--text3)">de ${money(metaMensalEvo)} (${pctMesEvo}%)</span>
+      </div>
+      <div style="background:var(--line);border-radius:4px;height:5px;overflow:hidden">
+        <div style="height:5px;border-radius:4px;background:${pctMesEvo>=100?'var(--ok)':'var(--accent)'};width:${Math.min(100,pctMesEvo)}%"></div>
+      </div>
+    </div>
+    ${medalPendenteEvo?`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--accent-soft);border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12.5px">
+      <span>${PAG_MEDAL_LABEL[medalPendenteEvo.medal]||''} <strong>${c.name}</strong> tem direito a nova medalha essa semana!</span>
+      <button class="btn btn-ghost btn-xs" data-noaccordion onclick="dismissMedalAchievement('${medalPendenteEvo.id}')" title="Marcar como visto">✕</button>
+    </div>`:''}`;
+    const evoBody=`${diaADiaHtml}${metaMensalHtml}${days>0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
           <div style="font-size:9px;color:var(--text3)">Ticket médio</div>
           <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(avgTicket)}</div>
@@ -9305,7 +9373,38 @@ function suggestTrainingText(chatterId){
         <textarea class="ftext" style="min-height:52px;font-size:12.5px;background:#fff" placeholder="Escreva como treinar ${c.name} esta semana..." onblur="saveChatterTraining('${c.id}',this.value)">${(S.chatterTraining[c.id]||suggestTrainingText(c.id))}</textarea>
       </div>`;
     html+=fichaAccordion('evocard-'+c.id,`margin-bottom:10px;border-left:3px solid ${pct===null?'var(--line)':pct>=80?'var(--ok)':pct>=50?'var(--warn)':'var(--bad)'}`,evoHead,evoBody);
+
+    // Snapshot resumido pro link myperformance (fatia própria e SEGURA, sem
+    // Dados PJ — ver comentário em SHARD_FIELDS). Só marca dirty se mudou.
+    if(!S.chatterWeeklySummaries[c.id])S.chatterWeeklySummaries[c.id]={};
+    const resumoSemana={
+      revenue:rev,meta,pct,avgTicket,avgVph,avgHigh,htTotal:htTotalWeek,totalVendas,peakHour,
+      medal:medalAtualEvo,
+      dayByDay:wkeys.map(dk=>{
+        const a=analytics[dk];
+        return{dk,rev:(a.chatterTotal||0)+(a.extraTotal||0),vendas:a.totalVendas||0,htPct:a.highTicketPct||0};
+      })
+    };
+    const resumoAnterior=S.chatterWeeklySummaries[c.id][wkey];
+    if(JSON.stringify(resumoAnterior)!==JSON.stringify(resumoSemana)){
+      S.chatterWeeklySummaries[c.id][wkey]=resumoSemana;
+      resumoSemanalMudou=true;
+    }
+    // Também guarda o progresso mensal já calculado (sem categoria/PAG_CATS
+    // no link público — só o número final, que não é sensível)
+    const currentMonthSnap={
+      monthRevenue:Math.round((monthEarnEvo.monthRevenue+monthEarnEvo.monthExtra)*100)/100,
+      metaMensal:Math.round(metaMensalEvo*100)/100,
+      pctMes:pctMesEvo,
+      medal:medalAtualEvo,
+      medalPendente:medalPendenteEvo?{id:medalPendenteEvo.id,medal:medalPendenteEvo.medal}:null
+    };
+    if(JSON.stringify(S.chatterWeeklySummaries[c.id].currentMonth)!==JSON.stringify(currentMonthSnap)){
+      S.chatterWeeklySummaries[c.id].currentMonth=currentMonthSnap;
+      resumoSemanalMudou=true;
+    }
   });
+  if(resumoSemanalMudou)save();
 
   // Team summary report
   const avgTeamTicket=teamDays>0?teamTicketSum/teamDays:0;
