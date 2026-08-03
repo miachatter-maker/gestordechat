@@ -215,7 +215,9 @@ function horarioTesteHtml(tester){
       ${HORARIO_SLOTS.filter(s=>s.grupo===g).map(s=>{
         const ocupado=ocupados.has(s.id);
         const ehMeu=s.id===meuSlotId;
-        const estilo=ocupado&&!ehMeu?'background:var(--bg-soft);color:var(--text3);cursor:not-allowed':ehMeu?'background:var(--ok-soft,#E7F5EE);color:var(--ok,#177350);border:1px solid var(--ok,#177350)':'background:#fff;color:var(--text);border:1px solid var(--line-strong)';
+        // Achado 03/08/2026 — a pedido da gestora: fundo colorido em vez de
+        // branco liso pra ficar mais bonito/fácil de ver de relance.
+        const estilo=ocupado&&!ehMeu?'background:var(--bg-soft);color:var(--text3);border:1px solid var(--line);cursor:not-allowed':ehMeu?'background:var(--ok-soft,#E7F5EE);color:var(--ok,#177350);border:1.5px solid var(--ok,#177350)':'background:var(--accent-soft);color:var(--accent-strong);border:1px solid var(--accent-soft)';
         return`<button class="btn" ${ocupado&&!ehMeu?'disabled':''} style="margin-bottom:6px;text-align:left;padding:11px 14px;${estilo}" ${ocupado&&!ehMeu?'':`onclick="enviarHorarioTeste('${s.id}')"`}>${s.opcao} (${s.horario})${ocupado&&!ehMeu?' — indisponível':ehMeu?' — seu horário atual':''}</button>`;
       }).join('')}
     `).join('')}
@@ -626,10 +628,14 @@ function renderTesterDays(testerId){
     // escolhido assim que aprovado, senão ficaria travado nessa etapa.
     const jaEscolheuHorario=tester.id===VICTOR_HORARIO_FIXO_ID||!!(tester.horarioTeste&&tester.horarioTeste.slotId)||!!localStorage.getItem('tn_horarioSlot_'+tester.id);
     if(jaEnviouPJ){
+      const meuSlotIdBemVindo=(tester.horarioTeste&&tester.horarioTeste.slotId)||localStorage.getItem('tn_horarioSlot_'+tester.id)||'';
+      const slotEncontrado=HORARIO_SLOTS.find(s=>s.id===meuSlotIdBemVindo);
+      const horarioLabel=tester.id===VICTOR_HORARIO_FIXO_ID?VICTOR_HORARIO_FIXO_LABEL:((tester.horarioTeste&&tester.horarioTeste.label)||(slotEncontrado&&horarioSlotLabel(slotEncontrado))||'');
       el.innerHTML=`<div class="card" style="text-align:center">
         <div style="font-size:30px;margin-bottom:8px">🎉</div>
         <div style="font-size:15px;font-weight:800;margin-bottom:6px">Seja bem-vindo, até o teste!</div>
-        <div style="font-size:14.5px;line-height:1.6">Já está tudo certo — nos vemos no seu horário combinado. Qualquer dúvida, seu padrinho${tester.padrinhoNome?` <strong>${tester.padrinhoNome}</strong>`:''} está por aqui pra te ajudar.</div>
+        <div style="font-size:14.5px;line-height:1.6">Já está tudo certo. Qualquer dúvida, seu padrinho${tester.padrinhoNome?` <strong>${tester.padrinhoNome}</strong>`:''} está por aqui pra te ajudar.</div>
+        ${horarioLabel?`<div style="margin-top:12px;padding:11px 14px;background:var(--accent-soft);color:var(--accent-strong);border-radius:var(--r-md);font-weight:700;font-size:13.5px">🗓️ Nos vemos: ${horarioLabel}</div>`:''}
       </div>`;
       return;
     }
