@@ -1471,6 +1471,15 @@ body{
       <label class="flabel">📢 Recado da Gestão (aparece pra todos os padrinhos)</label>
       <textarea class="ftext" id="recado-padrinhos-text" placeholder="Escreva um aviso/recado que vai aparecer no topo do link dos padrinhos..." onblur="saveRecadoPadrinhos()"></textarea>
     </div>
+    <div class="field" style="margin-top:6px">
+      <label class="flabel">🔓 Janela extra de reivindicação (fora de domingo)</label>
+      <div id="janela-reivindicacao-status" style="font-size:12px;color:var(--text2);margin-bottom:6px">Carregando...</div>
+      <div style="display:flex;gap:8px">
+        <input class="finput" id="janela-reivindicacao-minutos" type="number" placeholder="minutos (vazio = sem prazo)" style="max-width:170px">
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="abrirJanelaReivindicacao()">Abrir agora</button>
+        <button class="btn btn-ghost btn-sm" onclick="fecharJanelaReivindicacao()">Fechar</button>
+      </div>
+    </div>
     <div id="afilhado-claims-content"></div>
   </div>
 

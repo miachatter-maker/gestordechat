@@ -150,6 +150,7 @@ function migrateState(s){
   if(!s.geradorElite)s.geradorElite=[];
   if(!s.testerLogs)s.testerLogs={};
   if(s.recadoPadrinhos==null)s.recadoPadrinhos='';
+  if(s.reivindicacaoJanelaExtra===undefined)s.reivindicacaoJanelaExtra=null;
   if(!s.melhoras)s.melhoras=[];
   else{const wk=getWeekKey();s.melhoras=s.melhoras.filter(m=>!m.done||m.doneWeek===wk);}
   if(!s.melhoraHistory)s.melhoraHistory=[];
@@ -11622,8 +11623,44 @@ function saveRecadoPadrinhos(){
   save();
   toast('✅ Recado salvo — já aparece pros padrinhos');
 }
+// Janela extra de reivindicação — reivindicações de afilhado normalmente só
+// abrem aos domingos (pedido antigo da gestora); isso dá um jeito dela abrir
+// manualmente fora do domingo também (ex: teste rápido, ou reabrir num
+// horário combinado), sem mexer na regra normal de domingo. Guardado como
+// {inicio,fim} simples no estado central — fim=null significa "sem prazo,
+// fica aberta até eu fechar manualmente".
+window.abrirJanelaReivindicacao=function(){
+  const minRaw=document.getElementById('janela-reivindicacao-minutos')?.value;
+  const min=parseInt(minRaw,10);
+  const fim=(min>0)?new Date(Date.now()+min*60000).toISOString():null;
+  S.reivindicacaoJanelaExtra={inicio:new Date().toISOString(),fim};
+  save();
+  renderJanelaReivindicacaoStatus();
+  toast(fim?`🔓 Reivindicações abertas por ${min} min.`:'🔓 Reivindicações abertas (sem prazo — lembre de fechar depois).');
+};
+window.fecharJanelaReivindicacao=function(){
+  S.reivindicacaoJanelaExtra=null;
+  save();
+  renderJanelaReivindicacaoStatus();
+  toast('🔒 Janela extra de reivindicação fechada.');
+};
+function renderJanelaReivindicacaoStatus(){
+  const el=document.getElementById('janela-reivindicacao-status');
+  if(!el)return;
+  const j=S.reivindicacaoJanelaExtra;
+  const agora=new Date();
+  const ativa=!!(j&&j.inicio&&new Date(j.inicio)<=agora&&(!j.fim||new Date(j.fim)>agora));
+  if(agora.getDay()===0){
+    el.innerHTML='🟢 Hoje é domingo — reivindicações já abertas normalmente.';
+  }else if(ativa){
+    el.innerHTML=`🟢 Janela extra <strong>ABERTA</strong>${j.fim?` até ${new Date(j.fim).toLocaleString('pt-BR')}`:' — sem prazo, feche manualmente quando quiser'}.`;
+  }else{
+    el.innerHTML='🔴 Fechada agora (só abre normalmente aos domingos, ou pelo botão acima).';
+  }
+}
 function renderAfilhadoClaims(){
   renderRecadoPadrinhos();
+  renderJanelaReivindicacaoStatus();
   const el=document.getElementById('afilhado-claims-content');
   if(!el)return;
   const claims=S.afilhadoClaims||[];
@@ -12376,7 +12413,16 @@ function aplicarTesterAutoInclusaoPendente(docId,data){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'nome vazio'});
       return;
     }
-    const chatterId='c'+Date.now()+Math.random().toString(36).slice(2,4);
+    // Usa o MESMO id que o link público já gerou e mostrou pro tester na
+    // hora (ver enviarAutoinclusao em tarefas-novato.html) — assim a página
+    // dele, que já foi direto pra tela de tarefas de forma otimista, casa
+    // certinho com esse registro real assim que sincronizar de volta, sem
+    // duplicar nem trocar de id no meio do caminho.
+    const chatterId=data.chatterId||('c'+Date.now()+Math.random().toString(36).slice(2,4));
+    if(S.chatters.some(c=>c.id===chatterId)){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'id já existe'});
+      return;
+    }
     S.chatters.push({
       // A pedido da gestora: quem se autoinclui (porque não achou o nome)
       // NÃO espera aprovação pra começar a fazer as tarefas — ela se

@@ -90,7 +90,7 @@ const headerSub=document.getElementById('header-sub');
 const content=document.getElementById('content');
 
 let fbDb=null;
-let chatters=[],mapeamentoBatches=[],chatterFichasLive={},afilhadoClaimsLive=[],recadoPadrinhos='';
+let chatters=[],mapeamentoBatches=[],chatterFichasLive={},afilhadoClaimsLive=[],recadoPadrinhos='',reivindicacaoJanelaExtra=null;
 // tarefasNovato mora numa fatia própria do Firestore desde 31/07/2026 (não
 // mais dentro de chatterFichasLive/shard-fichas) — documento dedicado só
 // pros prints de PPM de quem ainda está em teste, sem dividir o orçamento
@@ -126,6 +126,15 @@ function getCicloAtual(){
   return{fridayKey,dias};
 }
 
+function janelaReivindicacaoAtiva(){
+  const j=reivindicacaoJanelaExtra;
+  if(!j||!j.inicio)return false;
+  const agora=new Date();
+  if(new Date(j.inicio)>agora)return false;
+  if(j.fim&&new Date(j.fim)<=agora)return false;
+  return true;
+}
+
 /* ---------- init ---------- */
 if(typeof firebase==='undefined'){
   headerSub.textContent='Erro de conexão';
@@ -157,6 +166,7 @@ function startListeners(){
         mapeamentoBatches=parsed.mapeamentoBatches||[];
         afilhadoClaimsLive=parsed.afilhadoClaims||[];
         recadoPadrinhos=parsed.recadoPadrinhos||'';
+        reivindicacaoJanelaExtra=parsed.reivindicacaoJanelaExtra||null;
         renderAll();
       }catch(e){console.error('Erro ao ler central-dados',e);}
     }
@@ -341,7 +351,10 @@ function renderDocumentoPadrinhos(testers){
     const open=expandedTester===t.id;
     const tarefas=getMergedTarefas(t.id)[ciclo.fridayKey]||{};
     const expColor=map?.experienciaProfissional==='boa'?'var(--ok)':map?.experienciaProfissional==='média'?'var(--warn)':'var(--bad)';
-    const ehDomingo=new Date().getDay()===0; // reivindicação só abre aos domingos, pedido da gestora
+    // Reivindicação só abre aos domingos por padrão (pedido da gestora), mas
+    // ela pode abrir uma janela extra manualmente (aba Testers → Solicitação
+    // de Afilhado) pra testes ou reaberturas pontuais fora do domingo.
+    const ehDomingo=new Date().getDay()===0||janelaReivindicacaoAtiva();
     const claimBoxHtml=(()=>{
       if(padrinhoId){
         const padrinhoAtual=chatters.find(c=>c.id===padrinhoId);

@@ -409,8 +409,21 @@ function renderAll(){
     attachAutoinclusaoHandlers();
     return;
   }
-  if(selTesterId&&!testers.some(t=>t.id===selTesterId))selTesterId='';
-  const testerAtual=selTesterId?testers.find(t=>t.id===selTesterId):null;
+  let testerAtual=selTesterId?testers.find(t=>t.id===selTesterId):null;
+  if(selTesterId&&!testerAtual){
+    // Acabou de se autoincluir (ver enviarAutoinclusao) e ainda não
+    // sincronizou de volta — o app da gestora só processa o cadastro
+    // quando ela está com o app aberto, então pode levar um tempo. Enquanto
+    // isso, mostra a tela de tarefas mesmo assim com um objeto mínimo local
+    // (não volta pro formulário de cadastro). Assim que sincronizar de
+    // verdade, o match por id acima passa a achar o registro real sozinho.
+    const nomePendente=localStorage.getItem('tn_pendingAutoNome');
+    if(nomePendente){
+      testerAtual={id:selTesterId,name:nomePendente,time:'tester',pendenteAprovacao:false};
+    }else{
+      selTesterId='';
+    }
+  }
   if(testerAtual){
     // A pedido da gestora: assim que a pessoa já tem nome cadastrado (guardado
     // neste navegador), some a opção de selecionar/cadastrar nome de novo — a
@@ -473,11 +486,24 @@ window.enviarAutoinclusao=async function(){
   const btn=document.getElementById('autoinclusao-btn');
   btn.disabled=true;btn.textContent='Enviando...';
   try{
+    // Gera o id AQUI (cliente) e manda junto no documento pendente — assim a
+    // página já pode ir DIRETO pra tela de tarefas na mesma hora, sem
+    // esperar o app da gestora processar (o que só acontece quando ela está
+    // com o app aberto, podendo levar um tempo). Quando ela processar,
+    // aplicarTesterAutoInclusaoPendente (app.js) usa ESSE MESMO id em vez de
+    // gerar um novo, então não duplica nem gera conflito quando o dado real
+    // sincronizar de volta.
+    const chatterId='c'+Date.now()+Math.random().toString(36).slice(2,6);
     await fbDb.collection('gestorpro').add({
       type:'testerAutoInclusaoPendente',processado:false,
-      nome,criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+      nome,chatterId,criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
+    if(!chatters.some(c=>c.id===chatterId)){
+      chatters.push({id:chatterId,name:nome,time:'tester',pendenteAprovacao:false});
+    }
     localStorage.setItem('tn_pendingAutoNome',nome);
+    localStorage.setItem('tn_testerId',chatterId);
+    selTesterId=chatterId;
     renderAll();
   }catch(e){
     console.error(e);
