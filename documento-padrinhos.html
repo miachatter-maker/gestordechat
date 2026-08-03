@@ -284,12 +284,43 @@ function renderAll(){
           ${padrinhos.map(p=>`<option value="${p.id}" ${selPadrinhoId===p.id?'selected':''}>${p.name}</option>`).join('')}
         </select>
       </div>
+      ${(typeof Notification!=='undefined'&&Notification.permission!=='granted')?`<button class="btn" style="margin-top:10px;background:var(--bg-soft);color:var(--text2)" onclick="ativarNotificacoes()">🔔 Ativar notificação de horário escolhido</button>`:(typeof Notification!=='undefined'?`<div style="margin-top:10px;font-size:11.5px;color:var(--ok)">🔔 Notificações ativadas — avisa quando um afilhado escolher horário (só enquanto essa aba estiver aberta).</div>`:'')}
     </div>
     <div id="padrinho-doc"></div>
   `;
   renderDocumentoPadrinhos(testers);
+  checarNovosHorarios(testers);
 }
-window.onPadrinhoChange=function(id){selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'||c.testerDecision));};
+window.ativarNotificacoes=function(){
+  if(typeof Notification==='undefined'){alert('Seu navegador não suporta notificações.');return;}
+  Notification.requestPermission().then(()=>renderAll());
+};
+// Avisa (notificação do navegador, só funciona com essa aba aberta — não
+// tem push em segundo plano nesse projeto) quando um afilhado MEU escolhe
+// horário de teste. Guarda no localStorage quem já foi avisado (por
+// testerId+slotId) pra não repetir o aviso a cada sync.
+function checarNovosHorarios(testers){
+  if(typeof Notification==='undefined'||Notification.permission!=='granted')return;
+  if(!selPadrinhoId)return;
+  const vistos=JSON.parse(localStorage.getItem('dp_horariosNotificados')||'[]');
+  let mudou=false;
+  testers.forEach(t=>{
+    const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
+    if(padrinhoId!==selPadrinhoId)return;
+    if(!t.horarioTeste||!t.horarioTeste.slotId)return;
+    const chave=t.id+'_'+t.horarioTeste.slotId;
+    if(vistos.includes(chave))return;
+    vistos.push(chave);mudou=true;
+    try{new Notification('🗓️ Horário de teste escolhido',{body:`${t.name} escolheu: ${t.horarioTeste.label}`});}catch(e){console.error(e);}
+  });
+  if(mudou)localStorage.setItem('dp_horariosNotificados',JSON.stringify(vistos));
+}
+window.onPadrinhoChange=function(id){
+  selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);
+  const testers=chatters.filter(c=>c.time==='tester'||c.testerDecision);
+  renderDocumentoPadrinhos(testers);
+  checarNovosHorarios(testers);
+};
 window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'||c.testerDecision));};
 function renderDocumentoPadrinhos(testers){
   const el=document.getElementById('padrinho-doc');
@@ -338,6 +369,7 @@ function renderDocumentoPadrinhos(testers){
           <div class="tester-name">${t.name}${t.testerDecision==='aprovado'?' <span style="font-size:11px;font-weight:700;color:var(--ok)">✅ Aprovado</span>':t.testerDecision==='reprovado'?' <span style="font-size:11px;font-weight:700;color:var(--bad)">❌ Reprovado</span>':''}</div>
           ${map?`<div class="tester-mapinfo">"${map.personalidadeUmaFrase||''}" ${map.pontuacaoGeral?`· 🎯 ${map.pontuacaoGeral}/100`:''}</div>`:''}
           ${map?.experienciaProfissional?`<div class="tester-mapinfo">💼 Experiência profissional: <strong style="color:${expColor};text-transform:uppercase">${map.experienciaProfissional}</strong></div>`:''}
+          ${t.horarioTeste?.label?`<div class="tester-mapinfo" style="color:var(--ok);font-weight:700">🗓️ Horário de teste escolhido: ${t.horarioTeste.label}</div>`:''}
           <div class="badges-row">${badges}</div>
         </div>
         <span class="chev">${open?'▲':'▼'}</span>

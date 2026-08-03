@@ -490,6 +490,7 @@ function initFirebase(){
     listenToSegundaChanceDecisoesPendentes();
     listenToExclusoesTesterPendentes();
     listenToDeserdarPendentes();
+    listenToHorarioTestePendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -12471,6 +12472,11 @@ function aplicarDadosPjPendente(docId,data){
       trelloEmail:data.trelloEmail||'',telegramNumero:data.telegramNumero||'',telegramNome:data.telegramNome||'',
       recebidoEm:new Date().toISOString()
     };
+    // Espelha só um FLAG (sem nenhum dado sensível) no chatter — é o que o
+    // link público de tarefas usa pra saber que já pode trocar o formulário
+    // de PJ pela mensagem de aprovado + seletor de horário, sem esperar a
+    // gestora abrir a Ficha. O CNPJ/pix/endereço em si nunca saem daqui.
+    c.dadosPjRecebidos=true;
     save();
     toast(`📋 Dados de PJ de ${c.name} recebidos via link.`);
     if(currentViewName()==='testers')renderTesters();
@@ -12655,6 +12661,49 @@ function aplicarDeserdarPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar deserdar como processado',e));
   }catch(e){
     console.error('Erro ao aplicar pedido de deserdar pendente',e);
+  }
+}
+
+/* ===========================================================
+   HORÁRIO DE TESTE — a pedido da gestora (03/08/2026), em vez de
+   "entraremos em contato pra marcar horário" o próprio tester escolhe 1 dos
+   6 horários disponíveis (2 grupos de 3 dias × 3 opções) direto no link de
+   tarefas, assim que aprovado — ou vê o horário fixo (caso do Victor,
+   combinado manualmente fora do sistema de vagas). Guarda só
+   {slotId,label,escolhidoEm} no CHATTER (não na ficha) — é um dado simples,
+   sem nada sensível, e precisa estar no array de chatters mesmo pra
+   sincronizar tanto com o link de tarefas (saber quais vagas já foram
+   ocupadas por outros) quanto com o documento dos padrinhos (avisar o
+   padrinho quando o afilhado escolhe).
+   =========================================================== */
+function listenToHorarioTestePendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','horarioTestePendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarHorarioTestePendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir horários de teste pendentes',err);
+    });
+}
+function aplicarHorarioTestePendente(docId,data){
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    c.horarioTeste={slotId:data.slotId||'',label:data.slotLabel||'',escolhidoEm:new Date().toISOString()};
+    save();
+    toast(`🗓️ ${c.name} escolheu o horário de teste: ${data.slotLabel||''}`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar horário de teste como processado',e));
+  }catch(e){
+    console.error('Erro ao aplicar horário de teste pendente',e);
   }
 }
 
