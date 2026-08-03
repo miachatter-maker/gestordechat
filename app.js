@@ -151,6 +151,7 @@ function migrateState(s){
   if(!s.testerLogs)s.testerLogs={};
   if(s.recadoPadrinhos==null)s.recadoPadrinhos='';
   if(s.reivindicacaoJanelaExtra===undefined)s.reivindicacaoJanelaExtra=null;
+  if(!Array.isArray(s.deserdarHistorico))s.deserdarHistorico=[];
   if(!s.melhoras)s.melhoras=[];
   else{const wk=getWeekKey();s.melhoras=s.melhoras.filter(m=>!m.done||m.doneWeek===wk);}
   if(!s.melhoraHistory)s.melhoraHistory=[];
@@ -11658,9 +11659,23 @@ function renderJanelaReivindicacaoStatus(){
     el.innerHTML='🔴 Fechada agora (só abre normalmente aos domingos, ou pelo botão acima).';
   }
 }
+function renderDeserdarHistorico(){
+  const el=document.getElementById('deserdar-historico-content');
+  if(!el)return;
+  const hist=S.deserdarHistorico||[];
+  if(!hist.length){
+    el.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Nenhuma deserção ainda.</div>';
+    return;
+  }
+  el.innerHTML=hist.map(h=>`<div style="border:1px solid var(--line);border-left:3px solid var(--bad);border-radius:9px;padding:10px 13px;margin-bottom:8px">
+    <div style="font-weight:700;font-size:13px">💔 ${h.padrinhoNome} deserdou ${h.testerNome}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px">${h.quando?new Date(h.quando).toLocaleString('pt-BR'):''} · volta pra lista de quem ainda não tem padrinho</div>
+  </div>`).join('');
+}
 function renderAfilhadoClaims(){
   renderRecadoPadrinhos();
   renderJanelaReivindicacaoStatus();
+  renderDeserdarHistorico();
   const el=document.getElementById('afilhado-claims-content');
   if(!el)return;
   const claims=S.afilhadoClaims||[];
@@ -12698,12 +12713,25 @@ function aplicarDeserdarPendente(docId,data){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado ou padrinho não confere mais'});
       return;
     }
+    const padrinhoNomeAntigo=c.padrinhoNome||data.padrinhoNome||'';
     ficha.padrinhoId='';
     c.temPadrinho=false;
     c.padrinhoNome='';
+    // Registro persistente — o toast() abaixo só aparece se o app estiver
+    // aberto e visível NA HORA EXATA em que isso acontece (achado em
+    // 03/08/2026: José deserdou o Fred e a gestora nunca viu nenhum aviso,
+    // porque o toast já tinha sumido da tela). Guarda os últimos 20 pra
+    // sempre dar pra conferir depois no quadro da aba Testers.
+    if(!Array.isArray(S.deserdarHistorico))S.deserdarHistorico=[];
+    S.deserdarHistorico.unshift({
+      testerId:id,testerNome:c.name,
+      padrinhoNome:padrinhoNomeAntigo||'Um padrinho',
+      quando:new Date().toISOString()
+    });
+    S.deserdarHistorico=S.deserdarHistorico.slice(0,20);
     save();
-    toast(`💔 ${data.padrinhoNome||'Um padrinho'} deserdou "${c.name}" — volta pra lista de quem ainda não tem padrinho.`);
-    if(currentViewName()==='testers')renderTesters();
+    toast(`💔 ${padrinhoNomeAntigo||'Um padrinho'} deserdou "${c.name}" — volta pra lista de quem ainda não tem padrinho.`);
+    if(currentViewName()==='testers'){renderTesters();renderAfilhadoClaims();}
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar deserdar como processado',e));
   }catch(e){
     console.error('Erro ao aplicar pedido de deserdar pendente',e);
