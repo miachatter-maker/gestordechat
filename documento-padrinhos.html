@@ -237,7 +237,17 @@ function getStatusDia(testerId,fridayKey,diaN,dataDia,prazo){
 function getMergedClaimForTester(testerId){
   const central=afilhadoClaimsLive.find(c=>c.testerId===testerId&&['pendente','aprovado','reservado'].includes(c.status));
   if(central)return central;
-  const raws=rawClaimDocs.filter(d=>d.testerId===testerId).sort((a,b)=>tsMillis(b.criadoEm)-tsMillis(a.criadoEm));
+  // Achado em 03/08/2026: essa fatia bruta (rawClaimDocs) existe só pra
+  // mostrar "pendente" na hora, no intervalo curto entre o padrinho clicar
+  // "Quero apadrinhar" e o app da gestora processar o pedido (marcando
+  // processado:true e refletindo em afilhadoClaimsLive). Sem o filtro
+  // !d.processado, um pedido JÁ DECIDIDO (aprovado ou reprovado — os dois
+  // tiram a entrada de afilhadoClaimsLive) ficava reaparecendo como
+  // "pendente" PRA SEMPRE aqui, porque o doc bruto no Firestore nunca é
+  // apagado, só marcado como processado. Foi o caso do "Arruda" — reprovado
+  // pela gestora, mas a tela dos padrinhos continuava travada mostrando
+  // "reivindicado, pendente" porque essa função ainda achava o doc velho.
+  const raws=rawClaimDocs.filter(d=>d.testerId===testerId&&!d.processado).sort((a,b)=>tsMillis(b.criadoEm)-tsMillis(a.criadoEm));
   if(raws.length)return{testerId,testerNome:raws[0].testerNome,padrinhoId:raws[0].padrinhoId,padrinhoNome:raws[0].padrinhoNome,status:'pendente'};
   return null;
 }
