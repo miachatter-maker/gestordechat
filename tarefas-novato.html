@@ -174,28 +174,11 @@ const HORARIO_SLOTS=[
   {id:'b3',grupo:'Sexta, sábado e domingo',opcao:'Opção 3',horario:'17h-19h'}
 ];
 function horarioSlotLabel(slot){return`${slot.grupo} · ${slot.opcao} (${slot.horario})`;}
-const VICTOR_HORARIO_FIXO_ID='c178553255567588';
-const VICTOR_HORARIO_FIXO_LABEL='Segunda 17h-20h, Quinta e Sexta 11h-15h';
 let mostrarPickerHorario=false;
 function horarioTesteHtml(tester){
-  if(tester.id===VICTOR_HORARIO_FIXO_ID){
-    // Sincroniza automaticamente (só uma vez) com o painel do padrinho, já
-    // que é um horário combinado manualmente com ele, fora do sistema de
-    // 6 vagas — sem isso o padrinho dele não veria o aviso de horário.
-    if(!tester.horarioTeste&&!localStorage.getItem('tn_horarioVictorEnviado')){
-      localStorage.setItem('tn_horarioVictorEnviado','1');
-      fbDb.collection('gestorpro').add({
-        type:'horarioTestePendente',processado:false,
-        testerId:tester.id,testerNome:tester.name,
-        slotId:'victor-fixo',slotLabel:VICTOR_HORARIO_FIXO_LABEL,
-        criadoEm:firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(e=>console.error(e));
-    }
-    return`<div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">🗓️ Seu horário de teste</div>
-      <div style="font-size:14px;font-weight:700">${VICTOR_HORARIO_FIXO_LABEL}</div>
-    </div>`;
-  }
+  // Exceção do horário fixo do Victor foi removida (03/08/2026, a pedido da
+  // gestora) — todo mundo usa o mesmo sistema de 6 vagas agora, sem
+  // exceção manual pra ninguém.
   const meuSlotId=(tester.horarioTeste&&tester.horarioTeste.slotId)||localStorage.getItem('tn_horarioSlot_'+tester.id)||'';
   const meuSlotLabel=(tester.horarioTeste&&tester.horarioTeste.label)||HORARIO_SLOTS.find(s=>s.id===meuSlotId)&&horarioSlotLabel(HORARIO_SLOTS.find(s=>s.id===meuSlotId))||'';
   if(meuSlotId&&!mostrarPickerHorario){
@@ -624,13 +607,13 @@ function renderTesterDays(testerId){
     // Ordem combinada com a gestora (03/08/2026): 1) mensagem de parabéns +
     // escolha de horário; 2) só depois de escolher horário, documentação
     // (dados PJ); 3) só depois de enviar os dados PJ, tela final de
-    // boas-vindas. Victor tem horário fixo (não escolhe) — conta como já
-    // escolhido assim que aprovado, senão ficaria travado nessa etapa.
-    const jaEscolheuHorario=tester.id===VICTOR_HORARIO_FIXO_ID||!!(tester.horarioTeste&&tester.horarioTeste.slotId)||!!localStorage.getItem('tn_horarioSlot_'+tester.id);
+    // boas-vindas. Sem exceção pra ninguém — todo mundo escolhe pelo mesmo
+    // sistema de 6 vagas (a exceção do Victor foi removida em 03/08/2026).
+    const jaEscolheuHorario=!!(tester.horarioTeste&&tester.horarioTeste.slotId)||!!localStorage.getItem('tn_horarioSlot_'+tester.id);
     if(jaEnviouPJ){
       const meuSlotIdBemVindo=(tester.horarioTeste&&tester.horarioTeste.slotId)||localStorage.getItem('tn_horarioSlot_'+tester.id)||'';
       const slotEncontrado=HORARIO_SLOTS.find(s=>s.id===meuSlotIdBemVindo);
-      const horarioLabel=tester.id===VICTOR_HORARIO_FIXO_ID?VICTOR_HORARIO_FIXO_LABEL:((tester.horarioTeste&&tester.horarioTeste.label)||(slotEncontrado&&horarioSlotLabel(slotEncontrado))||'');
+      const horarioLabel=(tester.horarioTeste&&tester.horarioTeste.label)||(slotEncontrado&&horarioSlotLabel(slotEncontrado))||'';
       el.innerHTML=`<div class="card" style="text-align:center">
         <div style="font-size:30px;margin-bottom:8px">🎉</div>
         <div style="font-size:15px;font-weight:800;margin-bottom:6px">Seja bem-vindo, até o teste!</div>
