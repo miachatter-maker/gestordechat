@@ -157,21 +157,25 @@ function getCicloAtual(){
 }
 function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
 
-// ---------- Horário de teste (6 vagas + exceção fixa do Victor) ----------
+// ---------- Horário de teste (8 vagas + exceção fixa do Victor) ----------
 // A pedido da gestora: depois de aprovado, em vez de "entraremos em contato
-// pra marcar horário", a pessoa já escolhe direto 1 dos 6 horários (2 grupos
-// de 3 dias × 3 opções cada) — o horário vale pros 3 dias do grupo. Uma vez
-// escolhido por alguém, some/fica cinza pros outros (é sincronizado via
-// central-dados, então todo mundo que estiver com a página aberta vê na
-// hora). O Victor tem horário combinado manualmente (fora desse sistema de
-// vagas) — só exibe o dele, sem picker.
+// pra marcar horário", a pessoa já escolhe direto 1 dos horários disponíveis
+// (grupos de dias × opções de horário cada) — o horário vale pros dias do
+// grupo. Uma vez escolhido por alguém, some/fica cinza pros outros (é
+// sincronizado via central-dados, então todo mundo que estiver com a página
+// aberta vê na hora). O Victor tem horário combinado manualmente (fora desse
+// sistema de vagas) — só exibe o dele, sem picker.
+// 04/08/2026 — a pedido da gestora: liberadas +2 vagas no grupo
+// Quarta/Quinta/Sexta (13h-17h e 19h-23h).
 const HORARIO_SLOTS=[
   {id:'a1',grupo:'Terça, quarta e quinta',opcao:'Opção 1',horario:'7h-10h'},
   {id:'a2',grupo:'Terça, quarta e quinta',opcao:'Opção 2',horario:'10h-13h'},
   {id:'a3',grupo:'Terça, quarta e quinta',opcao:'Opção 3',horario:'17h-19h'},
   {id:'b1',grupo:'Sexta, sábado e domingo',opcao:'Opção 1',horario:'7h-10h'},
   {id:'b2',grupo:'Sexta, sábado e domingo',opcao:'Opção 2',horario:'10h-13h'},
-  {id:'b3',grupo:'Sexta, sábado e domingo',opcao:'Opção 3',horario:'17h-19h'}
+  {id:'b3',grupo:'Sexta, sábado e domingo',opcao:'Opção 3',horario:'17h-19h'},
+  {id:'c1',grupo:'Quarta, quinta e sexta',opcao:'Opção 1',horario:'13h-17h'},
+  {id:'c2',grupo:'Quarta, quinta e sexta',opcao:'Opção 2',horario:'19h-23h'}
 ];
 function horarioSlotLabel(slot){return`${slot.grupo} · ${slot.opcao} (${slot.horario})`;}
 let mostrarPickerHorario=false;
