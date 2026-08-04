@@ -206,6 +206,54 @@ function renderEvolucao(mine){
       const MESES=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
       const [fy,fm]=(fin.monthKey||'').split('-').map(Number);
       const monthLabel=fy&&fm?MESES[fm-1]+'/'+fy:'';
+      // Pedido 04/08/2026: "quero que conste resumo diário, venda HT diário e
+      // resultados em ganhos, um resumo de toda a planilha, tudo visível na
+      // mesma página" — nada de accordion/expandir aqui, cada seção já vem
+      // aberta. Metas por semana mostram explicitamente bateu/não bateu e a
+      // medalha correspondente (mesma régua de % usada no pagamento real).
+      const diasSet=new Set([
+        ...Object.keys(fin.porDiaTurno||{}),
+        ...Object.keys(fin.porDiaExtra||{}),
+        ...Object.keys(fin.htPorDia||{})
+      ].map(Number));
+      const diasOrdenados=[...diasSet].sort((a,b)=>a-b);
+      const diaRowsFin=diasOrdenados.map(dia=>{
+        const t=(fin.porDiaTurno||{})[dia]||{valor:0,horas:0};
+        const ex=(fin.porDiaExtra||{})[dia]||{valor:0,horas:0};
+        const ht=(fin.htPorDia||{})[dia]||{count:0,valor:0};
+        const totalDia=(t.valor||0)+(ex.valor||0);
+        const horasDia=(t.horas||0)+(ex.horas||0);
+        let label=String(dia).padStart(2,'0');
+        if(fy&&fm){
+          try{label=dayName(fin.monthKey+'-'+String(dia).padStart(2,'0'));}catch(e){}
+        }
+        return`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--line);font-size:11px">
+          <span style="font-weight:600;min-width:70px">${label}</span>
+          <div style="display:flex;gap:8px;color:var(--text2);font-family:var(--font-mono);font-size:10.5px">
+            <span title="Faturamento do dia (turno + extra)">${money(totalDia)}</span>
+            <span title="Horas trabalhadas">${Math.round(horasDia*10)/10}h</span>
+            <span title="High tickets no dia" style="font-family:var(--font);color:${ht.count?'var(--accent-strong)':'var(--text3)'}">${ht.count?ht.count+'x HT · '+money(ht.valor):'—'}</span>
+          </div>
+        </div>`;
+      }).join('');
+      const produtoEntriesFin=Object.entries(fin.htPorProduto||{}).sort((a,b)=>(b[1].valor||0)-(a[1].valor||0));
+      const produtoRowsFin=produtoEntriesFin.map(([produto,d])=>`<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--line)">
+        <span style="color:var(--text2)">${produto}</span>
+        <span style="font-family:var(--font-mono)">${d.count}x · ${money(d.valor)}</span>
+      </div>`).join('');
+      const semanaRowsFin=(fin.porSemana||[]).map(s=>{
+        const bateu=s.bateuMeta!==undefined?s.bateuMeta:!!(s.nivel&&s.nivel!=='não bateu');
+        return`<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px">
+            <span style="color:var(--text2);font-weight:600">${s.semana}${s.categoria?' · cat. '+s.categoria:''}</span>
+            <span style="font-family:var(--font-mono)">${money(s.faturamento)} <span style="color:var(--text3)">(${Math.round((s.pctMeta||0)*100)}%)</span></span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:11px">
+            <span style="font-weight:700;color:${bateu?'var(--ok)':'var(--bad,#c0392b)'}">${bateu?'✅ bateu a meta':'❌ não bateu a meta'}${s.premio?' · prêmio '+money(s.premio):''}</span>
+            <span style="color:var(--text3)">${s.medal?PAG_MEDAL_LABEL[s.medal]:'sem medalha essa semana'}</span>
+          </div>
+        </div>`;
+      }).join('');
       monthHtml+=`<div class="card" style="border:1px solid var(--accent)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <div style="font-size:11px;font-weight:700;color:var(--accent-strong);text-transform:uppercase">📁 Financeiro oficial — ${monthLabel}</div>
@@ -216,16 +264,25 @@ function renderEvolucao(mine){
           <span style="font-size:11.5px;color:var(--text3)">de ${money(fin.meta)} (${Math.round((fin.pctMeta||0)*100)}%)</span>
         </div>
         <div class="progress-bar"><div class="progress-fill" style="background:${fin.atingiuMeta?'var(--ok)':'var(--accent)'};width:${Math.min(100,Math.round((fin.pctMeta||0)*100))}%"></div></div>
-        <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:11.5px;color:var(--text2)">
-          <span>⏱️ ${Math.round((fin.horasTotais||0)*10)/10}h no mês</span>
-          <span>💎 ${fin.htCount||0} high tickets</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
+          <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Turno</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fin.totalTurno||0)}</div></div>
+          <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Extra</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fin.totalExtra||0)}</div></div>
+          <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Horas no mês</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${Math.round((fin.horasTotais||0)*10)/10}h</div></div>
+          <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">High tickets</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${fin.htCount||0}</div></div>
+          <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Maior HT</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fin.htMaior||0)}</div></div>
+          <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Total em HT</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fin.htTotalValor||0)}</div></div>
         </div>
-        ${(fin.porSemana||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
-          ${fin.porSemana.map(s=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0">
-            <span style="color:var(--text2)">${s.semana}</span>
-            <span style="font-family:var(--font-mono);color:var(--text2)">${money(s.faturamento)}</span>
-            <span style="font-weight:700;color:${s.nivel&&s.nivel!=='não bateu'?'var(--ok)':'var(--text3)'}">${s.nivel||'—'}${s.premio?' · '+money(s.premio):''}</span>
-          </div>`).join('')}
+        ${semanaRowsFin?`<div style="margin-top:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">🗓️ Metas por semana</div>
+          ${semanaRowsFin}
+        </div>`:''}
+        ${produtoRowsFin?`<div style="margin-top:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">💎 High ticket por tipo</div>
+          ${produtoRowsFin}
+        </div>`:''}
+        ${diaRowsFin?`<div style="margin-top:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">📅 Resumo diário</div>
+          ${diaRowsFin}
         </div>`:''}
       </div>`;
     }

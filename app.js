@@ -9461,10 +9461,22 @@ function suggestTrainingText(chatterId){
     // (nome, CNPJ, endereço, telefone, e-mail, PIX ficam de fora por
     // completo — nem são lidos aqui, só o resumo calculado).
     const financeiroOficialSnap=finEvo?{
-      monthKey:monthKeyEvo,totalGeral:finEvo.totalGeral,meta:finEvo.meta,
-      pctMeta:finEvo.pctMeta,atingiuMeta:finEvo.atingiuMeta,horasTotais:finEvo.horasTotais,
-      htCount:finEvo.htCount,categoriaAtual:finEvo.categoriaAtual,
-      porSemana:(finEvo.porSemana||[]).map(s=>({semana:s.semana,categoria:s.categoria,faturamento:s.faturamento,nivel:s.nivel,premio:s.premio}))
+      monthKey:monthKeyEvo,totalGeral:finEvo.totalGeral,totalTurno:finEvo.totalTurno,totalExtra:finEvo.totalExtra,
+      meta:finEvo.meta,pctMeta:finEvo.pctMeta,atingiuMeta:finEvo.atingiuMeta,horasTotais:finEvo.horasTotais,
+      htCount:finEvo.htCount,htMaior:finEvo.htMaior,htBonusTotal:finEvo.htBonusTotal,htTotalValor:finEvo.htTotalValor,
+      categoriaAtual:finEvo.categoriaAtual,
+      // Resumo diário (turno+extra+HT por dia) e por tipo de produto de HT —
+      // pedido 04/08/2026 pra deixar o myperformance com "tudo visível na
+      // mesma página": nada aqui identifica cliente/CNPJ/PJ, só números de
+      // desempenho por dia, seguro pro link público.
+      porDiaTurno:finEvo.porDiaTurno||{},porDiaExtra:finEvo.porDiaExtra||{},
+      htPorDia:finEvo.htPorDia||{},htPorProduto:finEvo.htPorProduto||{},
+      porSemana:(finEvo.porSemana||[]).map(s=>({
+        semana:s.semana,categoria:s.categoria,faturamento:s.faturamento,pctMeta:s.pctMeta,
+        nivel:s.nivel,premio:s.premio,horas:s.horas,
+        bateuMeta:!!s.nivel&&s.nivel!=='não bateu',
+        medal:autoMedalForPct((s.pctMeta||0)*100)
+      }))
     }:null;
     const currentMonthSnap={
       monthRevenue:Math.round((monthEarnEvo.monthRevenue+monthEarnEvo.monthExtra)*100)/100,
@@ -14269,22 +14281,33 @@ function parseControleChatterWorkbook(wb,fileName){
   const metasSheet=wb.Sheets['Metas Semanais'];
   if(metasSheet)porSemana=ffParseMetasSemanais(XLSX.utils.sheet_to_json(metasSheet,{header:1,defval:null}));
 
-  let htCount=0,htMaior=0,htBonusTotal=0,htTotalValor=0;
+  let htCount=0,htMaior=0,htBonusTotal=0,htTotalValor=0,htPorDia={},htPorProduto={};
   const htSheet=wb.Sheets['High Tickets'];
   if(htSheet){
     const htRows=XLSX.utils.sheet_to_json(htSheet,{header:1,defval:null});
     // Soma direto das linhas de venda (coluna MODELO preenchida = venda real,
     // não linha vazia de indicador) — mais confiável que só ler o indicador
     // "Bônus total", porque também dá o valor bruto (sem o desconto do 8%),
-    // usado pra alimentar o cálculo de Pagamento do próprio app.
+    // usado pra alimentar o cálculo de Pagamento do próprio app. A planilha
+    // também tem colunas DIA (col1) e PRODUTO (col9) por venda — usadas pra
+    // montar o resumo diário de high ticket e o total por tipo de produto,
+    // pedido 04/08/2026 pra deixar o myperformance mais completo.
     const headerIdx=htRows.findIndex(r=>(r[0]||'').toString().trim()==='#');
     if(headerIdx>=0){
       for(let i=headerIdx+1;i<htRows.length;i++){
         const row=htRows[i];
         if(!row||row[3]==null||row[3]==='')continue;
         const valor=parseFloat(row[5])||0;
+        const dia=parseInt(row[1],10);
+        const produto=(row[9]||'').toString().trim()||'Outro';
         htCount++;htTotalValor+=valor;
         if(valor>htMaior)htMaior=valor;
+        if(dia){
+          if(!htPorDia[dia])htPorDia[dia]={count:0,valor:0};
+          htPorDia[dia].count++;htPorDia[dia].valor+=valor;
+        }
+        if(!htPorProduto[produto])htPorProduto[produto]={count:0,valor:0};
+        htPorProduto[produto].count++;htPorProduto[produto].valor+=valor;
       }
     }
     htBonusTotal=parseFloat(ffAchaValorEmQualquerCol(htRows,'Bônus total (8%)'))||Math.round(htTotalValor*0.08*100)/100;
@@ -14296,7 +14319,8 @@ function parseControleChatterWorkbook(wb,fileName){
 
   return{
     nomeRaw,monthKey,totalTurno,totalExtra,totalGeral,horasTotais,meta,atingiuMeta,pctMeta,
-    porDiaTurno,porDiaExtra,porSemana,categoriaAtual,htCount,htMaior,htBonusTotal,htTotalValor,arquivoNome:fileName
+    porDiaTurno,porDiaExtra,porSemana,categoriaAtual,htCount,htMaior,htBonusTotal,htTotalValor,
+    htPorDia,htPorProduto,arquivoNome:fileName
   };
 }
 function importarFaturamentoFinanceiro(e){
@@ -14326,6 +14350,7 @@ function importarFaturamentoFinanceiro(e){
               porDiaTurno:parsed.porDiaTurno,porDiaExtra:parsed.porDiaExtra,
               porSemana:parsed.porSemana,categoriaAtual:parsed.categoriaAtual,
               htCount:parsed.htCount,htMaior:parsed.htMaior,htBonusTotal:parsed.htBonusTotal,htTotalValor:parsed.htTotalValor,
+              htPorDia:parsed.htPorDia,htPorProduto:parsed.htPorProduto,
               nomeNaPlanilha:parsed.nomeRaw,arquivoNome:parsed.arquivoNome,
               importadoEm:new Date().toISOString()
             };
