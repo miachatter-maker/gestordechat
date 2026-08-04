@@ -7744,12 +7744,43 @@ function getChatterWeekHighTicket(chatterId,offset){
   return{avgHtPct,htTotal};
 }
 // Medalha automática — baseada no % da meta semanal batida (mesmos degraus do prêmio)
+// Mantida só por retrocompatibilidade (nada mais chama esta função a partir
+// de 04/08/2026 — ver autoMedalForChatter abaixo, que é a régua atual).
 function autoMedalForPct(pct){
   if(pct>=130)return 4; // 💎 Diamante
   if(pct>=100)return 3; // 🥇 Ouro
   if(pct>=85)return 2;  // 🥈 Prata
   if(pct>=70)return 1;  // 🥉 Bronze
   return 0;             // Sem medalha
+}
+// ---------- NOVA REGRA DE MEDALHAS (pedido 04/08/2026) ----------
+// Substitui inteiramente a régua por % de meta semanal (acima) em todo
+// lugar que decide a medalha (Pagamento, Evolução, myperformance, IA,
+// simuladores). Regra combinada, confirmada com a gestora:
+//  · Ouro    = faturamento do MÊS (turno+extra) ≥ R$24.000 — sozinho,
+//              não depende de categoria nem de semanas seguidas.
+//  · Diamante= faturamento do MÊS ≥ R$35.000 — mesma ideia, tem
+//              prioridade sobre Ouro (se bateu os dois, vale o maior).
+//  · Bronze  = categoria B cadastrada na Ficha do chatter E bateu 100%+
+//              da própria meta semanal da categoria B nas últimas 3
+//              semanas seguidas (semana atual + as 2 anteriores).
+//  · Prata   = mesma coisa, categoria C.
+//  · Categorias A/D/E não têm degrau de bronze/prata por semanas — só
+//    entram no jogo se o faturamento do mês bater Ouro/Diamante.
+// O override manual da gestora (dropdown de medalha em Pagamento) continua
+// funcionando por cima disso, sem mudança.
+function autoMedalForChatter(cid,cat,monthRevenueForGate){
+  const monthRev=monthRevenueForGate||0;
+  if(monthRev>=35000)return 4; // 💎 Diamante
+  if(monthRev>=24000)return 3; // 🥇 Ouro
+  if(cat==='B'||cat==='C'){
+    const catData=PAG_CATS[cat];
+    for(let o=0;o>-3;o--){
+      if(getChatterWeekRevenue(cid,o)<catData.n100)return 0;
+    }
+    return cat==='C'?2:1; // Prata=2, Bronze=1
+  }
+  return 0;
 }
 function getChatterWeekRevenue(id,offset){
   let t=0;
@@ -8175,9 +8206,9 @@ function checkMedalAchievements(){
   const chatters=getEstrategiaChatters();
   let changed=false;
   chatters.forEach(c=>{
-    const pct=calcChatterPctMeta(c,0);
-    if(pct==null)return;
-    const medalAtual=autoMedalForPct(pct);
+    const catMedal=S.chatterFichas?.[c.id]?.pagCategoria||'B';
+    const stMedal=getChatterMonthStats(c.id);
+    const medalAtual=autoMedalForChatter(c.id,catMedal,stMedal.monthRevenue+stMedal.monthExtra);
     const anterior=S.chatterLastMedal[c.id]??0;
     if(medalAtual>anterior){
       S.medalAchievements.unshift({
@@ -9312,8 +9343,8 @@ function suggestTrainingText(chatterId){
     // em Pagamento (categoria/medalha automática), só resumido aqui.
     const savedCatEvo=S.chatterFichas?.[c.id]?.pagCategoria||'B';
     const manualMedalRawEvo=S.chatterFichas?.[c.id]?.manualMedal;
-    const weekRevNowEvo=getChatterWeekRevenue(c.id,0);
-    const autoMedalEvo=autoMedalForPct(weekRevNowEvo>0?weekRevNowEvo/PAG_CATS[savedCatEvo].n100*100:0);
+    const statsEvoTmp=getChatterMonthStats(c.id);
+    const autoMedalEvo=autoMedalForChatter(c.id,savedCatEvo,statsEvoTmp.monthRevenue+statsEvoTmp.monthExtra);
     const medalAtualEvo=(manualMedalRawEvo!==undefined&&manualMedalRawEvo!=='')?parseInt(manualMedalRawEvo,10):autoMedalEvo;
     const monthEarnEvo=getChatterMonthEarnings(c.id,medalAtualEvo,savedCatEvo);
     const metaMensalEvo=PAG_CATS[savedCatEvo].n100*(getDaysInCurrentMonth()/7);
@@ -9463,8 +9494,11 @@ function suggestTrainingText(chatterId){
     const finPorSemanaMapped=(finEvo?.porSemana||[]).map(s=>({
       semana:s.semana,categoria:s.categoria,faturamento:s.faturamento,pctMeta:s.pctMeta,
       nivel:s.nivel,premio:s.premio,horas:s.horas,
-      bateuMeta:!!s.nivel&&s.nivel!=='não bateu',
-      medal:autoMedalForPct((s.pctMeta||0)*100)
+      bateuMeta:!!s.nivel&&s.nivel!=='não bateu'
+      // Não tem mais "medal" por semana individual — a régua nova
+      // (04/08/2026) não é mais por %/semana isolada: Bronze/Prata olham
+      // as últimas 3 semanas seguidas E Ouro/Diamante são valor absoluto
+      // do MÊS. A medalha atual (única, por chatter) está em recebimento.medalAtual.
     }));
     // Valores que a pessoa recebe (pedido 04/08/2026) — mesma régua de
     // pagamento usada em Pagamento/calcChatterPagamento, aplicada aos
@@ -9474,7 +9508,7 @@ function suggestTrainingText(chatterId){
     // planilha, então só somamos), bônus de 8% sobre high ticket e 10%
     // sobre hora extra. O "piso" continua só informativo (mínimo garantido,
     // não soma nem substitui o calculado) — mesma regra do resto do app.
-    const finMedalAtual=finPorSemanaMapped.length?finPorSemanaMapped[finPorSemanaMapped.length-1].medal:0;
+    const finMedalAtual=finEvo?autoMedalForChatter(c.id,savedCatEvo,finEvo.totalGeral):0;
     const finComissao=finEvo?Math.round((finEvo.totalGeral||0)*(PAG_COM[finMedalAtual]||0.04)*100)/100:0;
     const finPremioTotal=Math.round(finPorSemanaMapped.reduce((s,w)=>s+(w.premio||0),0)*100)/100;
     const finHtBonus=finEvo?Math.round((finEvo.htBonusTotal||(finEvo.htTotalValor||0)*0.08)*100)/100:0;
@@ -11379,7 +11413,8 @@ function buildOperationalContext(){
     const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
     const manualMedalRaw=S.chatterFichas?.[c.id]?.manualMedal;
     const catInfo=PAG_CATS[cat]||PAG_CATS.B;
-    const autoMedal=autoMedalForPct(fat>0?fat/catInfo.n100*100:0);
+    const statsCtx=getChatterMonthStats(c.id);
+    const autoMedal=autoMedalForChatter(c.id,cat,statsCtx.monthRevenue+statsCtx.monthExtra);
     const medal=(manualMedalRaw!==undefined&&manualMedalRaw!=='')?parseInt(manualMedalRaw,10):autoMedal;
     const metaManual=parseFloat((S.chatterWeekGoals[wkey]||{})[c.id])||0;
     const real=calcChatterPagamento(fat,medal,cat,htTotal,extraFat,metaManual);
@@ -14550,7 +14585,8 @@ function renderPagChattersAll(){
       const falta=Math.max(0,metaCat-weekRev);
       const remainDays=pagWeekOffset===0?getRemainingWorkDaysThisWeek(c.id):0;
       const faltaPorDia=falta>0&&remainDays>0?falta/remainDays:null;
-      const autoMedal=autoMedalForPct(pct);
+      const statsPagAll=getChatterMonthStats(c.id);
+      const autoMedal=autoMedalForChatter(c.id,cat,statsPagAll.monthRevenue+statsPagAll.monthExtra);
       const manualMedalRaw=S.chatterFichas?.[c.id]?.manualMedal;
       const hasManualMedal=manualMedalRaw!==undefined&&manualMedalRaw!==''&&manualMedalRaw!==null;
       const medal=hasManualMedal?parseInt(manualMedalRaw,10):autoMedal;
@@ -14653,7 +14689,8 @@ function toggleCatComparison(cid){
   const goals=S.chatterWeekGoals[wkey]||{};
   const metaVal=parseFloat(goals[cid])||0;
   const savedCat=S.chatterFichas?.[cid]?.pagCategoria||'B';
-  const autoMedal=autoMedalForPct(weekRev>0?weekRev/PAG_CATS[savedCat].n100*100:0);
+  const statsCatCmp=getChatterMonthStats(cid);
+  const autoMedal=autoMedalForChatter(cid,savedCat,statsCatCmp.monthRevenue+statsCatCmp.monthExtra);
   const medal=(manualMedalRaw!==undefined&&manualMedalRaw!=='')?parseInt(manualMedalRaw,10):autoMedal;
   el.innerHTML=`<div style="background:var(--bg);border-radius:8px;padding:8px 10px">
     <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Com o MESMO faturamento (${money(weekRev)}), veja quanto ${c.name.split(' ')[0]} ganharia em cada categoria — não muda a categoria dela de verdade, é só comparação</div>
@@ -14676,8 +14713,8 @@ function toggleMonthDashboard(cid){
   if(!c)return;
   const savedCat=S.chatterFichas?.[cid]?.pagCategoria||'B';
   const manualMedalRaw=S.chatterFichas?.[cid]?.manualMedal;
-  const weekRevNow=getChatterWeekRevenue(cid,0);
-  const autoMedal=autoMedalForPct(weekRevNow>0?weekRevNow/PAG_CATS[savedCat].n100*100:0);
+  const statsDashGate=getChatterMonthStats(cid);
+  const autoMedal=autoMedalForChatter(cid,savedCat,statsDashGate.monthRevenue+statsDashGate.monthExtra);
   const medal=(manualMedalRaw!==undefined&&manualMedalRaw!=='')?parseInt(manualMedalRaw,10):autoMedal;
   const earn=getChatterMonthEarnings(cid,medal,savedCat);
   const daysInMonth=getDaysInCurrentMonth();
@@ -15043,9 +15080,7 @@ function getProjecaoEmpresaData(overrides){
   chatters.forEach(c=>{
     const projMensal=getChatterAvgWeeklyRevenue(c.id)*(30/7)*fatorSimulador;
     const cat=S.chatterFichas?.[c.id]?.pagCategoria||'B';
-    const metaMensal=(parseFloat(goals[c.id])||PAG_CATS[cat]?.n100||0)*(30/7);
-    const pct=metaMensal>0?projMensal/metaMensal*100:0;
-    const medal=autoMedalForPct(pct);
+    const medal=autoMedalForChatter(c.id,cat,projMensal);
     comissaoChatters+=projMensal*(PAG_COM[medal]||0.04);
   });
 
@@ -15428,8 +15463,8 @@ function renderProjecaoChatter(cid,containerId){
     const cat=f.pagCategoria||'B';
     const metaManual=parseFloat(goalsNow[cid])||0;
     const metaCat=metaManual>0?metaManual:(PAG_CATS[cat]?.n100||0);
-    const pctNow=weekRev>0&&metaCat>0?Math.round(weekRev/metaCat*100):0;
-    const medalNow=autoMedalForPct(pctNow);
+    const statsFichaProj=getChatterMonthStats(cid);
+    const medalNow=autoMedalForChatter(cid,cat,statsFichaProj.monthRevenue+statsFichaProj.monthExtra);
     const pag=calcChatterPagamento(weekRev,medalNow,cat,htTotal,weekExtra,metaManual);
     const projGanhoMonth=pag.totalComPiso*(30/7);
     const projMonth=avgWeekRev*(30/7); // faturamento QUE ELE GERA, projetado pro mês
