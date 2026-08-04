@@ -241,6 +241,19 @@ function renderEvolucao(mine){
         <span style="color:var(--text2)">${produto}</span>
         <span style="font-family:var(--font-mono)">${d.count}x · ${money(d.valor)}</span>
       </div>`).join('');
+      const rec=fin.recebimento||null;
+      const recebimentoBlockFin=rec?`<div style="margin-top:14px;background:var(--ok-soft,#E7F5EE);border-radius:10px;padding:10px 12px">
+        <div style="font-size:10px;font-weight:700;color:var(--ok,#177350);text-transform:uppercase;margin-bottom:8px">💰 Quanto você recebe (mês)</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:var(--text2)">Comissão (${rec.comPct} do faturamento)</span><span style="font-family:var(--font-mono);font-weight:600">${money(rec.comissao)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:var(--text2)">Prêmios de meta (soma das semanas)</span><span style="font-family:var(--font-mono);font-weight:600">${money(rec.premioTotal)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:var(--text2)">Bônus high ticket (8%)</span><span style="font-family:var(--font-mono);font-weight:600">${money(rec.htBonus)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:var(--text2)">Bônus hora extra (10%)</span><span style="font-family:var(--font-mono);font-weight:600">${money(rec.extraBonus)}</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;padding-top:6px;border-top:1px solid var(--ok,#177350)">
+          <span style="font-size:12.5px;font-weight:700;color:var(--ok,#177350)">TOTAL A RECEBER</span>
+          <span style="font-family:var(--font-mono);font-weight:800;font-size:16px;color:var(--ok,#177350)">${money(rec.total)}</span>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:6px">Medalha atual: ${PAG_MEDAL_LABEL[rec.medalAtual]||''} · piso garantido de referência: ${money(rec.piso)}</div>
+      </div>`:'';
       const semanaRowsFin=(fin.porSemana||[]).map(s=>{
         const bateu=s.bateuMeta!==undefined?s.bateuMeta:!!(s.nivel&&s.nivel!=='não bateu');
         return`<div style="padding:6px 0;border-bottom:1px solid var(--line)">
@@ -272,6 +285,7 @@ function renderEvolucao(mine){
           <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Maior HT</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fin.htMaior||0)}</div></div>
           <div style="text-align:center"><div style="font-size:9px;color:var(--text3)">Total em HT</div><div style="font-size:12.5px;font-weight:700;font-family:var(--font-mono)">${money(fin.htTotalValor||0)}</div></div>
         </div>
+        ${recebimentoBlockFin}
         ${semanaRowsFin?`<div style="margin-top:14px">
           <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">🗓️ Metas por semana</div>
           ${semanaRowsFin}

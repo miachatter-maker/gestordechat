@@ -9460,6 +9460,27 @@ function suggestTrainingText(chatterId){
     // números de desempenho, NUNCA os dados pessoais/PJ da planilha
     // (nome, CNPJ, endereço, telefone, e-mail, PIX ficam de fora por
     // completo — nem são lidos aqui, só o resumo calculado).
+    const finPorSemanaMapped=(finEvo?.porSemana||[]).map(s=>({
+      semana:s.semana,categoria:s.categoria,faturamento:s.faturamento,pctMeta:s.pctMeta,
+      nivel:s.nivel,premio:s.premio,horas:s.horas,
+      bateuMeta:!!s.nivel&&s.nivel!=='não bateu',
+      medal:autoMedalForPct((s.pctMeta||0)*100)
+    }));
+    // Valores que a pessoa recebe (pedido 04/08/2026) — mesma régua de
+    // pagamento usada em Pagamento/calcChatterPagamento, aplicada aos
+    // números oficiais do financeiro: comissão sobre o faturamento total
+    // (% conforme a medalha da semana mais recente já lançada), soma dos
+    // prêmios de meta por semana (já vem calculado certinho da própria
+    // planilha, então só somamos), bônus de 8% sobre high ticket e 10%
+    // sobre hora extra. O "piso" continua só informativo (mínimo garantido,
+    // não soma nem substitui o calculado) — mesma regra do resto do app.
+    const finMedalAtual=finPorSemanaMapped.length?finPorSemanaMapped[finPorSemanaMapped.length-1].medal:0;
+    const finComissao=finEvo?Math.round((finEvo.totalGeral||0)*(PAG_COM[finMedalAtual]||0.04)*100)/100:0;
+    const finPremioTotal=Math.round(finPorSemanaMapped.reduce((s,w)=>s+(w.premio||0),0)*100)/100;
+    const finHtBonus=finEvo?Math.round((finEvo.htBonusTotal||(finEvo.htTotalValor||0)*0.08)*100)/100:0;
+    const finExtraBonus=finEvo?Math.round((finEvo.totalExtra||0)*0.10*100)/100:0;
+    const finTotalAReceber=Math.round((finComissao+finPremioTotal+finHtBonus+finExtraBonus)*100)/100;
+    const finPiso=PAG_PISO[finMedalAtual]||1000;
     const financeiroOficialSnap=finEvo?{
       monthKey:monthKeyEvo,totalGeral:finEvo.totalGeral,totalTurno:finEvo.totalTurno,totalExtra:finEvo.totalExtra,
       meta:finEvo.meta,pctMeta:finEvo.pctMeta,atingiuMeta:finEvo.atingiuMeta,horasTotais:finEvo.horasTotais,
@@ -9471,12 +9492,13 @@ function suggestTrainingText(chatterId){
       // desempenho por dia, seguro pro link público.
       porDiaTurno:finEvo.porDiaTurno||{},porDiaExtra:finEvo.porDiaExtra||{},
       htPorDia:finEvo.htPorDia||{},htPorProduto:finEvo.htPorProduto||{},
-      porSemana:(finEvo.porSemana||[]).map(s=>({
-        semana:s.semana,categoria:s.categoria,faturamento:s.faturamento,pctMeta:s.pctMeta,
-        nivel:s.nivel,premio:s.premio,horas:s.horas,
-        bateuMeta:!!s.nivel&&s.nivel!=='não bateu',
-        medal:autoMedalForPct((s.pctMeta||0)*100)
-      }))
+      porSemana:finPorSemanaMapped,
+      // Valores a receber — indicadores de pagamento (pedido 04/08/2026)
+      recebimento:{
+        medalAtual:finMedalAtual,comPct:PAG_COM_LABEL[finMedalAtual]||'4%',
+        comissao:finComissao,premioTotal:finPremioTotal,htBonus:finHtBonus,extraBonus:finExtraBonus,
+        total:finTotalAReceber,piso:finPiso
+      }
     }:null;
     const currentMonthSnap={
       monthRevenue:Math.round((monthEarnEvo.monthRevenue+monthEarnEvo.monthExtra)*100)/100,
