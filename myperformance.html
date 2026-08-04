@@ -197,6 +197,38 @@ function renderEvolucao(mine){
       <div class="progress-bar"><div class="progress-fill" style="background:${cm.pctMes>=100?'var(--ok)':'var(--accent)'};width:${Math.min(100,cm.pctMes)}%"></div></div>
       ${cm.medalPendente?`<div style="margin-top:10px;background:var(--accent-soft);border-radius:8px;padding:10px 12px;font-size:12.5px">🎉 ${PAG_MEDAL_LABEL[cm.medalPendente.medal]||''} — você tem direito a uma nova medalha essa semana! Fale com sua gestora.</div>`:''}
     </div>`;
+    // Financeiro oficial (pedido 04/08/2026) — mesmo resumo que a gestora vê
+    // em Evolução, só que sem NENHUM dado pessoal/PJ (nome completo, CNPJ,
+    // endereço, telefone, e-mail, PIX ficam de fora — só os números de
+    // desempenho, que já eram o que essa pessoa preencheu/gerou).
+    const fin=cm.financeiroOficial;
+    if(fin){
+      const MESES=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+      const [fy,fm]=(fin.monthKey||'').split('-').map(Number);
+      const monthLabel=fy&&fm?MESES[fm-1]+'/'+fy:'';
+      monthHtml+=`<div class="card" style="border:1px solid var(--accent)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:11px;font-weight:700;color:var(--accent-strong);text-transform:uppercase">📁 Financeiro oficial — ${monthLabel}</div>
+          ${fin.categoriaAtual?`<div style="font-size:11px;color:var(--text2);font-weight:700">Categoria ${fin.categoriaAtual}</div>`:''}
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <span style="font-family:var(--font-mono);font-weight:800;font-size:18px">${money(fin.totalGeral)}</span>
+          <span style="font-size:11.5px;color:var(--text3)">de ${money(fin.meta)} (${Math.round((fin.pctMeta||0)*100)}%)</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="background:${fin.atingiuMeta?'var(--ok)':'var(--accent)'};width:${Math.min(100,Math.round((fin.pctMeta||0)*100))}%"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:11.5px;color:var(--text2)">
+          <span>⏱️ ${Math.round((fin.horasTotais||0)*10)/10}h no mês</span>
+          <span>💎 ${fin.htCount||0} high tickets</span>
+        </div>
+        ${(fin.porSemana||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
+          ${fin.porSemana.map(s=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0">
+            <span style="color:var(--text2)">${s.semana}</span>
+            <span style="font-family:var(--font-mono);color:var(--text2)">${money(s.faturamento)}</span>
+            <span style="font-weight:700;color:${s.nivel&&s.nivel!=='não bateu'?'var(--ok)':'var(--text3)'}">${s.nivel||'—'}${s.premio?' · '+money(s.premio):''}</span>
+          </div>`).join('')}
+        </div>`:''}
+      </div>`;
+    }
   }
   const weekKeys=Object.keys(mine).filter(k=>k!=='currentMonth').sort().reverse();
   let weeksHtml='';

@@ -4749,7 +4749,15 @@ function getChatterExtraRevenue(chatterId,offset){
   const wkey=getWeekKey(offset);
   const isReserva=S.chatterFichas?.[chatterId]?.testerDecision==='espera';
   if(isReserva)return getChatterWeekRevenue(chatterId,offset); // reserva: 100% do faturamento conta como hora extra
-  return (S.horaExtraSlots[wkey]||[]).filter(x=>x.shiftId==='parsed'&&x.chatterId===chatterId).reduce((s,x)=>s+(parseFloat(x.revenue)||0),0);
+  const slots=(S.horaExtraSlots[wkey]||[]).filter(x=>x.shiftId==='parsed'&&x.chatterId===chatterId);
+  let t=0;
+  getWeekDates(offset).forEach(d=>{
+    const dk=fmt(d);
+    const fin=getChatterDayRevenueFinanceiro(chatterId,dk);
+    if(fin){t+=fin.extra;return;}
+    t+=slots.filter(x=>x.dateKey===dk).reduce((s,x)=>s+(parseFloat(x.revenue)||0),0);
+  });
+  return t;
 }
 
 /* ===========================================================
@@ -7744,7 +7752,13 @@ function autoMedalForPct(pct){
   return 0;             // Sem medalha
 }
 function getChatterWeekRevenue(id,offset){
-  let t=0;getWeekDates(offset).forEach(d=>S.models.forEach(m=>{t+=parseFloat(S.revenues[`${id}_${m.id}_${fmt(d)}`])||0;}));
+  let t=0;
+  getWeekDates(offset).forEach(d=>{
+    const dk=fmt(d);
+    const fin=getChatterDayRevenueFinanceiro(id,dk);
+    if(fin){t+=fin.turno;return;}
+    S.models.forEach(m=>{t+=parseFloat(S.revenues[`${id}_${m.id}_${dk}`])||0;});
+  });
   return t;
 }
 // Revenue for DISPLAY — INCLUDES hora extra
@@ -9442,12 +9456,23 @@ function suggestTrainingText(chatterId){
     }
     // Também guarda o progresso mensal já calculado (sem categoria/PAG_CATS
     // no link público — só o número final, que não é sensível)
+    // Financeiro oficial pro link público (pedido 04/08/2026) — só os
+    // números de desempenho, NUNCA os dados pessoais/PJ da planilha
+    // (nome, CNPJ, endereço, telefone, e-mail, PIX ficam de fora por
+    // completo — nem são lidos aqui, só o resumo calculado).
+    const financeiroOficialSnap=finEvo?{
+      monthKey:monthKeyEvo,totalGeral:finEvo.totalGeral,meta:finEvo.meta,
+      pctMeta:finEvo.pctMeta,atingiuMeta:finEvo.atingiuMeta,horasTotais:finEvo.horasTotais,
+      htCount:finEvo.htCount,categoriaAtual:finEvo.categoriaAtual,
+      porSemana:(finEvo.porSemana||[]).map(s=>({semana:s.semana,categoria:s.categoria,faturamento:s.faturamento,nivel:s.nivel,premio:s.premio}))
+    }:null;
     const currentMonthSnap={
       monthRevenue:Math.round((monthEarnEvo.monthRevenue+monthEarnEvo.monthExtra)*100)/100,
       metaMensal:Math.round(metaMensalEvo*100)/100,
       pctMes:pctMesEvo,
       medal:medalAtualEvo,
-      medalPendente:medalPendenteEvo?{id:medalPendenteEvo.id,medal:medalPendenteEvo.medal}:null
+      medalPendente:medalPendenteEvo?{id:medalPendenteEvo.id,medal:medalPendenteEvo.medal}:null,
+      financeiroOficial:financeiroOficialSnap
     };
     if(JSON.stringify(S.chatterWeeklySummaries[c.id].currentMonth)!==JSON.stringify(currentMonthSnap)){
       S.chatterWeeklySummaries[c.id].currentMonth=currentMonthSnap;
@@ -13255,23 +13280,36 @@ function getChatterMonthStats(cid){
   const analytics=f?.analytics?.weeklyData||{};
   let monthRevenue=0,monthExtra=0,monthHtTotal=0,ticketSum=0,ticketDays=0,vendasSum=0,diasTrabalhados=0,horasSum=0;
   const dayByDay=[];
+  // Pedido 04/08/2026: quando o mês desse chatter foi importado do
+  // financeiro, faturamento/horas por dia e o total de high ticket vêm de
+  // lá (mais preciso — é a fonte que o financeiro realmente fecha), não do
+  // lançamento manual/ChatLab. Alimenta Pagamento por igual.
+  const todayMonthKey=fmt(new Date()).slice(0,7);
+  const finMes=getChatterFinanceiroMes(cid,todayMonthKey);
   days.forEach(day=>{
     const dk=fmt(day);
-    let dayRev=0;
-    S.models.forEach(m=>{dayRev+=parseFloat(S.revenues[`${cid}_${m.id}_${dk}`])||0;});
+    let dayRev=0,dayExtra=0,dayHoras=0;
+    const fin=getChatterDayRevenueFinanceiro(cid,dk);
     const a=analytics[dk];
-    const dayExtra=a?.extraTotal||0;
+    if(fin){
+      dayRev=fin.turno;dayExtra=fin.extra;dayHoras=fin.horasTurno+fin.horasExtra;
+    }else{
+      S.models.forEach(m=>{dayRev+=parseFloat(S.revenues[`${cid}_${m.id}_${dk}`])||0;});
+      dayExtra=a?.extraTotal||0;
+      dayHoras=a?.shiftHours||0;
+    }
     monthRevenue+=dayRev;
     monthExtra+=dayExtra;
+    horasSum+=dayHoras;
     if(a){
-      monthHtTotal+=a.highTicketTotal||0;
+      if(!fin)monthHtTotal+=a.highTicketTotal||0; // com financeiro, HT vem de lá (override abaixo)
       vendasSum+=a.totalVendas||0;
       if(a.ticketMedio>0){ticketSum+=a.ticketMedio;ticketDays++;}
-      horasSum+=a.shiftHours||0;
     }
     if(dayRev>0||dayExtra>0||(a&&a.totalVendas>0)){diasTrabalhados++;}
     dayByDay.push({date:dk,rev:dayRev+dayExtra});
   });
+  if(finMes)monthHtTotal=finMes.htTotalValor||monthHtTotal;
   const avgTicket=ticketDays>0?ticketSum/ticketDays:0;
   const avgHtPct=monthRevenue+monthExtra>0?Math.round((monthHtTotal/(monthRevenue+monthExtra))*100):0;
   const mediaPorDia=diasTrabalhados>0?(monthRevenue+monthExtra)/diasTrabalhados:0;
@@ -13671,6 +13709,23 @@ function renderMetricas(){
    =========================================================== */
 function getChatterFinanceiroMes(chatterId,monthKey){
   return(S.faturamentoFinanceiro&&S.faturamentoFinanceiro[chatterId]&&S.faturamentoFinanceiro[chatterId][monthKey])||null;
+}
+// Pedido 04/08/2026: "todas as informações devem abastecer Faturamento
+// Semanal, Métricas, Pagamento e Projeção" — não basta só a Performance
+// Mensal. Esse é o helper de base (por DIA) que todas as funções de
+// faturamento passam a consultar primeiro; se o mês daquele chatter foi
+// importado do financeiro, TODOS os dias daquele mês passam a vir de lá
+// (mesmo os com valor zero — o mês inteiro fica "governado" pela planilha
+// oficial), e só cai pro lançamento manual (S.revenues/horaExtraSlots) nos
+// meses que ainda não foram importados.
+function getChatterDayRevenueFinanceiro(chatterId,dateKey){
+  const monthKey=dateKey.slice(0,7);
+  const fin=getChatterFinanceiroMes(chatterId,monthKey);
+  if(!fin)return null;
+  const dia=parseInt(dateKey.slice(8,10),10);
+  const dt=(fin.porDiaTurno&&fin.porDiaTurno[dia])||{valor:0,horas:0};
+  const de=(fin.porDiaExtra&&fin.porDiaExtra[dia])||{valor:0,horas:0};
+  return{turno:dt.valor||0,extra:de.valor||0,horasTurno:dt.horas||0,horasExtra:de.horas||0};
 }
 function getChatterMonthRevenue(chatterId,monthKey){
   // Se essa pessoa+mês tem planilha oficial do financeiro importada, ela vale
@@ -14214,13 +14269,25 @@ function parseControleChatterWorkbook(wb,fileName){
   const metasSheet=wb.Sheets['Metas Semanais'];
   if(metasSheet)porSemana=ffParseMetasSemanais(XLSX.utils.sheet_to_json(metasSheet,{header:1,defval:null}));
 
-  let htCount=0,htMaior=0,htBonusTotal=0;
+  let htCount=0,htMaior=0,htBonusTotal=0,htTotalValor=0;
   const htSheet=wb.Sheets['High Tickets'];
   if(htSheet){
     const htRows=XLSX.utils.sheet_to_json(htSheet,{header:1,defval:null});
-    htCount=parseFloat(ffAchaValorEmQualquerCol(htRows,'Nº de high tickets'))||0;
-    htMaior=parseFloat(ffAchaValorEmQualquerCol(htRows,'Maior high ticket'))||0;
-    htBonusTotal=parseFloat(ffAchaValorEmQualquerCol(htRows,'Bônus total (8%)'))||0;
+    // Soma direto das linhas de venda (coluna MODELO preenchida = venda real,
+    // não linha vazia de indicador) — mais confiável que só ler o indicador
+    // "Bônus total", porque também dá o valor bruto (sem o desconto do 8%),
+    // usado pra alimentar o cálculo de Pagamento do próprio app.
+    const headerIdx=htRows.findIndex(r=>(r[0]||'').toString().trim()==='#');
+    if(headerIdx>=0){
+      for(let i=headerIdx+1;i<htRows.length;i++){
+        const row=htRows[i];
+        if(!row||row[3]==null||row[3]==='')continue;
+        const valor=parseFloat(row[5])||0;
+        htCount++;htTotalValor+=valor;
+        if(valor>htMaior)htMaior=valor;
+      }
+    }
+    htBonusTotal=parseFloat(ffAchaValorEmQualquerCol(htRows,'Bônus total (8%)'))||Math.round(htTotalValor*0.08*100)/100;
   }
 
   // Categoria/medalha atual = a da semana mais recente já lançada (o
@@ -14229,7 +14296,7 @@ function parseControleChatterWorkbook(wb,fileName){
 
   return{
     nomeRaw,monthKey,totalTurno,totalExtra,totalGeral,horasTotais,meta,atingiuMeta,pctMeta,
-    porDiaTurno,porDiaExtra,porSemana,categoriaAtual,htCount,htMaior,htBonusTotal,arquivoNome:fileName
+    porDiaTurno,porDiaExtra,porSemana,categoriaAtual,htCount,htMaior,htBonusTotal,htTotalValor,arquivoNome:fileName
   };
 }
 function importarFaturamentoFinanceiro(e){
@@ -14258,7 +14325,7 @@ function importarFaturamentoFinanceiro(e){
               horasTotais:parsed.horasTotais,meta:parsed.meta,atingiuMeta:parsed.atingiuMeta,pctMeta:parsed.pctMeta,
               porDiaTurno:parsed.porDiaTurno,porDiaExtra:parsed.porDiaExtra,
               porSemana:parsed.porSemana,categoriaAtual:parsed.categoriaAtual,
-              htCount:parsed.htCount,htMaior:parsed.htMaior,htBonusTotal:parsed.htBonusTotal,
+              htCount:parsed.htCount,htMaior:parsed.htMaior,htBonusTotal:parsed.htBonusTotal,htTotalValor:parsed.htTotalValor,
               nomeNaPlanilha:parsed.nomeRaw,arquivoNome:parsed.arquivoNome,
               importadoEm:new Date().toISOString()
             };
@@ -14728,7 +14795,11 @@ function getCompanyMonthToDateRevenue(){
   let total=0;
   for(let d=1;d<=today.getDate();d++){
     const key=fmt(new Date(year,month,d));
-    chatters.forEach(c=>S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;}));
+    chatters.forEach(c=>{
+      const fin=getChatterDayRevenueFinanceiro(c.id,key);
+      if(fin){total+=fin.turno+fin.extra;return;}
+      S.models.forEach(m=>{total+=parseFloat(S.revenues[`${c.id}_${m.id}_${key}`])||0;});
+    });
   }
   return total;
 }
@@ -14846,11 +14917,15 @@ function getProjecaoEmpresaData(overrides){
   const goals=S.chatterWeekGoals[wkey]||{};
   const wd=getWeekDates(0);
 
-  // Faturamento de hoje, por modelo e total
+  // Faturamento de hoje, por modelo e total — por modelo continua só do
+  // lançamento manual (o financeiro não quebra por conta/modelo), mas o
+  // total do dia usa o financeiro quando o mês da pessoa já foi importado.
   const todayKey=fmt(new Date());
   const porModelo={};
   let hojeTotal=0;
   chatters.forEach(c=>{
+    const fin=getChatterDayRevenueFinanceiro(c.id,todayKey);
+    if(fin){hojeTotal+=fin.turno+fin.extra;return;}
     (S.models||[]).forEach(m=>{
       const v=parseFloat(S.revenues[`${c.id}_${m.id}_${todayKey}`])||0;
       if(v>0){porModelo[m.id]=(porModelo[m.id]||0)+v;hojeTotal+=v;}
@@ -15199,10 +15274,22 @@ function getChatterAvgWeeklyRevenue(cid){
   const f=S.chatterFichas[cid]||{};
   const analytics=f.analytics?.weeklyData||{};
   const weekGroups={};
-  Object.keys(analytics).forEach(dk=>{
+  // Pedido 04/08/2026: junta os dias que só existem no financeiro (mês
+  // importado, sem lançamento manual/ChatLab correspondente) com os dias
+  // do ChatLab, pra Projeção enxergar tudo — dia com financeiro sempre
+  // prevalece sobre o ChatLab pro mesmo dia.
+  const dateKeys=new Set(Object.keys(analytics));
+  Object.keys(S.faturamentoFinanceiro?.[cid]||{}).forEach(monthKey=>{
+    Object.keys(S.faturamentoFinanceiro[cid][monthKey].porDiaTurno||{}).forEach(dia=>{
+      dateKeys.add(monthKey+'-'+String(dia).padStart(2,'0'));
+    });
+  });
+  dateKeys.forEach(dk=>{
     const d=new Date(dk+'T12:00:00');
     const wk=fmt(getMondayOfWeek(d));
-    weekGroups[wk]=(weekGroups[wk]||0)+(analytics[dk].chatterTotal||0);
+    const fin=getChatterDayRevenueFinanceiro(cid,dk);
+    const dayTotal=fin?(fin.turno+fin.extra):(analytics[dk]?.chatterTotal||0);
+    weekGroups[wk]=(weekGroups[wk]||0)+dayTotal;
   });
   const recentWeeks=Object.keys(weekGroups).sort().reverse().slice(0,4);
   const weekRevs=recentWeeks.map(wk=>weekGroups[wk]).filter(v=>v>0);
