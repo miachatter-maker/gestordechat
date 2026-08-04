@@ -211,6 +211,7 @@ function migrateState(s){
     obs:''
   }];
   if(!s.analiseMensal)s.analiseMensal=[]; // [{id,modelId,modelName,monthKey,importadoEm,totalFaturamento,totalVendas,htCount,htTotal,htComissao,htPctVendas,htPctFaturamento,porTipo,whales,porChatter,naoAtribuidoTotal,naoAtribuidoCount}] — Análise Mensal de Vendas (planilhas importadas por modelo, só o resumo calculado é guardado)
+  if(!s.faturamentoFinanceiro)s.faturamentoFinanceiro={}; // {[chatterId]:{[monthKey]:{totalTurno,totalExtra,totalGeral,meta,atingiuMeta,pctMeta,horasTotais,porDiaTurno,porDiaExtra,arquivoNome,nomeNaPlanilha,importadoEm}}} — pedido 04/08/2026: substitui o lançamento manual na Performance Mensal pelas planilhas oficiais do financeiro (uma .xlsx por chatter, com aba Fechamento já calculada)
   // Estratégias de Liderança — substitui o antigo quadro "Motivacional da
   // semana" (texto livre) por uma lista de ações de verdade, organizadas por
   // prazo (imediato/curto/médio/estrutural), cada uma marcável como feita,
@@ -13609,6 +13610,7 @@ function renderMetricas(){
   const data=buildMetricasData(weekOffset);
   _metricasDataCache=data;
   el.innerHTML=renderMetricasTabelaChatters(data)+renderMetricasRankingCrescimento(data)+renderMetricasID(data)+renderMetricasEvolucaoModelo(data)+renderMetricasLeaderboard(data);
+  renderFaturamentoFinanceiro();
   renderMetricasPerformanceMensal();
   renderMetricasTreinamento();
   renderMetricasAnaliseMensal();
@@ -13621,7 +13623,15 @@ function renderMetricas(){
    serve pra gestora avaliar a própria liderança olhando quem está
    evoluindo e quem está caindo, mês a mês.
    =========================================================== */
+function getChatterFinanceiroMes(chatterId,monthKey){
+  return(S.faturamentoFinanceiro&&S.faturamentoFinanceiro[chatterId]&&S.faturamentoFinanceiro[chatterId][monthKey])||null;
+}
 function getChatterMonthRevenue(chatterId,monthKey){
+  // Se essa pessoa+mês tem planilha oficial do financeiro importada, ela vale
+  // como fonte — só cai pro lançamento manual (S.revenues) quando não tem
+  // importação (pedido 04/08/2026).
+  const fin=getChatterFinanceiroMes(chatterId,monthKey);
+  if(fin)return fin.totalTurno||0;
   let t=0;
   const prefix=chatterId+'_';
   Object.keys(S.revenues||{}).forEach(key=>{
@@ -13635,6 +13645,8 @@ function getChatterMonthRevenue(chatterId,monthKey){
   return t;
 }
 function getChatterMonthExtraRevenue(chatterId,monthKey){
+  const fin=getChatterFinanceiroMes(chatterId,monthKey);
+  if(fin)return fin.totalExtra||0;
   let t=0;
   Object.values(S.horaExtraSlots||{}).forEach(arr=>{
     (arr||[]).forEach(slot=>{
@@ -13663,7 +13675,8 @@ function renderMetricasPerformanceMensal(){
     const atual=getChatterMonthRevenue(c.id,monthKey)+getChatterMonthExtraRevenue(c.id,monthKey);
     const anterior=getChatterMonthRevenue(c.id,prevKey)+getChatterMonthExtraRevenue(c.id,prevKey);
     const variacao=anterior>0?Math.round(((atual-anterior)/anterior)*100):(atual>0?100:null);
-    return{c,atual,anterior,variacao};
+    const fonteFinanceiro=!!getChatterFinanceiroMes(c.id,monthKey);
+    return{c,atual,anterior,variacao,fonteFinanceiro};
   }).sort((a,b)=>b.atual-a.atual);
 
   function interpretar(v,atual){
@@ -13683,7 +13696,7 @@ function renderMetricasPerformanceMensal(){
     <tbody>${rows.map(r=>{
       const interp=interpretar(r.variacao,r.atual);
       return`<tr>
-        <td>${r.c.name}</td>
+        <td>${r.c.name}${r.fonteFinanceiro?' <span title="Faturamento oficial importado do financeiro" style="font-size:9.5px;font-weight:700;color:var(--accent-strong)">📁</span>':''}</td>
         <td style="text-align:right;font-family:var(--font-mono)">${money(r.atual)}</td>
         <td style="text-align:right;font-family:var(--font-mono);color:var(--text3)">${money(r.anterior)}</td>
         <td style="text-align:right;font-weight:700;color:${r.variacao==null?'var(--text3)':r.variacao>=0?'var(--ok)':'var(--bad)'}">${r.variacao==null?'—':(r.variacao>=0?'+':'')+r.variacao+'%'}</td>
@@ -14027,6 +14040,189 @@ function removerAnaliseMensal(id){
   S.analiseMensal=(S.analiseMensal||[]).filter(a=>a.id!==id);
   save();
   onAnaliseMensalModelChange();
+}
+
+/* ===========================================================
+   FATURAMENTO OFICIAL DO FINANCEIRO — pedido 04/08/2026: o
+   financeiro compartilha (via Drive) uma planilha .xlsx por
+   chatter ("Nome_Seduct_Controle_Chatter.xlsx"), com abas
+   Parâmetros (nome/mês), Controle Diário Turno/Extra (dia a dia)
+   e Fechamento (totais do mês já calculados: faturamento
+   turno+extra, meta, % da meta, horas). Importa vários arquivos
+   de uma vez (um por chatter), casa cada um com o chatter certo
+   pelo nome (mesmo com apelido/variação) e guarda só o resumo —
+   esse resumo passa a valer como faturamento oficial na
+   Performance Mensal (getChatterMonthRevenue/
+   getChatterMonthExtraRevenue), no lugar do lançamento manual
+   diário, pra essa pessoa+mês específicos. O lançamento manual
+   diário (aba Financeiro) continua existindo pra quem ainda não
+   tem planilha importada, e pros outros usos (ranking Semana,
+   Relatório Semanal etc.) que dependem de S.revenues por modelo —
+   só a leitura de Performance Mensal foi trocada por enquanto.
+   =========================================================== */
+function ffMatchChatter(nomePlanilha){
+  const norm=normalizeName(nomePlanilha);
+  if(!norm)return null;
+  const normWords=norm.split(/\s+/).filter(w=>w.length>=3);
+  let best=null,bestScore=0;
+  (S.chatters||[]).forEach(c=>{
+    const cn=normalizeName(c.name);
+    if(!cn)return;
+    if(cn===norm){best=c;bestScore=999;return;}
+    if(bestScore>=999)return;
+    if(norm.includes(cn)||cn.includes(norm)){
+      const score=100+Math.min(cn.length,norm.length);
+      if(score>bestScore){bestScore=score;best=c;}
+      return;
+    }
+    const cWords=cn.split(/\s+/).filter(w=>w.length>=3);
+    const shared=cWords.filter(w=>normWords.includes(w)).length;
+    if(shared>0&&shared>bestScore){bestScore=shared;best=c;}
+  });
+  return bestScore>0?best:null;
+}
+function ffAchaLabel(rows,label){
+  return rows.find(r=>(r[0]||'').toString().trim().toLowerCase()===label.toLowerCase());
+}
+function ffAchaValor(rows,label,col){
+  const row=ffAchaLabel(rows,label);
+  if(!row)return null;
+  if(col!=null&&row[col]!=null&&row[col]!=='')return row[col];
+  // fallback: primeiro valor não-vazio depois da coluna 0
+  for(let i=1;i<row.length;i++){if(row[i]!=null&&row[i]!=='')return row[i];}
+  return null;
+}
+function ffParsePorDia(rows,valorCol,horasCol){
+  const headerIdx=rows.findIndex(r=>(r[0]||'').toString().trim().toUpperCase()==='DIA');
+  if(headerIdx<0)return{};
+  const out={};
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const row=rows[i];
+    const dia=row&&row[0];
+    if(dia==null||dia===''||isNaN(Number(dia)))break;
+    out[Math.round(Number(dia))]={valor:parseFloat(row[valorCol])||0,horas:parseFloat(row[horasCol])||0};
+  }
+  return out;
+}
+function parseControleChatterWorkbook(wb,fileName){
+  const paramSheet=wb.Sheets['Parâmetros'];
+  const fechamentoSheet=wb.Sheets['Fechamento'];
+  if(!paramSheet||!fechamentoSheet)return{erro:'Planilha não parece ser o modelo "Controle Chatter" (faltam abas Parâmetros/Fechamento).'};
+  const paramRows=XLSX.utils.sheet_to_json(paramSheet,{header:1,defval:null});
+  const fechRows=XLSX.utils.sheet_to_json(fechamentoSheet,{header:1,defval:null});
+
+  const nomeRaw=(ffAchaValor(paramRows,'Nome do chatter',1)||'').toString().trim();
+  if(!nomeRaw)return{erro:'Não encontrei "Nome do chatter" na aba Parâmetros.'};
+  const mesRefRaw=ffAchaValor(paramRows,'Mês / Ano (referência)',1);
+  const mesRefDate=amParseDataCell(mesRefRaw);
+  if(!mesRefDate)return{erro:'Não encontrei o "Mês / Ano (referência)" na aba Parâmetros.'};
+  const monthKey=mesRefDate.getFullYear()+'-'+String(mesRefDate.getMonth()+1).padStart(2,'0');
+
+  const totalTurno=parseFloat(ffAchaValor(fechRows,'Faturamento turno principal',3))||0;
+  const totalExtra=parseFloat(ffAchaValor(fechRows,'Faturamento horas extras',3))||0;
+  const totalGeral=parseFloat(ffAchaValor(fechRows,'FATURAMENTO TOTAL (turno + extra)',3))||(totalTurno+totalExtra);
+  const horasTotais=parseFloat(ffAchaValor(fechRows,'Horas trabalhadas no mês',3))||0;
+  const meta=parseFloat(ffAchaValor(fechRows,'Meta mensal estipulada',3))||0;
+  const atingiuMetaRaw=(ffAchaValor(fechRows,'Atingiu a meta?',3)||'').toString().trim().toUpperCase();
+  const atingiuMeta=atingiuMetaRaw==='SIM';
+  const pctMeta=parseFloat(ffAchaValor(fechRows,'% da meta atingida',3))||0;
+
+  let porDiaTurno={},porDiaExtra={};
+  const turnoSheet=wb.Sheets['Controle Diário Turno'];
+  const extraSheet=wb.Sheets['Controle Diário Extra'];
+  if(turnoSheet)porDiaTurno=ffParsePorDia(XLSX.utils.sheet_to_json(turnoSheet,{header:1,defval:null}),2,4);
+  if(extraSheet)porDiaExtra=ffParsePorDia(XLSX.utils.sheet_to_json(extraSheet,{header:1,defval:null}),2,3);
+
+  return{
+    nomeRaw,monthKey,totalTurno,totalExtra,totalGeral,horasTotais,meta,atingiuMeta,pctMeta,
+    porDiaTurno,porDiaExtra,arquivoNome:fileName
+  };
+}
+function importarFaturamentoFinanceiro(e){
+  const files=Array.from(e.target.files||[]);
+  if(!files.length)return;
+  if(typeof XLSX==='undefined'){toast('❌ Biblioteca XLSX não carregou — recarregue a página');e.target.value='';return;}
+  let restantes=files.length;
+  const resultados=[];
+  files.forEach(f=>{
+    const r=new FileReader();
+    r.onload=ev=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:'array',cellDates:true});
+        const parsed=parseControleChatterWorkbook(wb,f.name);
+        if(parsed.erro){
+          resultados.push({arquivo:f.name,ok:false,msg:parsed.erro});
+        }else{
+          const chatter=ffMatchChatter(parsed.nomeRaw);
+          if(!chatter){
+            resultados.push({arquivo:f.name,ok:false,msg:`Não achei um chatter cadastrado parecido com "${parsed.nomeRaw}".`});
+          }else{
+            if(!S.faturamentoFinanceiro)S.faturamentoFinanceiro={};
+            if(!S.faturamentoFinanceiro[chatter.id])S.faturamentoFinanceiro[chatter.id]={};
+            S.faturamentoFinanceiro[chatter.id][parsed.monthKey]={
+              totalTurno:parsed.totalTurno,totalExtra:parsed.totalExtra,totalGeral:parsed.totalGeral,
+              horasTotais:parsed.horasTotais,meta:parsed.meta,atingiuMeta:parsed.atingiuMeta,pctMeta:parsed.pctMeta,
+              porDiaTurno:parsed.porDiaTurno,porDiaExtra:parsed.porDiaExtra,
+              nomeNaPlanilha:parsed.nomeRaw,arquivoNome:parsed.arquivoNome,
+              importadoEm:new Date().toISOString()
+            };
+            resultados.push({arquivo:f.name,ok:true,chatterNome:chatter.name,monthKey:parsed.monthKey,total:parsed.totalGeral});
+          }
+        }
+      }catch(err){
+        console.error(err);
+        resultados.push({arquivo:f.name,ok:false,msg:'Erro ao ler: '+err.message});
+      }
+      restantes--;
+      if(restantes===0){
+        save();
+        const ok=resultados.filter(r=>r.ok);
+        const falhas=resultados.filter(r=>!r.ok);
+        if(ok.length)toast(`✅ ${ok.length} planilha${ok.length!==1?'s':''} importada${ok.length!==1?'s':''}: ${ok.map(r=>r.chatterNome).join(', ')}`);
+        if(falhas.length)setTimeout(()=>{alert('⚠️ Alguns arquivos não foram importados:\n\n'+falhas.map(r=>`• ${r.arquivo}: ${r.msg}`).join('\n'));},ok.length?300:0);
+        renderFaturamentoFinanceiro();
+        renderMetricasPerformanceMensal();
+      }
+    };
+    r.readAsArrayBuffer(f);
+  });
+  e.target.value='';
+}
+function removerFaturamentoFinanceiro(chatterId,monthKey){
+  if(!confirm('Remover essa importação? A Performance Mensal dessa pessoa/mês volta a usar o lançamento manual.'))return;
+  if(S.faturamentoFinanceiro&&S.faturamentoFinanceiro[chatterId]){
+    delete S.faturamentoFinanceiro[chatterId][monthKey];
+    if(!Object.keys(S.faturamentoFinanceiro[chatterId]).length)delete S.faturamentoFinanceiro[chatterId];
+  }
+  save();
+  renderFaturamentoFinanceiro();
+  renderMetricasPerformanceMensal();
+}
+function renderFaturamentoFinanceiro(){
+  const el=document.getElementById('ff-content');
+  if(!el)return;
+  const rows=[];
+  Object.keys(S.faturamentoFinanceiro||{}).forEach(chatterId=>{
+    const c=(S.chatters||[]).find(ch=>ch.id===chatterId);
+    Object.keys(S.faturamentoFinanceiro[chatterId]).forEach(monthKey=>{
+      rows.push({chatterId,chatterNome:c?c.name:'(removido)',monthKey,...S.faturamentoFinanceiro[chatterId][monthKey]});
+    });
+  });
+  if(!rows.length){
+    el.innerHTML='<div style="color:var(--text3);font-size:12.5px;padding:8px 0">Nenhuma planilha do financeiro importada ainda.</div>';
+    return;
+  }
+  rows.sort((a,b)=>b.monthKey.localeCompare(a.monthKey)||a.chatterNome.localeCompare(b.chatterNome));
+  el.innerHTML=`<div style="overflow-x:auto"><table class="rtable">
+    <thead><tr><th>Chatter</th><th>Mês</th><th style="text-align:right">Faturamento</th><th style="text-align:right">Meta</th><th></th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td>${r.chatterNome}</td>
+      <td>${amMonthLabel(r.monthKey)}</td>
+      <td style="text-align:right;font-family:var(--font-mono)">${money(r.totalGeral)}</td>
+      <td style="text-align:right;font-weight:700;color:${r.atingiuMeta?'var(--ok)':'var(--text3)'}">${r.atingiuMeta?'✅ bateu':(r.pctMeta?Math.round(r.pctMeta*100)+'%':'—')}</td>
+      <td><button class="btn btn-ghost btn-xs" style="color:var(--bad)" onclick="removerFaturamentoFinanceiro('${r.chatterId}','${r.monthKey}')">✕</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
 }
 
 // ---- Perguntar à IA sobre os dados já calculados (opcional, sob demanda) ----

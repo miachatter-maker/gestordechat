@@ -1590,7 +1590,17 @@ body{
 
   <div class="panel">
     <div class="panel-head">
-      <div><div class="panel-title">📅 Performance Mensal por Chatter</div><div class="panel-note">Visão mensal (não semanal) do faturamento de cada chatter, com interpretação da evolução ou queda — seu termômetro pra avaliar a própria liderança</div></div>
+      <div><div class="panel-title">💰 Faturamento Oficial do Financeiro</div><div class="panel-note">Importe as planilhas "Controle Chatter" (.xlsx) que o financeiro compartilha — uma por chatter. O faturamento de cada uma passa a valer como fonte oficial na Performance Mensal abaixo (📁), no lugar do lançamento manual, pra aquela pessoa e mês. Pode selecionar vários arquivos de uma vez.</div></div>
+    </div>
+    <label class="btn btn-ghost btn-sm" style="cursor:pointer;display:block;text-align:center">📂 Importar planilhas do financeiro (.xlsx)
+      <input type="file" accept=".xlsx,.xls" multiple style="display:none" onchange="importarFaturamentoFinanceiro(event)">
+    </label>
+    <div id="ff-content" style="margin-top:12px"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div><div class="panel-title">📅 Performance Mensal por Chatter</div><div class="panel-note">Visão mensal (não semanal) do faturamento de cada chatter, com interpretação da evolução ou queda — seu termômetro pra avaliar a própria liderança. 📁 = faturamento oficial importado do financeiro.</div></div>
       <select class="fselect" id="pm-month-select" onchange="renderMetricasPerformanceMensal()" style="flex:0 0 auto;width:120px"></select>
     </div>
     <div id="pm-tabela-content"></div>
