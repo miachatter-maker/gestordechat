@@ -342,82 +342,113 @@ window.onPadrinhoChange=function(id){
   checarNovosHorarios(testers);
 };
 window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'||c.testerDecision));};
+function renderTesterRow(t,ciclo){
+  const map=getMapeamentoInfo(t.id,t.name);
+  const claim=getMergedClaimForTester(t.id);
+  const podeExcluir=!t.testerDecision&&!hasAnyTarefaEnviada(t.id);
+  const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
+  const isMine=selPadrinhoId&&padrinhoId===selPadrinhoId;
+  const badges=ciclo.dias.map(d=>{
+    const status=getStatusDia(t.id,ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
+    const label={enviado:'✅',bloqueado:'❌',aberto:'🟢',futuro:'⏳'}[status];
+    return`<span class="badge badge-${status}">${label} ${d.label.slice(0,3)}</span>`;
+  }).join('');
+  const open=expandedTester===t.id;
+  const tarefas=getMergedTarefas(t.id)[ciclo.fridayKey]||{};
+  const expColor=map?.experienciaProfissional==='boa'?'var(--ok)':map?.experienciaProfissional==='média'?'var(--warn)':'var(--bad)';
+  // Reivindicação só abre aos domingos por padrão (pedido da gestora), mas
+  // ela pode abrir uma janela extra manualmente (aba Testers → Solicitação
+  // de Afilhado) pra testes ou reaberturas pontuais fora do domingo.
+  const ehDomingo=new Date().getDay()===0||janelaReivindicacaoAtiva();
+  // Horário em destaque (pedido 04/08/2026): antes era só uma linha de texto
+  // dentro do cabeçalho — agora é um banner colorido, visível mesmo com o
+  // card fechado, pra padrinho conseguir se planejar de relance.
+  const horarioBannerHtml=t.horarioTeste?.label
+    ?`<div style="margin-top:8px;padding:10px 13px;background:var(--ok-soft);color:var(--ok);border-radius:10px;font-weight:800;font-size:13.5px">🗓️ ${t.horarioTeste.label}</div>`
+    :(padrinhoId?`<div style="margin-top:8px;padding:9px 13px;background:var(--bg-soft);color:var(--text3);border-radius:10px;font-size:12px">🗓️ Ainda não escolheu horário de teste</div>`:'');
+  const claimBoxHtml=(()=>{
+    if(padrinhoId){
+      const padrinhoAtual=chatters.find(c=>c.id===padrinhoId);
+      return`<div class="claimbox">👑 Padrinho aprovado: <strong>${padrinhoAtual?padrinhoAtual.name:'—'}</strong>
+        ${isMine?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn btn-primary" style="text-decoration:none;flex:1;min-width:140px" href="avaliacao.html?id=${encodeURIComponent(t.id)}&nome=${encodeURIComponent(t.name)}">📜 Avalie seu afiliado</a>
+          <button class="btn" style="background:var(--bad-soft);color:var(--bad);flex:0 0 auto;padding:13px 14px" title="Liberar esse afilhado pra outro padrinho" onclick="deserdarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">💔 Deserdar</button>
+        </div>`:''}
+      </div>`;
+    }
+    if(claim){
+      const meta={pendente:['⏳ Solicitação pendente de decisão da gestora','var(--warn)'],reservado:['🔵 Solicitação reservada pela gestora','var(--text2)']}[claim.status]||['⏳ Pendente','var(--warn)'];
+      return`<div class="claimbox">👑 Reivindicado por: <strong>${claim.padrinhoNome}</strong><div style="margin-top:4px;color:${meta[1]};font-weight:700;font-size:11.5px">${meta[0]}</div></div>`;
+    }
+    if(!ehDomingo){
+      return`<div class="claimbox">Ninguém reivindicou esse tester ainda.<div style="margin-top:6px;color:var(--text3)">🗓️ Reivindicações só abrem aos domingos.</div></div>`;
+    }
+    return`<div class="claimbox">Ninguém reivindicou esse tester ainda.
+      ${selPadrinhoId?`<button class="btn btn-primary" style="margin-top:8px" onclick="reivindicarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🙋 Quero apadrinhar</button>`:'<div style="margin-top:6px;color:var(--text3)">Selecione seu nome de padrinho acima pra poder reivindicar.</div>'}
+    </div>`;
+  })();
+  return`<div class="tester-row">
+    <div class="tester-row-head" onclick="toggleTesterDetail('${t.id}')">
+      <div style="flex:1">
+        <div class="tester-name">${t.name}${t.testerDecision==='aprovado'?' <span style="font-size:11px;font-weight:700;color:var(--ok)">✅ Aprovado</span>':t.testerDecision==='reprovado'?' <span style="font-size:11px;font-weight:700;color:var(--bad)">❌ Reprovado</span>':''}</div>
+        ${map?`<div class="tester-mapinfo">"${map.personalidadeUmaFrase||''}" ${map.pontuacaoGeral?`· 🎯 ${map.pontuacaoGeral}/100`:''}</div>`:''}
+        ${map?.experienciaProfissional?`<div class="tester-mapinfo">💼 Experiência profissional: <strong style="color:${expColor};text-transform:uppercase">${map.experienciaProfissional}</strong></div>`:''}
+        ${horarioBannerHtml}
+        <div class="badges-row">${badges}</div>
+      </div>
+      <span class="chev">${open?'▲':'▼'}</span>
+    </div>
+    <div class="detail-body ${open?'open':''}">
+      ${map?`<div class="tarefa-desc">${map.resumo||''}</div>`:''}
+      ${map?.experienciaProfissionalMotivo?`<div class="tarefa-desc">💼 <strong>Experiência profissional:</strong> ${map.experienciaProfissionalMotivo}</div>`:''}
+      ${t.dadosAutoInformados?.sobreVoce?`<div class="tarefa-desc">💬 <strong>O que ele(a) contou pra te conhecer melhor:</strong> ${t.dadosAutoInformados.sobreVoce}</div>`:''}
+      ${ciclo.dias.map(d=>{
+        const reg=tarefas['dia'+d.dia];
+        if(!reg)return'';
+        return`<div style="margin-bottom:10px">
+          <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">${d.label} — Dia ${d.dia}</div>
+          ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
+          ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
+          ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
+          ${(reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:''}
+        </div>`;
+      }).join('')}
+      ${segundaChanceHtml(t.id)}
+      ${claimBoxHtml}
+      ${podeExcluir?`<button class="btn" style="margin-top:10px;background:var(--bad-soft);color:var(--bad)" onclick="event.stopPropagation();excluirNomeDuplicado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🗑️ Excluir esse nome (duplicado, nunca enviou tarefa)</button>`:''}
+    </div>
+  </div>`;
+}
 function renderDocumentoPadrinhos(testers){
   const el=document.getElementById('padrinho-doc');
   if(!el)return;
   if(!testers.length){el.innerHTML='<div class="warn-box">Nenhum tester ativo no momento.</div>';return;}
   const ciclo=getCicloAtual();
-  el.innerHTML=testers.map(t=>{
-    const map=getMapeamentoInfo(t.id,t.name);
-    const claim=getMergedClaimForTester(t.id);
-    const podeExcluir=!t.testerDecision&&!hasAnyTarefaEnviada(t.id);
+  // Privacidade por padrinho (pedido 04/08/2026): depois que a gestora
+  // aprova um apadrinhamento, aquele afilhado só aparece pro padrinho dele —
+  // os outros padrinhos nem veem a linha. Quem ainda não tem padrinho
+  // aprovado (mesmo com reivindicação pendente) continua visível pra todo
+  // mundo, numa seção separada embaixo, como "ainda disponível".
+  const meus=[],disponiveis=[];
+  testers.forEach(t=>{
     const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
-    const isMine=selPadrinhoId&&padrinhoId===selPadrinhoId;
-    const badges=ciclo.dias.map(d=>{
-      const status=getStatusDia(t.id,ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
-      const label={enviado:'✅',bloqueado:'❌',aberto:'🟢',futuro:'⏳'}[status];
-      return`<span class="badge badge-${status}">${label} ${d.label.slice(0,3)}</span>`;
-    }).join('');
-    const open=expandedTester===t.id;
-    const tarefas=getMergedTarefas(t.id)[ciclo.fridayKey]||{};
-    const expColor=map?.experienciaProfissional==='boa'?'var(--ok)':map?.experienciaProfissional==='média'?'var(--warn)':'var(--bad)';
-    // Reivindicação só abre aos domingos por padrão (pedido da gestora), mas
-    // ela pode abrir uma janela extra manualmente (aba Testers → Solicitação
-    // de Afilhado) pra testes ou reaberturas pontuais fora do domingo.
-    const ehDomingo=new Date().getDay()===0||janelaReivindicacaoAtiva();
-    const claimBoxHtml=(()=>{
-      if(padrinhoId){
-        const padrinhoAtual=chatters.find(c=>c.id===padrinhoId);
-        return`<div class="claimbox">👑 Padrinho aprovado: <strong>${padrinhoAtual?padrinhoAtual.name:'—'}</strong>
-          ${isMine?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-            <a class="btn btn-primary" style="text-decoration:none;flex:1;min-width:140px" href="avaliacao.html?id=${encodeURIComponent(t.id)}&nome=${encodeURIComponent(t.name)}">📜 Avalie seu afiliado</a>
-            <button class="btn" style="background:var(--bad-soft);color:var(--bad);flex:0 0 auto;padding:13px 14px" title="Liberar esse afilhado pra outro padrinho" onclick="deserdarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">💔 Deserdar</button>
-          </div>`:''}
-        </div>`;
-      }
-      if(claim){
-        const meta={pendente:['⏳ Solicitação pendente de decisão da gestora','var(--warn)'],reservado:['🔵 Solicitação reservada pela gestora','var(--text2)']}[claim.status]||['⏳ Pendente','var(--warn)'];
-        return`<div class="claimbox">👑 Reivindicado por: <strong>${claim.padrinhoNome}</strong><div style="margin-top:4px;color:${meta[1]};font-weight:700;font-size:11.5px">${meta[0]}</div></div>`;
-      }
-      if(!ehDomingo){
-        return`<div class="claimbox">Ninguém reivindicou esse tester ainda.<div style="margin-top:6px;color:var(--text3)">🗓️ Reivindicações só abrem aos domingos.</div></div>`;
-      }
-      return`<div class="claimbox">Ninguém reivindicou esse tester ainda.
-        ${selPadrinhoId?`<button class="btn btn-primary" style="margin-top:8px" onclick="reivindicarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🙋 Quero apadrinhar</button>`:'<div style="margin-top:6px;color:var(--text3)">Selecione seu nome de padrinho acima pra poder reivindicar.</div>'}
-      </div>`;
-    })();
-    return`<div class="tester-row">
-      <div class="tester-row-head" onclick="toggleTesterDetail('${t.id}')">
-        <div>
-          <div class="tester-name">${t.name}${t.testerDecision==='aprovado'?' <span style="font-size:11px;font-weight:700;color:var(--ok)">✅ Aprovado</span>':t.testerDecision==='reprovado'?' <span style="font-size:11px;font-weight:700;color:var(--bad)">❌ Reprovado</span>':''}</div>
-          ${map?`<div class="tester-mapinfo">"${map.personalidadeUmaFrase||''}" ${map.pontuacaoGeral?`· 🎯 ${map.pontuacaoGeral}/100`:''}</div>`:''}
-          ${map?.experienciaProfissional?`<div class="tester-mapinfo">💼 Experiência profissional: <strong style="color:${expColor};text-transform:uppercase">${map.experienciaProfissional}</strong></div>`:''}
-          ${t.horarioTeste?.label?`<div class="tester-mapinfo" style="color:var(--ok);font-weight:700">🗓️ Horário de teste escolhido: ${t.horarioTeste.label}</div>`:''}
-          <div class="badges-row">${badges}</div>
-        </div>
-        <span class="chev">${open?'▲':'▼'}</span>
-      </div>
-      <div class="detail-body ${open?'open':''}">
-        ${map?`<div class="tarefa-desc">${map.resumo||''}</div>`:''}
-        ${map?.experienciaProfissionalMotivo?`<div class="tarefa-desc">💼 <strong>Experiência profissional:</strong> ${map.experienciaProfissionalMotivo}</div>`:''}
-        ${t.dadosAutoInformados?.sobreVoce?`<div class="tarefa-desc">💬 <strong>O que ele(a) contou pra te conhecer melhor:</strong> ${t.dadosAutoInformados.sobreVoce}</div>`:''}
-        ${ciclo.dias.map(d=>{
-          const reg=tarefas['dia'+d.dia];
-          if(!reg)return'';
-          return`<div style="margin-bottom:10px">
-            <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">${d.label} — Dia ${d.dia}</div>
-            ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
-            ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
-            ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
-            ${(reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:''}
-          </div>`;
-        }).join('')}
-        ${segundaChanceHtml(t.id)}
-        ${claimBoxHtml}
-        ${podeExcluir?`<button class="btn" style="margin-top:10px;background:var(--bad-soft);color:var(--bad)" onclick="event.stopPropagation();excluirNomeDuplicado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🗑️ Excluir esse nome (duplicado, nunca enviou tarefa)</button>`:''}
-      </div>
-    </div>`;
-  }).join('');
+    if(padrinhoId){
+      if(selPadrinhoId&&padrinhoId===selPadrinhoId)meus.push(t);
+      // se tem padrinho e não é o selecionado, some da tela (privado)
+    }else{
+      disponiveis.push(t);
+    }
+  });
+  el.innerHTML=`
+    ${selPadrinhoId?`<div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:800;color:var(--accent-strong);text-transform:uppercase;letter-spacing:.03em;margin-bottom:10px">🌟 Meus afilhados</div>
+      ${meus.length?meus.map(t=>renderTesterRow(t,ciclo)).join(''):'<div class="warn-box">Você ainda não tem nenhum afilhado aprovado.</div>'}
+    </div>`:''}
+    <div>
+      <div style="font-size:13px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.03em;margin-bottom:10px">🙋 Ainda disponíveis</div>
+      ${disponiveis.length?disponiveis.map(t=>renderTesterRow(t,ciclo)).join(''):'<div class="warn-box">Nenhum tester disponível pra apadrinhar no momento.</div>'}
+    </div>
+  `;
 }
 function segundaChanceHtml(testerId){
   const reqs=((chatterFichasLive[testerId]&&chatterFichasLive[testerId].segundaChanceRequests)||[]).filter(r=>r.status==='pendente');
