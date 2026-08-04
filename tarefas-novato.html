@@ -632,6 +632,7 @@ function renderTesterDays(testerId){
         <div style="font-size:15px;font-weight:800;margin-bottom:6px">🎉 Parabéns, você foi aprovado!</div>
         <div style="font-size:13px;color:var(--text2);margin-bottom:10px">Agora preencha os dados abaixo.</div>
         <div class="error-box" style="font-weight:800;text-align:center">⚠️ NECESSÁRIO ABRIR CNPJ PARA PARTICIPAR DO TESTE</div>
+        <a href="https://mei.receita.economia.gov.br/inscricao/login" target="_blank" rel="noopener" style="display:block;text-align:center;margin:8px 0 4px;padding:11px 14px;background:var(--ok,#177350);color:#fff;border-radius:var(--r-md);font-weight:700;font-size:13.5px;text-decoration:none">Abra agora mesmo seu MEI em minutos →</a>
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Dados para cada colaborador PJ</div>
         ${['razaoSocial::Razão Social','nickname::Nickname','cnpj::CNPJ','endereco::Endereço de sede','bairro::Bairro','cep::Cep','telefone::Telefone/Celular','email::E-mail','pix::Pix','bancoChave::Banco e chave'].map(p=>{
           const[id,label]=p.split('::');
