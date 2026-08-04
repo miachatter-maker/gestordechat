@@ -9098,6 +9098,10 @@ function renderEvolucao(){
   const wkey=getWeekKey();
   const wd=getWeekDates();
   let html='';
+  // Mês de referência pro faturamento oficial do financeiro (pedido
+  // 04/08/2026) — Evolução navega por semana, então usa a segunda-feira da
+  // semana exibida pra decidir qual mês do financeiro mostrar.
+  const monthKeyEvo=(wd&&wd[0])?fmt(wd[0]).slice(0,7):fmt(new Date()).slice(0,7);
 
   if(!S.chatters.length){
     el.innerHTML='<div style="color:var(--text3);font-size:13px;padding:12px 0">Cadastre chatters na aba Equipe</div>';
@@ -9318,7 +9322,49 @@ function suggestTrainingText(chatterId){
       <span>${PAG_MEDAL_LABEL[medalPendenteEvo.medal]||''} <strong>${c.name}</strong> tem direito a nova medalha essa semana!</span>
       <button class="btn btn-ghost btn-xs" data-noaccordion onclick="dismissMedalAchievement('${medalPendenteEvo.id}')" title="Marcar como visto">✕</button>
     </div>`:''}`;
-    const evoBody=`${diaADiaHtml}${metaMensalHtml}${days>0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+    // 💰 Financeiro oficial (pedido 04/08/2026) — faturamento, meta, horas,
+    // high tickets e categoria/prêmio semanal, direto da planilha oficial
+    // importada do financeiro (S.faturamentoFinanceiro), quando existe pra
+    // essa pessoa nesse mês. Convive com o quadro "Meta mensal" (que usa a
+    // medalha/categoria calculada de dentro do próprio app) — esse aqui é a
+    // fonte externa, lado a lado, pra comparar.
+    const finEvo=getChatterFinanceiroMes(c.id,monthKeyEvo);
+    const financeiroOficialHtml=finEvo?`<div style="background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:10px;font-weight:700;color:var(--accent-strong);text-transform:uppercase">📁 Financeiro oficial — ${amMonthLabel(monthKeyEvo)}</div>
+        ${finEvo.categoriaAtual?`<div style="font-size:11px;color:var(--text2);font-weight:700">Categoria ${finEvo.categoriaAtual}</div>`:''}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-family:var(--font-mono);font-weight:800;font-size:15px">${money(finEvo.totalGeral)}</span>
+        <span style="font-size:10.5px;color:var(--text3)">de ${money(finEvo.meta)} (${Math.round((finEvo.pctMeta||0)*100)}%)</span>
+      </div>
+      <div style="background:var(--line);border-radius:4px;height:5px;overflow:hidden;margin-bottom:8px">
+        <div style="height:5px;border-radius:4px;background:${finEvo.atingiuMeta?'var(--ok)':'var(--accent)'};width:${Math.min(100,Math.round((finEvo.pctMeta||0)*100))}%"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--text3)">Horas no mês</div>
+          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${Math.round((finEvo.horasTotais||0)*10)/10}h</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--text3)">High tickets</div>
+          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${finEvo.htCount||0}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--text3)">Extra (hora extra)</div>
+          <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(finEvo.totalExtra||0)}</div>
+        </div>
+      </div>
+      ${(finEvo.porSemana||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
+        ${finEvo.porSemana.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:2px 0">
+          <span style="color:var(--text2)">${s.semana} · cat. ${s.categoria||'—'}</span>
+          <span style="font-family:var(--font-mono);color:var(--text2)">${money(s.faturamento)}</span>
+          <span style="font-weight:700;color:${s.nivel&&s.nivel!=='não bateu'?'var(--ok)':'var(--text3)'}">${s.nivel||'—'}${s.premio?' · '+money(s.premio):''}</span>
+        </div>`).join('')}
+      </div>`:''}
+      <div style="font-size:9.5px;color:var(--text3);margin-top:6px">Arquivo: ${finEvo.arquivoNome||'—'} · importado ${finEvo.importadoEm?new Date(finEvo.importadoEm).toLocaleDateString('pt-BR'):''}</div>
+    </div>`:'';
+    const evoBody=`${diaADiaHtml}${financeiroOficialHtml}${metaMensalHtml}${days>0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
         <div style="background:var(--bg-soft);border-radius:7px;padding:7px;text-align:center">
           <div style="font-size:9px;color:var(--text3)">Ticket médio</div>
           <div style="font-size:13px;font-weight:700;font-family:var(--font-mono)">${money(avgTicket)}</div>
@@ -14104,6 +14150,37 @@ function ffParsePorDia(rows,valorCol,horasCol){
   }
   return out;
 }
+function ffAchaValorEmQualquerCol(rows,label){
+  // Alguns indicadores (High Tickets, Metas Semanais) ficam numa coluna
+  // "INDICADORES" no meio da tabela, não na coluna 0 — varre todas as
+  // colunas de cada linha procurando o rótulo.
+  for(const row of rows){
+    if(!row)continue;
+    for(let i=0;i<row.length;i++){
+      if((row[i]||'').toString().trim().toLowerCase()===label.toLowerCase()){
+        for(let j=i+1;j<row.length;j++){if(row[j]!=null&&row[j]!=='')return row[j];}
+      }
+    }
+  }
+  return null;
+}
+function ffParseMetasSemanais(rows){
+  const headerIdx=rows.findIndex(r=>(r[0]||'').toString().trim().toUpperCase()==='SEMANA');
+  if(headerIdx<0)return[];
+  const out=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const row=rows[i];
+    const label=((row&&row[0])||'').toString().trim();
+    if(!label||!/^semana/i.test(label))break;
+    out.push({
+      semana:label,categoria:(row[1]||'').toString().trim(),
+      faturamento:parseFloat(row[2])||0,pctMeta:parseFloat(row[3])||0,
+      nivel:(row[4]||'').toString().trim(),premio:parseFloat(row[5])||0,
+      horas:parseFloat(row[6])||0
+    });
+  }
+  return out;
+}
 function parseControleChatterWorkbook(wb,fileName){
   const paramSheet=wb.Sheets['Parâmetros'];
   const fechamentoSheet=wb.Sheets['Fechamento'];
@@ -14133,9 +14210,26 @@ function parseControleChatterWorkbook(wb,fileName){
   if(turnoSheet)porDiaTurno=ffParsePorDia(XLSX.utils.sheet_to_json(turnoSheet,{header:1,defval:null}),2,4);
   if(extraSheet)porDiaExtra=ffParsePorDia(XLSX.utils.sheet_to_json(extraSheet,{header:1,defval:null}),2,3);
 
+  let porSemana=[];
+  const metasSheet=wb.Sheets['Metas Semanais'];
+  if(metasSheet)porSemana=ffParseMetasSemanais(XLSX.utils.sheet_to_json(metasSheet,{header:1,defval:null}));
+
+  let htCount=0,htMaior=0,htBonusTotal=0;
+  const htSheet=wb.Sheets['High Tickets'];
+  if(htSheet){
+    const htRows=XLSX.utils.sheet_to_json(htSheet,{header:1,defval:null});
+    htCount=parseFloat(ffAchaValorEmQualquerCol(htRows,'Nº de high tickets'))||0;
+    htMaior=parseFloat(ffAchaValorEmQualquerCol(htRows,'Maior high ticket'))||0;
+    htBonusTotal=parseFloat(ffAchaValorEmQualquerCol(htRows,'Bônus total (8%)'))||0;
+  }
+
+  // Categoria/medalha atual = a da semana mais recente já lançada (o
+  // financeiro reavalia isso toda semana no cadastro do chatter).
+  const categoriaAtual=porSemana.length?porSemana[porSemana.length-1].categoria:'';
+
   return{
     nomeRaw,monthKey,totalTurno,totalExtra,totalGeral,horasTotais,meta,atingiuMeta,pctMeta,
-    porDiaTurno,porDiaExtra,arquivoNome:fileName
+    porDiaTurno,porDiaExtra,porSemana,categoriaAtual,htCount,htMaior,htBonusTotal,arquivoNome:fileName
   };
 }
 function importarFaturamentoFinanceiro(e){
@@ -14163,6 +14257,8 @@ function importarFaturamentoFinanceiro(e){
               totalTurno:parsed.totalTurno,totalExtra:parsed.totalExtra,totalGeral:parsed.totalGeral,
               horasTotais:parsed.horasTotais,meta:parsed.meta,atingiuMeta:parsed.atingiuMeta,pctMeta:parsed.pctMeta,
               porDiaTurno:parsed.porDiaTurno,porDiaExtra:parsed.porDiaExtra,
+              porSemana:parsed.porSemana,categoriaAtual:parsed.categoriaAtual,
+              htCount:parsed.htCount,htMaior:parsed.htMaior,htBonusTotal:parsed.htBonusTotal,
               nomeNaPlanilha:parsed.nomeRaw,arquivoNome:parsed.arquivoNome,
               importadoEm:new Date().toISOString()
             };
