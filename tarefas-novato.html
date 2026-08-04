@@ -623,6 +623,7 @@ function renderTesterDays(testerId){
         <div style="font-size:15px;font-weight:800;margin-bottom:6px">Seja bem-vindo, até o teste!</div>
         <div style="font-size:14.5px;line-height:1.6">Já está tudo certo. Qualquer dúvida, seu padrinho${tester.padrinhoNome?` <strong>${tester.padrinhoNome}</strong>`:''} está por aqui pra te ajudar.</div>
         ${horarioLabel?`<div style="margin-top:12px;padding:11px 14px;background:var(--accent-soft);color:var(--accent-strong);border-radius:var(--r-md);font-weight:700;font-size:13.5px">🗓️ Nos vemos: ${horarioLabel}</div>`:''}
+        ${horarioLabel?`<div style="margin-top:10px;padding:11px 14px;background:var(--ok-soft,#E7F5EE);color:var(--ok,#177350);border-radius:var(--r-md);font-weight:700;font-size:13.5px">🏢 No horário combinado, aguarde ${tester.padrinhoNome?`<strong>${tester.padrinhoNome}</strong>`:'seu padrinho'} dentro do Escritório</div>`:''}
       </div>`;
       return;
     }
