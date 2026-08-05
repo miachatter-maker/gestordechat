@@ -624,6 +624,11 @@ function renderTesterDays(testerId){
         <div style="font-size:14.5px;line-height:1.6">Já está tudo certo. Qualquer dúvida, seu padrinho${tester.padrinhoNome?` <strong>${tester.padrinhoNome}</strong>`:''} está por aqui pra te ajudar.</div>
         ${horarioLabel?`<div style="margin-top:12px;padding:11px 14px;background:var(--accent-soft);color:var(--accent-strong);border-radius:var(--r-md);font-weight:700;font-size:13.5px">🗓️ Nos vemos: ${horarioLabel}</div>`:''}
         ${horarioLabel?`<div style="margin-top:10px;padding:11px 14px;background:var(--ok-soft,#E7F5EE);color:var(--ok,#177350);border-radius:var(--r-md);font-weight:700;font-size:13.5px">🏢 No horário combinado, aguarde ${tester.padrinhoNome?`<strong>${tester.padrinhoNome}</strong>`:'seu padrinho'} dentro do Escritório</div>`:''}
+        <div style="margin-top:16px;text-align:left">
+          <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px">📎 Materiais — leia antes de entrar em operação</div>
+          <a href="/materiais/Duvidas_Operacionais_v4.docx" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:8px;padding:11px 14px;background:var(--bg-soft);color:var(--text);border-radius:var(--r-md);font-weight:700;font-size:13.5px;text-decoration:none;margin-bottom:8px">📄 Dúvidas Operacionais</a>
+          <a href="/materiais/Estrategias_que_Colocam_Voce_a_Frente_v4.docx" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:8px;padding:11px 14px;background:var(--bg-soft);color:var(--text);border-radius:var(--r-md);font-weight:700;font-size:13.5px;text-decoration:none">📄 Estratégias que Colocam Você à Frente</a>
+        </div>
       </div>`;
       return;
     }
