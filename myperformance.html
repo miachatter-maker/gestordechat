@@ -261,21 +261,44 @@ function renderEvolucao(mine){
         </div>
         <div style="font-size:10px;color:var(--text3);margin-top:6px">Medalha atual: ${PAG_MEDAL_LABEL[rec.medalAtual]||''} · piso garantido de referência: ${money(rec.piso)}</div>
       </div>`:'';
-      // Ganho estimado por semana (pedido 05/08/2026) — sem mexer no resto
-      // da estrutura, só acrescenta: usa a MESMA proporção comissão/faturamento
-      // já calculada pro mês inteiro (rec.comissao ÷ fin.totalGeral) aplicada
-      // ao faturamento daquela semana, somada ao prêmio de meta da própria
-      // semana (que já vem certinho da planilha). É uma estimativa (a comissão
-      // real é sobre o total do mês, não semana a semana), mas dá pra pessoa
-      // acompanhar semana a semana quanto ela foi gerando em ganho.
+      // Ganho estimado por semana (pedido 05/08/2026, ampliado 05/08/2026 com
+      // high ticket) — sem mexer no resto da estrutura, só acrescenta: usa a
+      // MESMA proporção comissão/faturamento já calculada pro mês inteiro
+      // (rec.comissao ÷ fin.totalGeral) aplicada ao faturamento daquela
+      // semana, somada ao prêmio de meta da própria semana (que já vem
+      // certinho da planilha) e ao bônus de high ticket da semana (8% sobre
+      // o valor de HT vendido nos dias daquela semana). É uma estimativa (a
+      // comissão real é sobre o total do mês, não semana a semana), mas dá
+      // pra pessoa acompanhar semana a semana quanto ela foi gerando em ganho.
+      //
+      // A planilha não marca em qual "Semana N" cada dia cai, então
+      // reconstituímos aqui: a Semana 1 é a semana (Segunda-Domingo) que
+      // contém o dia 1 do mês, e assim por diante — mesmo critério de
+      // virada de semana usado no resto do app (Segunda a Domingo).
       const comissaoRatioFin=(rec&&fin.totalGeral>0)?(rec.comissao/fin.totalGeral):0;
-      const semanaRowsFin=(fin.porSemana||[]).map(s=>{
+      const htPorSemanaFin={};
+      if(fy&&fm){
+        const dowDia1=(new Date(fy,fm-1,1).getDay()+6)%7; // 0=segunda...6=domingo
+        Object.entries(fin.htPorDia||{}).forEach(([dia,d])=>{
+          const idx=Math.floor((Number(dia)-1+dowDia1)/7);
+          if(!htPorSemanaFin[idx])htPorSemanaFin[idx]={count:0,valor:0};
+          htPorSemanaFin[idx].count+=d.count||0;
+          htPorSemanaFin[idx].valor+=d.valor||0;
+        });
+      }
+      const semanaRowsFin=(fin.porSemana||[]).map((s,idxSemana)=>{
         const bateu=s.bateuMeta!==undefined?s.bateuMeta:!!(s.nivel&&s.nivel!=='não bateu');
-        const ganhoSemana=Math.round(((s.faturamento||0)*comissaoRatioFin+(s.premio||0))*100)/100;
+        const htSemana=htPorSemanaFin[idxSemana]||{count:0,valor:0};
+        const htBonusSemana=Math.round((htSemana.valor||0)*0.08*100)/100;
+        const ganhoSemana=Math.round(((s.faturamento||0)*comissaoRatioFin+(s.premio||0)+htBonusSemana)*100)/100;
         return`<div style="padding:6px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px">
             <span style="color:var(--text2);font-weight:600">${s.semana}${s.categoria?' · cat. '+s.categoria:''}</span>
             <span style="font-family:var(--font-mono)">${money(s.faturamento)} <span style="color:var(--text3)">(${Math.round((s.pctMeta||0)*100)}%)</span></span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:11px">
+            <span style="color:var(--text3)">💎 High ticket na semana</span>
+            <span style="font-family:var(--font-mono);color:${htSemana.count?'var(--accent-strong)':'var(--text3)'}">${htSemana.count?htSemana.count+'x · '+money(htSemana.valor):'—'}</span>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:11px">
             <span style="font-weight:700;color:${bateu?'var(--ok)':'var(--bad,#c0392b)'}">${bateu?'✅ bateu a meta':'❌ não bateu a meta'}${s.premio?' · prêmio '+money(s.premio):''}</span>
