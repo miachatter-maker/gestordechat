@@ -261,8 +261,17 @@ function renderEvolucao(mine){
         </div>
         <div style="font-size:10px;color:var(--text3);margin-top:6px">Medalha atual: ${PAG_MEDAL_LABEL[rec.medalAtual]||''} · piso garantido de referência: ${money(rec.piso)}</div>
       </div>`:'';
+      // Ganho estimado por semana (pedido 05/08/2026) — sem mexer no resto
+      // da estrutura, só acrescenta: usa a MESMA proporção comissão/faturamento
+      // já calculada pro mês inteiro (rec.comissao ÷ fin.totalGeral) aplicada
+      // ao faturamento daquela semana, somada ao prêmio de meta da própria
+      // semana (que já vem certinho da planilha). É uma estimativa (a comissão
+      // real é sobre o total do mês, não semana a semana), mas dá pra pessoa
+      // acompanhar semana a semana quanto ela foi gerando em ganho.
+      const comissaoRatioFin=(rec&&fin.totalGeral>0)?(rec.comissao/fin.totalGeral):0;
       const semanaRowsFin=(fin.porSemana||[]).map(s=>{
         const bateu=s.bateuMeta!==undefined?s.bateuMeta:!!(s.nivel&&s.nivel!=='não bateu');
+        const ganhoSemana=Math.round(((s.faturamento||0)*comissaoRatioFin+(s.premio||0))*100)/100;
         return`<div style="padding:6px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px">
             <span style="color:var(--text2);font-weight:600">${s.semana}${s.categoria?' · cat. '+s.categoria:''}</span>
@@ -270,6 +279,10 @@ function renderEvolucao(mine){
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:11px">
             <span style="font-weight:700;color:${bateu?'var(--ok)':'var(--bad,#c0392b)'}">${bateu?'✅ bateu a meta':'❌ não bateu a meta'}${s.premio?' · prêmio '+money(s.premio):''}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;font-size:11px">
+            <span style="color:var(--text3)">💰 Ganho estimado na semana</span>
+            <span style="font-family:var(--font-mono);font-weight:700;color:var(--ok,#177350)">${money(ganhoSemana)}</span>
           </div>
         </div>`;
       }).join('');
