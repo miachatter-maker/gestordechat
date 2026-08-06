@@ -6013,6 +6013,11 @@ function renderFichaChatter(chatterId){
       <div style="font-size:12px;color:var(--text3)">${c.level} · desde ${c.createdAt?c.createdAt.slice(0,10):'?'}</div>
     </div>
 
+    ${f.dadosPJ?.falaIngles?`<div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:12.5px;font-weight:700;color:var(--text2)">🗣️ Fala inglês</div>
+      <div style="font-size:13.5px;font-weight:800;color:var(--accent-strong)">${f.dadosPJ.falaIngles}</div>
+    </div>`:''}
+
     ${renderMapeamentoPanel(chatterId)}
 
     ${fichaAccordion('tech-'+chatterId,'','<div class="panel-title">⚡ Técnica</div>',`
@@ -11914,8 +11919,9 @@ function textoDadosPJ(c,d){
   return[
     `${c.name}`,
     `Razão Social: ${d.razaoSocial||''}`,`Nickname: ${d.nickname||''}`,`CNPJ: ${d.cnpj||''}`,
-    `Endereço de sede: ${d.endereco||''}`,`Bairro: ${d.bairro||''}`,`Cep: ${d.cep||''}`,
+    `Endereço de sede: ${d.endereco||''}`,`Número: ${d.numero||''}`,`Bairro: ${d.bairro||''}`,`Cep: ${d.cep||''}`,
     `Telefone/Celular: ${d.telefone||''}`,`E-mail: ${d.email||''}`,`Pix: ${d.pix||''}`,`Banco e chave: ${d.bancoChave||''}`,
+    `Fala inglês: ${d.falaIngles||''}`,
     `Email do Trello: ${d.trelloEmail||''}`,`Número do Telegram: ${d.telegramNumero||''}`,`Nome no Telegram: ${d.telegramNome||''}`
   ].join('\n');
 }
@@ -11934,8 +11940,9 @@ function renderDadosPjPanel(){
     const d=S.chatterFichas[c.id].dadosPJ;
     const linhas=[
       ['Razão Social',d.razaoSocial],['Nickname',d.nickname],['CNPJ',d.cnpj],
-      ['Endereço de sede',d.endereco],['Bairro',d.bairro],['CEP',d.cep],
+      ['Endereço de sede',d.endereco],['Número',d.numero],['Bairro',d.bairro],['CEP',d.cep],
       ['Telefone/Celular',d.telefone],['E-mail',d.email],['Pix',d.pix],['Banco e chave',d.bancoChave],
+      ['Fala inglês',d.falaIngles],
       ['Email do Trello',d.trelloEmail],['Número do Telegram',d.telegramNumero],['Nome no Telegram',d.telegramNome]
     ].filter(([,v])=>v);
     return`<div class="dadospj-swipe-row" data-key="${c.id}" style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
@@ -12294,7 +12301,11 @@ function copiarLinkAvaliacao(){
 // links de avaliação/chatlab (um por pessoa), esse é o MESMO link pra
 // todos os testers e padrinhos; a própria página pública pede o nome.
 function gerarLinkTarefasNovato(){
-  const url=`${location.origin}/tarefas-novato.html`;
+  // Renomeado de tarefas-novato.html pra chatterteste.html (06/08/2026, a
+  // pedido da gestora) — o arquivo antigo virou um redirect, então quem já
+  // tinha o link salvo continua funcionando, mas o link novo compartilhado
+  // daqui pra frente já é o certo.
+  const url=`${location.origin}/chatterteste.html`;
   const input=document.getElementById('tarefas-novato-link-input');
   if(input)input.value=url;
   openModal('m-tarefas-novato-link');
@@ -12669,8 +12680,9 @@ function aplicarDadosPjPendente(docId,data){
     if(!S.chatterFichas[c.id])S.chatterFichas[c.id]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
     S.chatterFichas[c.id].dadosPJ={
       razaoSocial:data.razaoSocial||'',nickname:data.nickname||'',cnpj:data.cnpj||'',
-      endereco:data.endereco||'',bairro:data.bairro||'',cep:data.cep||'',
+      endereco:data.endereco||'',numero:data.numero||'',bairro:data.bairro||'',cep:data.cep||'',
       telefone:data.telefone||'',email:data.email||'',pix:data.pix||'',bancoChave:data.bancoChave||'',
+      falaIngles:data.falaIngles||'',
       trelloEmail:data.trelloEmail||'',telegramNumero:data.telegramNumero||'',telegramNome:data.telegramNome||'',
       recebidoEm:new Date().toISOString()
     };
@@ -12679,6 +12691,11 @@ function aplicarDadosPjPendente(docId,data){
     // de PJ pela mensagem de aprovado + seletor de horário, sem esperar a
     // gestora abrir a Ficha. O CNPJ/pix/endereço em si nunca saem daqui.
     c.dadosPjRecebidos=true;
+    // Nickname (=user do Telegram, ver campo no form) TAMBÉM é espelhado no
+    // chatter (não sensível, ao contrário do resto) — a pedido da gestora
+    // (06/08/2026), pra aparecer junto com as outras informações no link dos
+    // padrinhos (documento-padrinhos.html).
+    c.nicknameTelegram=data.nickname||'';
     save();
     toast(`📋 Dados de PJ de ${c.name} recebidos via link.`);
     if(currentViewName()==='testers')renderTesters();

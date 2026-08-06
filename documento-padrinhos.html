@@ -391,6 +391,7 @@ function renderTesterRow(t,ciclo){
     <div class="tester-row-head" onclick="toggleTesterDetail('${t.id}')">
       <div style="flex:1">
         <div class="tester-name">${t.name}${t.testerDecision==='aprovado'?' <span style="font-size:11px;font-weight:700;color:var(--ok)">✅ Aprovado</span>':t.testerDecision==='reprovado'?' <span style="font-size:11px;font-weight:700;color:var(--bad)">❌ Reprovado</span>':''}</div>
+        ${t.nicknameTelegram?`<div class="tester-mapinfo">📱 Telegram: <strong>${t.nicknameTelegram}</strong></div>`:''}
         ${map?`<div class="tester-mapinfo">"${map.personalidadeUmaFrase||''}" ${map.pontuacaoGeral?`· 🎯 ${map.pontuacaoGeral}/100`:''}</div>`:''}
         ${map?.experienciaProfissional?`<div class="tester-mapinfo">💼 Experiência profissional: <strong style="color:${expColor};text-transform:uppercase">${map.experienciaProfissional}</strong></div>`:''}
         ${horarioBannerHtml}
