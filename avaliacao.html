@@ -32,13 +32,13 @@ body{font-family:var(--font);color:var(--text);min-height:100dvh;font-size:15px;
 .ftext{min-height:60px;resize:vertical;}
 .finput:focus,.ftext:focus{outline:none;border-color:var(--accent);}
 .crit{border:1px solid var(--line);border-radius:9px;padding:12px 13px;margin-bottom:10px;}
-.crit-title{font-size:13.5px;font-weight:700;margin-bottom:4px;}
-.crit-desc{font-size:11.5px;color:var(--text3);margin-bottom:9px;line-height:1.5;}
-.crit-btns{display:flex;gap:6px;margin-bottom:8px;}
-.crit-btn{flex:1;padding:8px 4px;border-radius:7px;border:2px solid var(--line);background:#fff;cursor:pointer;font-family:var(--font);font-weight:700;font-size:11px;color:var(--text2);}
-.crit-btn.sel-atende{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);}
-.crit-btn.sel-parcial{border-color:var(--warn);background:var(--warn-soft);color:var(--warn);}
-.crit-btn.sel-nao{border-color:var(--bad);background:var(--bad-soft);color:var(--bad);}
+.crit-title{font-size:13.5px;font-weight:700;margin-bottom:10px;}
+.simnao-btns{display:flex;gap:16px;margin-bottom:8px;}
+.simnao-opt{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;}
+.simnao-circle{width:42px;height:42px;border-radius:50%;border:2px solid var(--line-strong);background:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:var(--text3);}
+.simnao-circle.sel-sim{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);}
+.simnao-circle.sel-nao{border-color:var(--bad);background:var(--bad-soft);color:var(--bad);}
+.simnao-label{font-size:11px;font-weight:700;color:var(--text2);}
 .btn{display:block;width:100%;text-align:center;padding:14px;border-radius:var(--r-md);border:none;font-family:var(--font);font-weight:700;font-size:15px;cursor:pointer;}
 .btn-primary{background:var(--accent);color:#fff;}
 .btn-primary:disabled{opacity:.55;}
@@ -145,34 +145,38 @@ function renderForm(){
     ${CRITERIOS.map((c,idx)=>`
       <div class="crit">
         <div class="crit-title">${idx+1}. ${c.titulo}</div>
-        <div class="crit-desc">${c.descricao}</div>
-        <div class="crit-btns" id="crit-btns-${c.id}">
-          ${btnHtml(c.id,'atende','✅ Atende')}
-          ${btnHtml(c.id,'parcial','⚠️ Parcial')}
-          ${btnHtml(c.id,'nao','❌ Não atende')}
+        <div class="simnao-btns" id="crit-btns-${c.id}">
+          ${btnHtml(c.id,'sim')}
+          ${btnHtml(c.id,'nao')}
         </div>
-        <textarea class="ftext" placeholder="Observação (opcional)..." onblur="setNota('${c.id}',this.value)"></textarea>
       </div>
     `).join('')}
     <div class="card">
       <div class="field" style="margin-bottom:0">
-        <label class="flabel">✍️ Observações gerais</label>
-        <textarea class="ftext" id="obs-gerais" placeholder="Comentário geral sobre o desempenho da pessoa..."></textarea>
+        <label class="flabel" style="text-transform:none;letter-spacing:0;font-size:12.5px;line-height:1.5">1. Descreva como foi o processo de teste com essa pessoa: se ela tem facilidade em se corrigir de acordo com os feedbacks, se tem fácil comunicação e reage bem quando chamou atenção dela. Se buscou melhorar, aprender mais durante o teste. Se teve dificuldade em comunicação. E sua opinião sobre a possível aprovação dele como chatter.</label>
+        <textarea class="ftext" id="obs-gerais" placeholder="Escreva sua resposta aqui..." style="min-height:130px"></textarea>
       </div>
     </div>
     <button class="btn btn-primary" id="btn-enviar" onclick="enviarAvaliacao()">📤 Enviar avaliação</button>
   `;
 }
-function btnHtml(critId,status,label){
+// A pedido da gestora (07/08/2026): critérios técnicos viraram só Sim/Não
+// (bolinha), sem a descrição embaixo do título — antes eram 3 opções
+// (atende/parcial/não atende) com um textinho explicando cada critério.
+function btnHtml(critId,status){
   const sel=respostas[critId]?.status===status;
-  return `<button type="button" class="crit-btn ${sel?'sel-'+status:''}" onclick="setStatus('${critId}','${status}')">${label}</button>`;
+  const isSim=status==='sim';
+  return `<div class="simnao-opt" onclick="setStatus('${critId}','${status}')">
+    <div class="simnao-circle ${sel?'sel-'+status:''}">${isSim?'✓':'✗'}</div>
+    <div class="simnao-label">${isSim?'Sim':'Não'}</div>
+  </div>`;
 }
 window.setStatus=function(critId,status){
   if(!respostas[critId])respostas[critId]={status:'',nota:''};
   respostas[critId].status=respostas[critId].status===status?'':status;
   const box=document.getElementById('crit-btns-'+critId);
   if(box){
-    box.innerHTML=`${btnHtml(critId,'atende','✅ Atende')}${btnHtml(critId,'parcial','⚠️ Parcial')}${btnHtml(critId,'nao','❌ Não atende')}`;
+    box.innerHTML=`${btnHtml(critId,'sim')}${btnHtml(critId,'nao')}`;
   }
   const answered=CRITERIOS.filter(c=>respostas[c.id]?.status).length;
   const pt=document.getElementById('progress-txt');
@@ -186,31 +190,28 @@ window.setNota=function(critId,val){
 // Monta o relatório "Análise-Padrinhos" formatado pra colar no Discord,
 // a partir das respostas do formulário que o padrinho acabou de preencher.
 function buildAnalisePadrinhos(padrinhoNome,obsGerais){
-  const statusLabel={atende:'Atende',parcial:'Atende parcialmente',nao:'Não atende'};
-  let atende=0,parcial=0,nao=0;
+  const statusLabel={sim:'Sim',nao:'Não'};
+  let sim=0,nao=0;
   const linhasCriterios=CRITERIOS.map((c,idx)=>{
     const r=respostas[c.id]||{};
-    if(r.status==='atende')atende++;
-    else if(r.status==='parcial')parcial++;
+    if(r.status==='sim')sim++;
     else if(r.status==='nao')nao++;
     const lab=r.status?statusLabel[r.status]:'— não avaliado';
-    let linha=`${idx+1}. ${c.titulo}: ${lab}`;
-    if(r.nota&&r.nota.trim())linha+=`\n   Obs: ${r.nota.trim()}`;
-    return linha;
+    return `${idx+1}. ${c.titulo}: ${lab}`;
   }).join('\n');
   const total=CRITERIOS.length;
-  const avaliados=atende+parcial+nao;
+  const avaliados=sim+nao;
   const dataStr=new Date().toLocaleDateString('pt-BR');
   const lines=[
     `📊 ANÁLISE-PADRINHOS — ${chatterNome||'Chatter'}`,
     `Avaliado por: ${padrinhoNome}`,
     `Data: ${dataStr}`,
     '',
-    `Resumo: ${atende} atende, ${parcial} parcial, ${nao} não atende  (${avaliados}/${total} critérios avaliados)`,
+    `Resumo: ${sim} sim, ${nao} não  (${avaliados}/${total} critérios avaliados)`,
     '',
     linhasCriterios
   ];
-  if(obsGerais)lines.push('','✍️ Observações gerais:',obsGerais);
+  if(obsGerais)lines.push('','📝 Processo de teste e opinião do padrinho:',obsGerais);
   return lines.join('\n');
 }
 window.copiarAnalise=function(){

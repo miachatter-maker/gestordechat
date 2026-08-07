@@ -12213,13 +12213,15 @@ function setPadrinhoResponsavel(cid,padrinhoId){
 }
 function mandamentosPanelHtml(cid){
   const ev=S.chatterFichas?.[cid]?.mandamentosEval||{};
+  // A pedido da gestora (07/08/2026): critérios técnicos viraram só Sim/Não
+  // (antes eram 3 opções atende/parcial/não atende, com descrição embaixo
+  // de cada item — agora é só a bolinha sim/não, sem texto explicativo).
   const statusMeta={
-    atende:{label:'✅ Atende',color:'var(--ok)',bg:'var(--ok-soft)'},
-    parcial:{label:'⚠️ Parcial',color:'var(--warn)',bg:'var(--warn-soft)'},
-    nao:{label:'❌ Não atende',color:'var(--bad)',bg:'var(--bad-soft)'}
+    sim:{label:'✅ Sim',color:'var(--ok)',bg:'var(--ok-soft)'},
+    nao:{label:'❌ Não',color:'var(--bad)',bg:'var(--bad-soft)'}
   };
   const total=MANDAMENTOS_CRITERIOS.length;
-  const atendeCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='atende').length;
+  const simCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='sim').length;
   const naoCount=MANDAMENTOS_CRITERIOS.filter(c=>ev[c.id]?.status==='nao').length;
   const padrinhoId=S.chatterFichas?.[cid]?.padrinhoId||'';
   const padrinhos=S.chatters.filter(ch=>(ch.level==='padrinho'||ch.isPadrinho)&&ch.id!==cid);
@@ -12231,27 +12233,27 @@ function mandamentosPanelHtml(cid){
     </select>`:`<div style="font-size:12px;color:var(--text3)">Nenhum chatter marcado como 👑 Padrinho ainda — defina o cargo na aba Equipe pra poder escolher aqui.</div>`}
   </div>`;
   const obsGerais=S.chatterFichas?.[cid]?.padrinhoObservacoesGerais||'';
+  // Rótulo alinhado com a pergunta que o padrinho responde no link público
+  // (avaliacao.html) — a pedido da gestora (07/08/2026).
   const obsGeraisHtml=`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-top:9px">
-    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">✍️ Observações gerais do padrinho</div>
-    <textarea class="ftext" style="min-height:44px;font-size:12px" placeholder="Preenchido automaticamente ao importar o PDF do padrinho — ou escreva aqui direto..." onblur="savePadrinhoObsGerais('${cid}',this.value)">${obsGerais}</textarea>
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">📝 Processo de teste e opinião do padrinho</div>
+    <textarea class="ftext" style="min-height:60px;font-size:12px" placeholder="Preenchido automaticamente quando o padrinho envia pelo link — ou escreva aqui direto..." onblur="savePadrinhoObsGerais('${cid}',this.value)">${obsGerais}</textarea>
   </div>`;
   return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
-    <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${atendeCount}/${total} critérios atendidos${naoCount?` · ${naoCount} não atendido${naoCount>1?'s':''}`:''}</div></div>
+    <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${simCount}/${total} critérios com Sim${naoCount?` · ${naoCount} com Não`:''}</div></div>
       <button class="btn btn-ghost btn-xs" onclick="gerarLinkAvaliacao('${cid}')">🔗 Link de avaliação</button>
     </div>
     ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
       const e=ev[c.id]||{};
       return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${idx+1}. ${c.titulo}</div>
-        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">${c.descricao}</div>
-        <div style="display:flex;gap:6px;margin-bottom:8px">
-          ${['atende','parcial','nao'].map(s=>{
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">${idx+1}. ${c.titulo}</div>
+        <div style="display:flex;gap:6px">
+          ${['sim','nao'].map(s=>{
             const sel=e.status===s;
             const m=statusMeta[s];
             return`<button onclick="setMandamentoStatus('${cid}','${c.id}','${s}')" style="flex:1;padding:6px 4px;border-radius:7px;border:2px solid ${sel?m.color:'var(--line)'};background:${sel?m.bg:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:10.5px;color:${sel?m.color:'var(--text2)'}">${m.label}</button>`;
           }).join('')}
         </div>
-        <textarea class="ftext" style="min-height:38px;font-size:12px" placeholder="Observação (espaço de resposta)..." onblur="saveMandamentoNota('${cid}','${c.id}',this.value)">${e.nota||''}</textarea>
       </div>`;
     }).join('')}
     ${padrinhoSelectHtml}
