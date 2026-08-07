@@ -494,6 +494,7 @@ function initFirebase(){
     listenToExclusoesTesterPendentes();
     listenToDeserdarPendentes();
     listenToHorarioTestePendentes();
+    listenToEntrevistaPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -6007,16 +6008,12 @@ function renderFichaChatter(chatterId){
 
   const history=f.history||[];
 
+  const falaInglesFicha=f.falaIngles||f.dadosPJ?.falaIngles||'';
   el.innerHTML=`
     <div style="background:var(--bg-soft);border-radius:12px;padding:14px;margin-bottom:12px">
       <div style="font-weight:800;font-size:16px;margin-bottom:4px">${c.name}</div>
-      <div style="font-size:12px;color:var(--text3)">${c.level} · desde ${c.createdAt?c.createdAt.slice(0,10):'?'}</div>
+      <div style="font-size:12px;color:var(--text3)">${c.level} · desde ${c.createdAt?c.createdAt.slice(0,10):'?'}${falaInglesFicha?` · 🗣️ ${falaInglesFicha}`:''}</div>
     </div>
-
-    ${f.dadosPJ?.falaIngles?`<div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:12.5px;font-weight:700;color:var(--text2)">🗣️ Fala inglês</div>
-      <div style="font-size:13.5px;font-weight:800;color:var(--accent-strong)">${f.dadosPJ.falaIngles}</div>
-    </div>`:''}
 
     ${renderMapeamentoPanel(chatterId)}
 
@@ -11833,9 +11830,12 @@ function renderAfilhadoClaims(){
   const ordenados=[...claims].sort((a,b)=>(a.status==='pendente'?0:1)-(b.status==='pendente'?0:1)||(b.criadoEm||'').localeCompare(a.criadoEm||''));
   el.innerHTML=ordenados.map(cl=>{
     const meta=statusMeta[cl.status]||statusMeta.pendente;
+    const testerChatterCl=S.chatters.find(ch=>ch.id===cl.testerId);
+    const entrevistaLabel=testerChatterCl?.entrevista?.label||'';
     return`<div style="border:1px solid var(--line);border-left:3px solid ${meta.color};border-radius:9px;padding:11px 13px;margin-bottom:9px">
       <div style="font-weight:700;font-size:13.5px">👑 ${cl.padrinhoNome||'—'} → 🧪 ${cl.testerNome||'—'}</div>
       <div style="font-size:11px;color:${meta.color};font-weight:700;margin-top:2px">${meta.label}</div>
+      ${entrevistaLabel?`<div style="font-size:11.5px;color:var(--text2);margin-top:4px">🎥 Entrevista marcada: Domingo, ${entrevistaLabel}</div>`:`<div style="font-size:11.5px;color:var(--text3);margin-top:4px">🎥 Ainda não marcou horário de entrevista</div>`}
       <div style="display:flex;gap:6px;margin-top:9px">
         ${['aprovado','reservado','reprovado'].map(op=>{
           const labels={aprovado:'✅ Aprovar',reservado:'🔵 Reservar',reprovado:'❌ Reprovar'};
@@ -12686,6 +12686,11 @@ function aplicarDadosPjPendente(docId,data){
       trelloEmail:data.trelloEmail||'',telegramNumero:data.telegramNumero||'',telegramNome:data.telegramNome||'',
       recebidoEm:new Date().toISOString()
     };
+    // Espelha também no nível de cima da Ficha (falaIngles), não só dentro de
+    // dadosPJ — é o mesmo campo que a gestora pode setar manualmente pra
+    // chatters já efetivados (que nunca passaram pelo form de tester), então
+    // os dois caminhos escrevem no mesmo lugar e a Ficha mostra sempre daqui.
+    if(data.falaIngles)S.chatterFichas[c.id].falaIngles=data.falaIngles;
     // Espelha só um FLAG (sem nenhum dado sensível) no chatter — é o que o
     // link público de tarefas usa pra saber que já pode trocar o formulário
     // de PJ pela mensagem de aprovado + seletor de horário, sem esperar a
@@ -12936,6 +12941,48 @@ function aplicarHorarioTestePendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar horário de teste como processado',e));
   }catch(e){
     console.error('Erro ao aplicar horário de teste pendente',e);
+  }
+}
+
+/* ===========================================================
+   ENTREVISTA POR VIDEOCHAMADA — a pedido da gestora (07/08/2026):
+   logo abaixo da tarefa de Domingo (Dia 3), o tester marca o horário da
+   entrevista obrigatória (sempre no próprio Domingo, 19h-1h, de 30 em 30
+   min, vagas exclusivas — mesmo padrão do horário de teste). Espelha no
+   CHATTER (c.entrevista={slotId,label,agendadoEm}) pra sincronizar com o
+   link de tarefas (saber quais vagas já foram ocupadas) e aparecer aqui
+   na Solicitação de Afilhado — é exatamente ali que a gestora aprova e
+   só depois disso a pessoa vira afilhado do padrinho e segue pras
+   páginas seguintes (dados PJ, horário de teste, Seja bem-vindo).
+   =========================================================== */
+function listenToEntrevistaPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','entrevistaPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarEntrevistaPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir entrevistas pendentes',err);
+    });
+}
+function aplicarEntrevistaPendente(docId,data){
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    c.entrevista={slotId:data.slotId||'',label:data.slotLabel||'',agendadoEm:new Date().toISOString()};
+    save();
+    toast(`🎥 ${c.name} marcou a entrevista: Domingo, ${data.slotLabel||''}`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar entrevista como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar entrevista pendente',e);
   }
 }
 

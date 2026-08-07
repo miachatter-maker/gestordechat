@@ -178,6 +178,69 @@ const HORARIO_SLOTS=[
   {id:'c2',grupo:'Quarta, quinta e sexta',opcao:'Opção 2',horario:'19h-23h'}
 ];
 function horarioSlotLabel(slot){return`${slot.grupo} · ${slot.opcao} (${slot.horario})`;}
+
+// ---------- Entrevista por videochamada (Domingo, 19h-1h, vagas de 30min) ----------
+// A pedido da gestora (07/08/2026): logo abaixo da tarefa de Domingo (Dia 3),
+// a pessoa marca o horário da entrevista por videochamada — obrigatória antes
+// de virar afilhado. Mesmo padrão de vagas do horário de teste: exclusivo (uma
+// vez escolhido por alguém, some pros outros), sincronizado via central-dados.
+// É sempre no próprio Domingo do ciclo — só o horário muda, não o dia. Cada
+// vaga é uma JANELA de 30 minutos de verdade (não só um horário de início) —
+// pedido explícito da gestora (07/08/2026) — por isso o rótulo mostra sempre
+// início e fim (ex: 19:00–19:30), e a última vaga começa às 00:30 (termina
+// 01:00) pra não passar do limite da disponibilidade (19h até 1h da manhã).
+const ENTREVISTA_SLOTS=['19:00','19:30','20:00','20:30','21:00','21:30','22:00','22:30','23:00','23:30','00:00','00:30']
+  .map((h,i)=>{
+    const[hh,mm]=h.split(':').map(Number);
+    const fimMin=(hh*60+mm+30)%(24*60);
+    const fim=`${String(Math.floor(fimMin/60)).padStart(2,'0')}:${String(fimMin%60).padStart(2,'0')}`;
+    return{id:'ent'+i,horario:`${h}–${fim}`};
+  });
+let mostrarPickerEntrevista=false;
+function entrevistaHtml(tester){
+  const meuSlotId=(tester.entrevista&&tester.entrevista.slotId)||localStorage.getItem('tn_entrevistaSlot_'+tester.id)||'';
+  const meuSlotLabel=(tester.entrevista&&tester.entrevista.label)||(ENTREVISTA_SLOTS.find(s=>s.id===meuSlotId)||{}).horario||'';
+  const aviso=`<div class="card">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">🎥 Entrevista por videochamada</div>
+    <div style="font-size:12.5px;color:var(--text2);line-height:1.5;margin-bottom:10px">Marque seu horário da entrevista por videochamada. É simples, porém é obrigatória pra gente te conhecer. Mandaremos o link de acesso da entrevista no seu privado do Discord.</div>`;
+  if(meuSlotId&&!mostrarPickerEntrevista){
+    return aviso+`
+      <div style="padding:11px 14px;background:var(--ok-soft,#E7F5EE);color:var(--ok,#177350);border-radius:var(--r-md);font-weight:700;font-size:13.5px">🗓️ Domingo, ${meuSlotLabel}</div>
+      <button class="btn" style="background:var(--bg-soft);color:var(--text2);margin-top:8px" onclick="mostrarPickerEntrevista=true;renderTesterDays(selTesterId)">🔄 Trocar horário</button>
+    </div>`;
+  }
+  const ocupados=new Set(chatters.filter(c=>c.id!==tester.id&&c.entrevista&&c.entrevista.slotId).map(c=>c.entrevista.slotId));
+  return aviso+`
+    <div style="font-size:12px;color:var(--text2);margin-bottom:8px">Todos os horários são de meia em meia hora — Domingo, das 19h até 1h da madrugada.</div>
+    ${ENTREVISTA_SLOTS.map(s=>{
+      const ocupado=ocupados.has(s.id);
+      const ehMeu=s.id===meuSlotId;
+      const estilo=ocupado&&!ehMeu?'background:var(--bg-soft);color:var(--text3);border:1px solid var(--line);cursor:not-allowed':ehMeu?'background:var(--ok-soft,#E7F5EE);color:var(--ok,#177350);border:1.5px solid var(--ok,#177350)':'background:var(--accent-soft);color:var(--accent-strong);border:1px solid var(--accent-soft)';
+      return`<button class="btn" ${ocupado&&!ehMeu?'disabled':''} style="margin-bottom:6px;text-align:left;padding:11px 14px;${estilo}" ${ocupado&&!ehMeu?'':`onclick="enviarEntrevista('${s.id}')"`}>${s.horario}${ocupado&&!ehMeu?' — indisponível':ehMeu?' — seu horário atual':''}</button>`;
+    }).join('')}
+    ${meuSlotId?`<button class="btn" style="background:var(--bg-soft);color:var(--text2);margin-top:6px" onclick="mostrarPickerEntrevista=false;renderTesterDays(selTesterId)">Cancelar</button>`:''}
+  </div>`;
+}
+window.enviarEntrevista=async function(slotId){
+  const tester=chatters.find(t=>t.id===selTesterId);
+  if(!tester)return;
+  const slot=ENTREVISTA_SLOTS.find(s=>s.id===slotId);
+  if(!slot)return;
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'entrevistaPendente',processado:false,
+      testerId:tester.id,testerNome:tester.name,
+      slotId:slot.id,slotLabel:slot.horario,
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    localStorage.setItem('tn_entrevistaSlot_'+tester.id,slot.id);
+    mostrarPickerEntrevista=false;
+    renderTesterDays(selTesterId);
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+  }
+};
 let mostrarPickerHorario=false;
 function horarioTesteHtml(tester){
   // Exceção do horário fixo do Victor foi removida (03/08/2026, a pedido da
@@ -743,7 +806,7 @@ function renderTesterDays(testerId){
         <span class="badge badge-${status}">${badgeLabel}</span>
       </div>
       ${bodyHtml}
-    </div>`;
+    </div>`+(d.dia===3?entrevistaHtml(tester):'');
   }).join('')+`<div class="warn-box">⚠️ Envie todas as tarefas até às 00h de cada dia — o envio é obrigatório e faz parte dos critérios de eliminação.</div>`;
 }
 // ---------- Edição de tarefa já enviada ----------
