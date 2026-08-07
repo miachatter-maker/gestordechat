@@ -752,6 +752,12 @@ function renderTesterDays(testerId){
     }
   }
   const ciclo=getCicloAtual();
+  // Entrevista só pode aparecer depois que TODAS as 3 tarefas (Sexta, Sábado
+  // e Domingo) já foram entregues — a pedido explícito da gestora (07/08/2026):
+  // "só é possível no domingo e após entrega das outras tarefas". Sem isso,
+  // o card de Domingo aparecia (mesmo que só como "futuro"/bloqueado) desde
+  // Sexta, e o aviso da entrevista vinha junto — cedo demais.
+  const todasTarefasEnviadas=ciclo.dias.every(d=>getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo)==='enviado');
   el.innerHTML=meusDadosHtml(tester)+ciclo.dias.map(d=>{
     const status=getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
     const tarefas=getMinhasTarefas();
@@ -806,7 +812,7 @@ function renderTesterDays(testerId){
         <span class="badge badge-${status}">${badgeLabel}</span>
       </div>
       ${bodyHtml}
-    </div>`+(d.dia===3?entrevistaHtml(tester):'');
+    </div>`+(d.dia===3&&todasTarefasEnviadas?entrevistaHtml(tester):'');
   }).join('')+`<div class="warn-box">⚠️ Envie todas as tarefas até às 00h de cada dia — o envio é obrigatório e faz parte dos critérios de eliminação.</div>`;
 }
 // ---------- Edição de tarefa já enviada ----------
