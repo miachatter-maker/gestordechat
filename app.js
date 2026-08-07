@@ -12239,23 +12239,28 @@ function mandamentosPanelHtml(cid){
     <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">📝 Processo de teste e opinião do padrinho</div>
     <textarea class="ftext" style="min-height:60px;font-size:12px" placeholder="Preenchido automaticamente quando o padrinho envia pelo link — ou escreva aqui direto..." onblur="savePadrinhoObsGerais('${cid}',this.value)">${obsGerais}</textarea>
   </div>`;
+  // Lista compacta (07/08/2026, a pedido da gestora): cada critério é uma
+  // linha só — título + bolinha Sim/Não do lado, sem card próprio nem
+  // descrição embaixo. Antes cada item ocupava um bloco inteiro.
   return`<div class="panel" style="margin-bottom:14px;border-left:3px solid var(--accent)">
     <div class="panel-head"><div><div class="panel-title">📜 Avaliação de Chatter</div><div class="panel-note">${simCount}/${total} critérios com Sim${naoCount?` · ${naoCount} com Não`:''}</div></div>
       <button class="btn btn-ghost btn-xs" onclick="gerarLinkAvaliacao('${cid}')">🔗 Link de avaliação</button>
     </div>
-    ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
-      const e=ev[c.id]||{};
-      return`<div style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:8px">${idx+1}. ${c.titulo}</div>
-        <div style="display:flex;gap:6px">
-          ${['sim','nao'].map(s=>{
-            const sel=e.status===s;
-            const m=statusMeta[s];
-            return`<button onclick="setMandamentoStatus('${cid}','${c.id}','${s}')" style="flex:1;padding:6px 4px;border-radius:7px;border:2px solid ${sel?m.color:'var(--line)'};background:${sel?m.bg:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:10.5px;color:${sel?m.color:'var(--text2)'}">${m.label}</button>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }).join('')}
+    <div style="border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:9px">
+      ${MANDAMENTOS_CRITERIOS.map((c,idx)=>{
+        const e=ev[c.id]||{};
+        return`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;${idx<MANDAMENTOS_CRITERIOS.length-1?'border-bottom:1px solid var(--line)':''}">
+          <div style="font-size:12px;font-weight:600;line-height:1.3;flex:1">${idx+1}. ${c.titulo}</div>
+          <div style="display:flex;gap:5px;flex-shrink:0">
+            ${['sim','nao'].map(s=>{
+              const sel=e.status===s;
+              const m=statusMeta[s];
+              return`<button onclick="setMandamentoStatus('${cid}','${c.id}','${s}')" style="width:26px;height:26px;border-radius:50%;border:2px solid ${sel?m.color:'var(--line-strong)'};background:${sel?m.bg:'var(--bg)'};cursor:pointer;font-family:var(--font-display);font-weight:800;font-size:11px;color:${sel?m.color:'var(--text3)'};display:flex;align-items:center;justify-content:center;padding:0">${s==='sim'?'✓':'✗'}</button>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
     ${padrinhoSelectHtml}
     ${obsGeraisHtml}
   </div>`;
