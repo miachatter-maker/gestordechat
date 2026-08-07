@@ -434,10 +434,16 @@ function init(){
 }
 
 function renderAll(){
-  // Inclui quem já teve decisão (aprovado/reprovado) também, senão a pessoa
-  // some do seletor assim que é aprovada (vira time==='basico') e nunca mais
-  // consegue ver a tela de parabéns/dados PJ ou a de reprovação.
-  const testers=chatters.filter(c=>c.time==='tester'||c.testerDecision);
+  // A pedido da gestora (07/08/2026): quem já teve decisão (aprovado/
+  // reprovado/reservas) some da lista de seleção pra sempre depois de
+  // decidido — a lista deve mostrar só quem ainda está no processo:
+  // afilhados aguardando avaliação (com padrinho, sem decisão) e quem
+  // está no ciclo atual. Antes ficava tudo acumulado pra sempre (ex:
+  // Henrique Spagnolo, aprovado há semanas, ainda aparecia no seletor).
+  // Quem já foi decidido e ainda não tinha o id salvo neste navegador
+  // (cache local) não vai mais achar o nome aqui pra rever a tela de
+  // resultado — troca consciente, a gestora topou o risco.
+  const testers=chatters.filter(c=>c.time==='tester'&&!c.testerDecision);
   headerSub.textContent='Sexta / Sábado / Domingo — ciclo da semana atual';
   // Se essa pessoa acabou de se autoincluir (pendingAutoNome no localStorage)
   // e agora já apareceu na lista com esse nome, seleciona ela automaticamente
