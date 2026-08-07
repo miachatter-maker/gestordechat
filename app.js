@@ -12132,11 +12132,20 @@ function renderTesters(){
           // reprovado — pra sempre poder consultar quanto essa pessoa gerou
           // no período de teste, mesmo depois de reprovada.
           const analysis=getTesterAnalysis(c.id);
-          return`<div class="tester-decided-row" data-key="${c.id}" style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px;touch-action:pan-y">
+          // A pedido da gestora (07/08/2026): antes essa linha não tinha
+          // onclick nenhum — depois de decidido (aprovado/reprovado), não
+          // dava pra abrir o detalhe do tester pra gerar/rever o link de
+          // Avaliação de Chatter (mandamentosPanelHtml), então o relatório
+          // do padrinho ficava sem onde ser processado/registrado pra quem
+          // já tinha sido decidido. Agora clica igual à lista de pendentes.
+          return`<div class="tester-decided-row" data-key="${c.id}" style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg-soft);border-radius:8px;margin-bottom:6px;font-size:12.5px;touch-action:pan-y;cursor:pointer" onclick="document.getElementById('tester-select').value='${c.id}';renderTesterDetail('${c.id}')">
             <div><strong>${c.name}</strong> <span style="color:${isAprov?'var(--ok)':'var(--bad)'}">${isAprov?'✅ aprovado':'❌ reprovado'}</span></div>
-            <div style="text-align:right">
-              <div style="font-weight:700;font-family:var(--font-mono)">${money(analysis.totalRev)}</div>
-              <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="text-align:right">
+                <div style="font-weight:700;font-family:var(--font-mono)">${money(analysis.totalRev)}</div>
+                <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
+              </div>
+              <div style="font-size:16px;color:var(--text3)">›</div>
             </div>
           </div>`;
         }).join('')}
@@ -12385,6 +12394,11 @@ function listenToAvaliacoesPendentes(){
     });
 }
 function aplicarAvaliacaoPendente(docId,data){
+  // A pedido da gestora (07/08/2026): o relatório de avaliação do padrinho
+  // continua sendo processado e registrado mesmo depois que o tester já foi
+  // aprovado ou reprovado — de propósito, sem checar testerDecision aqui.
+  // Só o chatter em si precisa existir (não foi apagado); a decisão que já
+  // foi tomada não impede o registro do relatório.
   try{
     const c=S.chatters.find(ch=>ch.id===data.chatterId);
     if(!c){
