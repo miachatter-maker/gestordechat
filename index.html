@@ -608,6 +608,68 @@ body{
 </style>
 </head>
 <body>
+<!-- ============================================================
+     TRAVA DE SENHA — a pedido da gestora (07/08/2026): "qualquer pessoa
+     tem acesso aos dados pelo endereço do app". Cobre a tela inteira ANTES
+     de qualquer dado aparecer. Uma vez digitada certo num aparelho, esse
+     aparelho fica "de confiança" (localStorage) e não pede de novo — é
+     assim que o computador e o celular dela passam a entrar direto depois
+     da primeira vez, mas qualquer OUTRO aparelho pede a senha sempre.
+     Só guarda o HASH (SHA-256) da senha no código, nunca o texto puro.
+     Importante: isso é uma trava de VISUALIZAÇÃO no navegador, não uma
+     autenticação de servidor de verdade (o site é estático) — serve pra
+     barrar quem só tem o link, não resiste a alguém tecnicamente muito
+     insistente abrindo o DevTools. Pros links públicos (tarefas, avaliação,
+     documento dos padrinhos, myperformance) continua sem senha nenhuma, de
+     propósito — são feitos pra outras pessoas acessarem sem login.
+     ============================================================ -->
+<div id="password-gate-overlay" style="position:fixed;inset:0;z-index:999999;background:linear-gradient(135deg,#FCEAF0,#FBF6F7);display:flex;align-items:center;justify-content:center;padding:20px;font-family:'Inter',system-ui,sans-serif">
+  <div style="width:100%;max-width:340px;background:#fff;border-radius:16px;padding:28px 24px;box-shadow:0 12px 40px rgba(36,26,29,.18);text-align:center">
+    <div style="width:52px;height:52px;border-radius:50%;margin:0 auto 14px;background:linear-gradient(135deg,#E8779B,#D85C84);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;color:#fff">G</div>
+    <div style="font-size:17px;font-weight:800;color:#241A1D;margin-bottom:4px">GestorPro</div>
+    <div style="font-size:12.5px;color:#7A6A6E;margin-bottom:18px">Acesso restrito — digite a senha</div>
+    <input type="password" id="pg-input" placeholder="Senha" autocomplete="current-password" style="width:100%;padding:11px 13px;border:1px solid #E5CFD5;border-radius:10px;font-size:15px;margin-bottom:10px;outline:none;font-family:inherit;box-sizing:border-box" onkeydown="if(event.key==='Enter')checkGestorProPassword()">
+    <button onclick="checkGestorProPassword()" style="width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#E8779B,#D85C84);color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">Entrar</button>
+    <div id="pg-error" style="color:#B42334;font-size:12px;margin-top:10px;min-height:16px"></div>
+  </div>
+</div>
+<script>
+(function(){
+  var TRUSTED_KEY='gestorpro_device_trusted_v1';
+  // SHA-256 da senha — nunca o texto puro.
+  var HASH='0da587d8f8166f811e5618f45914e43baebf67e111a4f5e889f20e3fe9126122';
+  var overlay=document.getElementById('password-gate-overlay');
+  function unlock(){ if(overlay&&overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+  if(localStorage.getItem(TRUSTED_KEY)==='1'){ unlock(); }
+  else{
+    var inp=document.getElementById('pg-input');
+    if(inp)setTimeout(function(){inp.focus();},50);
+  }
+  async function sha256Hex(str){
+    var buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.prototype.map.call(new Uint8Array(buf),function(b){return b.toString(16).padStart(2,'0');}).join('');
+  }
+  window.checkGestorProPassword=async function(){
+    var input=document.getElementById('pg-input');
+    var errEl=document.getElementById('pg-error');
+    var val=(input&&input.value)||'';
+    if(!val){if(errEl)errEl.textContent='Digite a senha.';return;}
+    try{
+      var hash=await sha256Hex(val);
+      if(hash===HASH){
+        localStorage.setItem(TRUSTED_KEY,'1');
+        unlock();
+      }else{
+        if(errEl)errEl.textContent='Senha incorreta.';
+        if(input){input.value='';input.focus();}
+      }
+    }catch(e){
+      if(errEl)errEl.textContent='Erro ao verificar — tente de novo.';
+    }
+  };
+})();
+</script>
+
 <div id="initial-load-overlay" style="position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
   <div style="width:36px;height:36px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite"></div>
   <div style="font-size:13px;color:var(--text2)">Carregando dados…</div>
