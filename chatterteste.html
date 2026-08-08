@@ -626,7 +626,10 @@ function getStatusDia(fridayKey,diaN,dataDia,prazo){
     if(liberado)return'aberto';
     return'bloqueado';
   }
-  const inicioDia=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate());
+  // A pedido da gestora (08/08/2026): a tarefa de cada dia só libera às 16h
+  // daquele dia (antes ficava "aberto" desde meia-noite) — até lá fica
+  // trancada ("futuro"), mesmo já sendo o dia certo.
+  const inicioDia=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate(),16,0,0,0);
   if(agora>=inicioDia)return'aberto';
   return'futuro';
 }
@@ -789,7 +792,7 @@ function renderTesterDays(testerId){
             <button class="btn btn-primary" onclick="enviarSegundaChance(${d.dia},'${ciclo.fridayKey}')">Enviar pedido</button>
           </div>`}`;
     }else if(status==='futuro'){
-      bodyHtml=`<div class="warn-box" style="margin-bottom:0">Disponível a partir de ${d.label.toLowerCase()} (${fmtBR(d.dataDia)}).</div>`;
+      bodyHtml=`<div class="warn-box" style="margin-bottom:0">Disponível a partir das 16h de ${d.label.toLowerCase()} (${fmtBR(d.dataDia)}).</div>`;
     }else{
       const campos=TAREFAS_DIA[d.dia].campos;
       bodyHtml=`
