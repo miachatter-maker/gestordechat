@@ -261,7 +261,18 @@ function horarioTesteHtml(tester){
       <button class="btn" style="background:var(--bg-soft);color:var(--text2)" onclick="mostrarPickerHorario=true;renderTesterDays(selTesterId)">🔄 Trocar horário</button>
     </div>`;
   }
-  const ocupados=new Set(chatters.filter(c=>c.id!==tester.id&&c.horarioTeste&&c.horarioTeste.slotId).map(c=>c.horarioTeste.slotId));
+  // Achado 10/08/2026 — a gestora corrigiu o critério: esses horários NÃO
+  // são amarrados à decisão (aprovado/reprovado) — são amarrados À SEMANA.
+  // Cada leva de testers entra no domingo e o horário escolhido só vale
+  // durante aquela semana; no domingo seguinte a vaga fica livre de novo
+  // pra próxima leva, não importa o que aconteceu com quem escolheu antes.
+  // Por isso: só conta como ocupado quem escolheu DEPOIS do último domingo
+  // (ciclo atual) — qualquer escolha de uma semana anterior expira sozinha.
+  const agoraH=new Date();
+  const ultimoDomingoH=new Date(agoraH);
+  ultimoDomingoH.setHours(0,0,0,0);
+  ultimoDomingoH.setDate(ultimoDomingoH.getDate()-ultimoDomingoH.getDay());
+  const ocupados=new Set(chatters.filter(c=>c.id!==tester.id&&c.horarioTeste&&c.horarioTeste.slotId&&c.horarioTeste.escolhidoEm&&new Date(c.horarioTeste.escolhidoEm)>=ultimoDomingoH).map(c=>c.horarioTeste.slotId));
   const grupos=[...new Set(HORARIO_SLOTS.map(s=>s.grupo))];
   return`<div class="card">
     <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">🗓️ Nossos horários de teste disponíveis</div>
