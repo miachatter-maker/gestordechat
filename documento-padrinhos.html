@@ -345,7 +345,11 @@ function renderEntrevistaView(){
   const ultimoDomingoEV=new Date(agoraEV);
   ultimoDomingoEV.setHours(0,0,0,0);
   ultimoDomingoEV.setDate(ultimoDomingoEV.getDate()-ultimoDomingoEV.getDay());
-  const candidatos=chatters.filter(c=>c.time==='tester'&&!c.testerDecision&&c.horarioTeste&&c.horarioTeste.slotId&&c.horarioTeste.escolhidoEm&&new Date(c.horarioTeste.escolhidoEm)>=ultimoDomingoEV);
+  // 10/08/2026 — a pedido da gestora: sempre em ordem cronológica (quem
+  // marcou primeiro aparece primeiro), não na ordem solta que o array de
+  // chatters vier.
+  const candidatos=chatters.filter(c=>c.time==='tester'&&!c.testerDecision&&c.horarioTeste&&c.horarioTeste.slotId&&c.horarioTeste.escolhidoEm&&new Date(c.horarioTeste.escolhidoEm)>=ultimoDomingoEV)
+    .sort((a,b)=>new Date(a.horarioTeste.escolhidoEm)-new Date(b.horarioTeste.escolhidoEm));
   if(!candidatos.length){
     el.innerHTML='<div class="warn-box">Ninguém marcou horário de teste ainda.</div>';
     return;
