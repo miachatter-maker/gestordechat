@@ -12016,6 +12016,22 @@ function setTesterDecision(chatterId,decision){
   save();
   renderTesters();
 }
+// 08/08/2026 — a pedido da gestora: arrastar (swipe) na lista de Testers
+// (pendentes ou decididos) NÃO apaga mais o chatter inteiro — só some
+// daqui (fica marcado arquivadoTesters=true, que o filtro de renderTesters
+// exclui). Todo o histórico, ficha, faturamento etc. continuam intactos.
+// Antes o swipe chamava deleteChatter direto, apagando tudo sem volta —
+// exatamente o que a gestora reportou como bug ("arrasto e apaga no
+// sistema"). Pra apagar de vez agora precisa do botão 🗑️ explícito (linha
+// de Decididos), que é bem mais difícil de acionar sem querer que um swipe.
+function arquivarTester(id){
+  const c=S.chatters.find(ch=>ch.id===id);
+  if(!confirm(`Tirar ${c?c.name:'essa pessoa'} da lista de Testers? Isso só esconde daqui — NÃO apaga o chatter, a ficha, nem o histórico de nada. Pra apagar de vez, use o botão 🗑️.`))return;
+  if(!S.chatterFichas[id])S.chatterFichas[id]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+  S.chatterFichas[id].arquivadoTesters=true;
+  save();
+  toast(`${c?c.name:'Pessoa'} tirada da lista de Testers — nada foi apagado.`);
+}
 function renderTesters(){
   renderMapSlots();
   renderMapTranscricoes();
@@ -12034,9 +12050,14 @@ function renderTesters(){
   // teste — quem ainda não tem padrinho fica só no link dos padrinhos, onde
   // eles reivindicam. Quem já teve alguma decisão continua aparecendo
   // (histórico), mesmo que por algum motivo não tenha mais padrinhoId.
+  // 08/08/2026 — a pedido da gestora: arrastar (swipe) nessa lista deixou
+  // de apagar o chatter inteiro (deleteChatter) e passou a só "arquivar"
+  // (arquivadoTesters=true), que esse filtro exclui — a pessoa some da
+  // lista mas TODO o histórico continua intacto. Apagar de vez agora é só
+  // pelo botão 🗑️ explícito (ver decisionBtns/tester-decided-row abaixo).
   const testers=S.chatters.filter(c=>{
     const ficha=S.chatterFichas?.[c.id];
-    return!!(ficha&&(ficha.padrinhoId||ficha.testerDecision));
+    return!!(ficha&&(ficha.padrinhoId||ficha.testerDecision)&&!ficha.arquivadoTesters);
   });
   if(sel){
     const cur=sel.value;
@@ -12117,6 +12138,7 @@ function renderTesters(){
             <div style="font-size:11.5px;color:var(--text2);margin-top:2px">Teste: ${daysLabel}${analysis.testDays.length?` · <strong style="color:${color}">${money(rev)}</strong> nos 3 dias`:''}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:1px">${workDays.length} dia${workDays.length!==1?'s':''} de trabalho · contrato desde ${contractDate}</div>
           </div>
+          <button title="Apagar de vez (não some sozinho? use isso)" onclick="event.stopPropagation();deleteChatter('${c.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px">🗑️</button>
           <div style="font-size:18px">›</div>
         </div>
         <div style="display:flex;gap:6px;margin-top:10px">${decisionBtns(c,decision)}</div>
@@ -12145,14 +12167,18 @@ function renderTesters(){
                 <div style="font-weight:700;font-family:var(--font-mono)">${money(analysis.totalRev)}</div>
                 <div style="color:var(--text3);font-size:11px">${f.testerDecisionDate?f.testerDecisionDate.split('-').reverse().join('/'):''}</div>
               </div>
+              <button title="Apagar de vez (não some sozinho? use isso)" onclick="event.stopPropagation();deleteChatter('${c.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px">🗑️</button>
               <div style="font-size:16px;color:var(--text3)">›</div>
             </div>
           </div>`;
         }).join('')}
       </div>`:''}
   `;
-  attachSwipeToDelete(el,'.tester-pending-row',id=>deleteChatter(id),renderTesters);
-  attachSwipeToDelete(el,'.tester-decided-row',id=>deleteChatter(id),renderTesters);
+  // 08/08/2026 — a pedido da gestora: arrastar aqui não apaga mais o
+  // chatter inteiro, só "arquiva" (esconde da lista, sem apagar nada —
+  // ver arquivarTester). Apagar de vez é só pelo botão 🗑️ explícito.
+  attachSwipeToDelete(el,'.tester-pending-row',id=>arquivarTester(id),renderTesters);
+  attachSwipeToDelete(el,'.tester-decided-row',id=>arquivarTester(id),renderTesters);
 }
 
 /* ===========================================================

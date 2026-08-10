@@ -165,17 +165,23 @@ function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
 // sincronizado via central-dados, então todo mundo que estiver com a página
 // aberta vê na hora). O Victor tem horário combinado manualmente (fora desse
 // sistema de vagas) — só exibe o dele, sem picker.
-// 04/08/2026 — a pedido da gestora: liberadas +2 vagas no grupo
-// Quarta/Quinta/Sexta (13h-17h e 19h-23h).
+// 08/08/2026 — a pedido da gestora: grupos de dias trocados por
+// Segunda/Terça/Quarta e Sexta/Sábado/Domingo, cada um dividido em
+// Modelo A (3 turnos de 6h: 19h-01h, 13h-19h, 01h-07h) e Modelo B (1
+// turno de 6h: 07h-13h) — juntos, Modelo A + Modelo B cobrem o dia
+// inteiro em blocos de 6h. Obs: a gestora escreveu "Modelo A" duas vezes
+// pro grupo de Sexta/Sábado/Domingo (07h-13h) — corrigido aqui pra
+// "Modelo B" pra manter a simetria com o grupo de Segunda/Terça/Quarta
+// (Modelo A já tem os 3 turnos ali em cima); avisar se não era isso.
 const HORARIO_SLOTS=[
-  {id:'a1',grupo:'Terça, quarta e quinta',opcao:'Opção 1',horario:'7h-10h'},
-  {id:'a2',grupo:'Terça, quarta e quinta',opcao:'Opção 2',horario:'10h-13h'},
-  {id:'a3',grupo:'Terça, quarta e quinta',opcao:'Opção 3',horario:'17h-19h'},
-  {id:'b1',grupo:'Sexta, sábado e domingo',opcao:'Opção 1',horario:'7h-10h'},
-  {id:'b2',grupo:'Sexta, sábado e domingo',opcao:'Opção 2',horario:'10h-13h'},
-  {id:'b3',grupo:'Sexta, sábado e domingo',opcao:'Opção 3',horario:'17h-19h'},
-  {id:'c1',grupo:'Quarta, quinta e sexta',opcao:'Opção 1',horario:'13h-17h'},
-  {id:'c2',grupo:'Quarta, quinta e sexta',opcao:'Opção 2',horario:'19h-23h'}
+  {id:'a1',grupo:'Segunda, terça e quarta — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
+  {id:'a2',grupo:'Segunda, terça e quarta — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
+  {id:'a3',grupo:'Segunda, terça e quarta — Modelo A',opcao:'Opção 3',horario:'01h-07h'},
+  {id:'b1',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
+  {id:'b2',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
+  {id:'b3',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 3',horario:'01h-07h'},
+  {id:'c1',grupo:'Segunda, terça e quarta — Modelo B',opcao:'Opção única',horario:'07h-13h'},
+  {id:'d1',grupo:'Sexta, sábado e domingo — Modelo B',opcao:'Opção única',horario:'07h-13h'}
 ];
 function horarioSlotLabel(slot){return`${slot.grupo} · ${slot.opcao} (${slot.horario})`;}
 
@@ -766,6 +772,10 @@ function renderTesterDays(testerId){
   // "só é possível no domingo e após entrega das outras tarefas". Sem isso,
   // o card de Domingo aparecia (mesmo que só como "futuro"/bloqueado) desde
   // Sexta, e o aviso da entrevista vinha junto — cedo demais.
+  // 08/08/2026 — reforço a pedido da gestora: além das 3 tarefas entregues,
+  // agora também exige tester.temPadrinho (ela já ter aprovado o
+  // apadrinhamento) — antes bastava entregar as 3 tarefas, mesmo sem
+  // padrinho aprovado ainda, e a entrevista já aparecia.
   const todasTarefasEnviadas=ciclo.dias.every(d=>getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo)==='enviado');
   el.innerHTML=meusDadosHtml(tester)+ciclo.dias.map(d=>{
     const status=getStatusDia(ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
@@ -821,7 +831,7 @@ function renderTesterDays(testerId){
         <span class="badge badge-${status}">${badgeLabel}</span>
       </div>
       ${bodyHtml}
-    </div>`+(d.dia===3&&todasTarefasEnviadas?entrevistaHtml(tester):'');
+    </div>`+(d.dia===3&&todasTarefasEnviadas&&tester.temPadrinho?entrevistaHtml(tester):'');
   }).join('')+`<div class="warn-box">⚠️ Envie todas as tarefas até às 00h de cada dia — o envio é obrigatório e faz parte dos critérios de eliminação.</div>`;
 }
 // ---------- Edição de tarefa já enviada ----------

@@ -275,11 +275,12 @@ function hasAnyTarefaEnviada(testerId){
 
 /* ---------- render ---------- */
 function renderAll(){
-  // Inclui quem já teve decisão (aprovado/reprovado) também — senão a
-  // pessoa some da lista assim que é aprovada (vira time==='basico') e o
-  // padrinho perde o acesso à avaliação/mapeamento dela bem na hora que
-  // isso passa a importar mais (mesmo ajuste feito em tarefas-novato.html).
-  const testers=chatters.filter(c=>c.time==='tester'||c.testerDecision);
+  // A pedido da gestora (08/08/2026): assim que a pessoa é decidida
+  // (aprovada ou reprovada), some daqui de vez — antes ficava pra sempre
+  // (inclusive um chatter já efetivado há semanas, tipo Henrique Spagnolo,
+  // ainda aparecia nesse link). O padrinho não precisa mais acompanhar
+  // aqui depois que a gestora já decidiu.
+  const testers=chatters.filter(c=>c.time==='tester'&&!c.testerDecision);
   // Padrinho é um CARGO à parte do nível principal (ex: alguém pode ser
   // Sênior e Padrinho ao mesmo tempo, ver task de "2 cargos por chatter") —
   // por isso considera tanto level==='padrinho' quanto a flag isPadrinho,
@@ -337,11 +338,11 @@ function checarNovosHorarios(testers){
 }
 window.onPadrinhoChange=function(id){
   selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);
-  const testers=chatters.filter(c=>c.time==='tester'||c.testerDecision);
+  const testers=chatters.filter(c=>c.time==='tester'&&!c.testerDecision);
   renderDocumentoPadrinhos(testers);
   checarNovosHorarios(testers);
 };
-window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'||c.testerDecision));};
+window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'&&!c.testerDecision));};
 function renderTesterRow(t,ciclo){
   const map=getMapeamentoInfo(t.id,t.name);
   const claim=getMergedClaimForTester(t.id);
