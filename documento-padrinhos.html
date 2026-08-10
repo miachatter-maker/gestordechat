@@ -350,20 +350,27 @@ function renderEntrevistaView(){
     el.innerHTML='<div class="warn-box">Ninguém marcou horário de teste ainda.</div>';
     return;
   }
+  // 10/08/2026 — a pedido da gestora: as tarefas de cada um (mesmo quadro
+  // que aparece pros padrinhos — badges + detalhe expansível com o que foi
+  // enviado em cada dia) também aparecem aqui, reaproveitando renderTesterRow
+  // direto. Os botões de aprovado/reprovado da entrevista ficam à parte,
+  // menores, num card logo abaixo.
+  const ciclo=getCicloAtual();
   el.innerHTML=`<div>
     <div style="font-size:13px;font-weight:800;color:var(--accent-strong);text-transform:uppercase;letter-spacing:.03em;margin-bottom:10px">🎤 Pra entrevistar</div>
     ${candidatos.map(t=>{
       const modelo=modeloDoSlot(t.horarioTeste.slotId);
       const ficha=chatterFichasLive[t.id]||{};
       const decisao=ficha.entrevistaDecisao||'';
-      return`<div class="card" style="margin-bottom:10px">
-        <div style="font-weight:800;font-size:14.5px">${t.name}</div>
-        <div style="font-size:12.5px;color:var(--text2);margin-top:5px">🗓️ ${t.horarioTeste.label||''}</div>
-        ${modelo?`<div style="font-size:12.5px;color:var(--text2);margin-top:3px">🎭 Modelo: <strong>${modelo}</strong></div>`:''}
-        <div style="font-size:12.5px;color:var(--text2);margin-top:3px">💬 Discord: <strong>${t.discordUsername||'— ainda não enviou'}</strong></div>
-        <div style="display:flex;gap:8px;margin-top:11px">
-          <button class="btn" style="flex:1;border:2px solid ${decisao==='aprovado'?'var(--ok)':'var(--line)'};background:${decisao==='aprovado'?'var(--ok-soft)':'var(--bg-soft)'};color:${decisao==='aprovado'?'var(--ok)':'var(--text2)'};font-weight:700" onclick="decidirEntrevista('${t.id}','${(t.name||'').replace(/'/g,"\\'")}','aprovado')">✅ Aprovado</button>
-          <button class="btn" style="flex:1;border:2px solid ${decisao==='reprovado'?'var(--bad)':'var(--line)'};background:${decisao==='reprovado'?'var(--bad-soft)':'var(--bg-soft)'};color:${decisao==='reprovado'?'var(--bad)':'var(--text2)'};font-weight:700" onclick="decidirEntrevista('${t.id}','${(t.name||'').replace(/'/g,"\\'")}','reprovado')">❌ Reprovado</button>
+      return`<div style="margin-bottom:16px">
+        ${renderTesterRow(t,ciclo)}
+        <div class="card" style="margin-top:6px">
+          ${modelo?`<div style="font-size:12.5px;color:var(--text2)">🎭 Modelo: <strong>${modelo}</strong></div>`:''}
+          <div style="font-size:12.5px;color:var(--text2);margin-top:3px">💬 Discord: <strong>${t.discordUsername||'— ainda não enviou'}</strong></div>
+          <div style="display:flex;gap:6px;margin-top:9px">
+            <button style="flex:1;padding:7px 4px;border-radius:8px;border:2px solid ${decisao==='aprovado'?'var(--ok)':'var(--line)'};background:${decisao==='aprovado'?'var(--ok-soft)':'var(--bg-soft)'};color:${decisao==='aprovado'?'var(--ok)':'var(--text2)'};font-family:var(--font);font-weight:700;font-size:11.5px;cursor:pointer" onclick="decidirEntrevista('${t.id}','${(t.name||'').replace(/'/g,"\\'")}','aprovado')">✅ Aprovado</button>
+            <button style="flex:1;padding:7px 4px;border-radius:8px;border:2px solid ${decisao==='reprovado'?'var(--bad)':'var(--line)'};background:${decisao==='reprovado'?'var(--bad-soft)':'var(--bg-soft)'};color:${decisao==='reprovado'?'var(--bad)':'var(--text2)'};font-family:var(--font);font-weight:700;font-size:11.5px;cursor:pointer" onclick="decidirEntrevista('${t.id}','${(t.name||'').replace(/'/g,"\\'")}','reprovado')">❌ Reprovado</button>
+          </div>
         </div>
       </div>`;
     }).join('')}
@@ -412,7 +419,15 @@ window.onPadrinhoChange=function(id){
   renderDocumentoPadrinhos(testers);
   checarNovosHorarios(testers);
 };
-window.toggleTesterDetail=function(id){expandedTester=expandedTester===id?'':id;renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'&&!c.testerDecision));};
+window.toggleTesterDetail=function(id){
+  expandedTester=expandedTester===id?'':id;
+  // 10/08/2026 — agora renderTesterRow também é usado no modo Entrevista
+  // (Henrique Peres), que tem sua própria função de render — sem esse
+  // if, expandir a tarefa de alguém ali voltava sempre pra tela de
+  // padrinhos por engano.
+  if(selPadrinhoId==='ENTREVISTA'){renderEntrevistaView();return;}
+  renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'&&!c.testerDecision));
+};
 function renderTesterRow(t,ciclo){
   const map=getMapeamentoInfo(t.id,t.name);
   const claim=getMergedClaimForTester(t.id);
@@ -456,7 +471,7 @@ function renderTesterRow(t,ciclo){
       return`<div class="claimbox">Ninguém reivindicou esse tester ainda.<div style="margin-top:6px;color:var(--text3)">🗓️ Reivindicações só abrem aos domingos.</div></div>`;
     }
     return`<div class="claimbox">Ninguém reivindicou esse tester ainda.
-      ${selPadrinhoId?`<button class="btn btn-primary" style="margin-top:8px" onclick="reivindicarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🙋 Quero apadrinhar</button>`:'<div style="margin-top:6px;color:var(--text3)">Selecione seu nome de padrinho acima pra poder reivindicar.</div>'}
+      ${(selPadrinhoId&&selPadrinhoId!=='ENTREVISTA')?`<button class="btn btn-primary" style="margin-top:8px" onclick="reivindicarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🙋 Quero apadrinhar</button>`:'<div style="margin-top:6px;color:var(--text3)">Selecione seu nome de padrinho acima pra poder reivindicar.</div>'}
     </div>`;
   })();
   return`<div class="tester-row">
