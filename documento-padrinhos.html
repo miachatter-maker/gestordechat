@@ -287,11 +287,16 @@ function renderAll(){
   // senão quem tem outro nível principal (ex: José, Eduardo) some da lista.
   const padrinhos=chatters.filter(c=>c.level==='padrinho'||c.isPadrinho);
   headerSub.textContent='Mapeamento + tarefas de cada tester, atualizado ao vivo';
-  if(!padrinhos.length){
-    content.innerHTML='<div class="warn-box">Nenhum chatter marcado como 👑 Padrinho ainda — peça pra gestora definir o cargo na aba Equipe.</div>';
-    return;
-  }
-  if(selPadrinhoId&&!padrinhos.some(p=>p.id===selPadrinhoId))selPadrinhoId='';
+  // 10/08/2026 — a pedido da gestora: além dos padrinhos (que veem só os
+  // afilhados deles), existe agora um segundo CARGO nesse mesmo seletor —
+  // "Henrique Peres (Entrevista)" — que não é um padrinho de verdade (não
+  // tem ficha de chatter, não entra na aba Equipe/Turnos), é só uma opção
+  // fixa que muda o que aparece na tela: em vez dos afilhados de alguém,
+  // mostra TODO MUNDO que já marcou horário de teste, pra ele entrevistar.
+  // Por isso o rótulo virou "Selecione seu cargo" (não é mais só "seu
+  // nome") e a validação abaixo não pode limpar essa seleção só porque
+  // 'ENTREVISTA' não está na lista de chatters-padrinho.
+  if(selPadrinhoId&&selPadrinhoId!=='ENTREVISTA'&&!padrinhos.some(p=>p.id===selPadrinhoId))selPadrinhoId='';
   content.innerHTML=`
     ${recadoPadrinhos?`<div class="warn-box" style="border:1px solid var(--accent-strong);background:var(--accent-soft);color:var(--text)">
       <div style="font-size:11px;font-weight:700;color:var(--accent-strong);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">📢 Recado da Gestão</div>
@@ -299,19 +304,83 @@ function renderAll(){
     </div>`:''}
     <div class="card">
       <div class="field" style="margin-bottom:0">
-        <label class="flabel">Selecione seu nome (padrinho)</label>
+        <label class="flabel">Selecione seu cargo</label>
         <select class="fselect" id="padrinho-select" onchange="onPadrinhoChange(this.value)">
           <option value="">— selecionar —</option>
-          ${padrinhos.map(p=>`<option value="${p.id}" ${selPadrinhoId===p.id?'selected':''}>${p.name}</option>`).join('')}
+          ${padrinhos.map(p=>`<option value="${p.id}" ${selPadrinhoId===p.id?'selected':''}>${p.name} (Padrinho)</option>`).join('')}
+          <option value="ENTREVISTA" ${selPadrinhoId==='ENTREVISTA'?'selected':''}>Henrique Peres (Entrevista)</option>
         </select>
       </div>
       ${(typeof Notification!=='undefined'&&Notification.permission!=='granted')?`<button class="btn" style="margin-top:10px;background:var(--bg-soft);color:var(--text2)" onclick="ativarNotificacoes()">🔔 Ativar notificação de horário escolhido</button>`:(typeof Notification!=='undefined'?`<div style="margin-top:10px;font-size:11.5px;color:var(--ok)">🔔 Notificações ativadas — avisa quando um afilhado escolher horário (só enquanto essa aba estiver aberta).</div>`:'')}
     </div>
     <div id="padrinho-doc"></div>
   `;
-  renderDocumentoPadrinhos(testers);
-  checarNovosHorarios(testers);
+  if(selPadrinhoId==='ENTREVISTA'){
+    renderEntrevistaView();
+  }else{
+    renderDocumentoPadrinhos(testers);
+    checarNovosHorarios(testers);
+  }
 }
+// ---------- Modo "Henrique Peres (Entrevista)" ----------
+// Mostra todo mundo que já marcou horário de teste (não filtra por
+// padrinho — ele precisa ver todo mundo agendado, de qualquer padrinho),
+// junto com o Discord da pessoa e qual modelo ela caiu (Modelo A/B do
+// sistema de horários vira o nome de verdade da modelo aqui, só na
+// exibição — o dado salvo continua sendo "Modelo A"/"Modelo B").
+function modeloDoSlot(slotId){
+  if(!slotId)return'';
+  const letra=slotId[0];
+  if(letra==='a'||letra==='b')return'Thays Arruda';
+  if(letra==='c'||letra==='d')return'Feli';
+  return'';
+}
+function renderEntrevistaView(){
+  const el=document.getElementById('padrinho-doc');
+  if(!el)return;
+  // Mesmo corte semanal do horário de teste (ver chatterteste.html,
+  // "Achado 10/08/2026") — sem isso, um tester esquecido/deserdado com
+  // horário de semanas atrás nunca some daqui pro Henrique Peres.
+  const agoraEV=new Date();
+  const ultimoDomingoEV=new Date(agoraEV);
+  ultimoDomingoEV.setHours(0,0,0,0);
+  ultimoDomingoEV.setDate(ultimoDomingoEV.getDate()-ultimoDomingoEV.getDay());
+  const candidatos=chatters.filter(c=>c.time==='tester'&&!c.testerDecision&&c.horarioTeste&&c.horarioTeste.slotId&&c.horarioTeste.escolhidoEm&&new Date(c.horarioTeste.escolhidoEm)>=ultimoDomingoEV);
+  if(!candidatos.length){
+    el.innerHTML='<div class="warn-box">Ninguém marcou horário de teste ainda.</div>';
+    return;
+  }
+  el.innerHTML=`<div>
+    <div style="font-size:13px;font-weight:800;color:var(--accent-strong);text-transform:uppercase;letter-spacing:.03em;margin-bottom:10px">🎤 Pra entrevistar</div>
+    ${candidatos.map(t=>{
+      const modelo=modeloDoSlot(t.horarioTeste.slotId);
+      const ficha=chatterFichasLive[t.id]||{};
+      const decisao=ficha.entrevistaDecisao||'';
+      return`<div class="card" style="margin-bottom:10px">
+        <div style="font-weight:800;font-size:14.5px">${t.name}</div>
+        <div style="font-size:12.5px;color:var(--text2);margin-top:5px">🗓️ ${t.horarioTeste.label||''}</div>
+        ${modelo?`<div style="font-size:12.5px;color:var(--text2);margin-top:3px">🎭 Modelo: <strong>${modelo}</strong></div>`:''}
+        <div style="font-size:12.5px;color:var(--text2);margin-top:3px">💬 Discord: <strong>${t.discordUsername||'— ainda não enviou'}</strong></div>
+        <div style="display:flex;gap:8px;margin-top:11px">
+          <button class="btn" style="flex:1;border:2px solid ${decisao==='aprovado'?'var(--ok)':'var(--line)'};background:${decisao==='aprovado'?'var(--ok-soft)':'var(--bg-soft)'};color:${decisao==='aprovado'?'var(--ok)':'var(--text2)'};font-weight:700" onclick="decidirEntrevista('${t.id}','${(t.name||'').replace(/'/g,"\\'")}','aprovado')">✅ Aprovado</button>
+          <button class="btn" style="flex:1;border:2px solid ${decisao==='reprovado'?'var(--bad)':'var(--line)'};background:${decisao==='reprovado'?'var(--bad-soft)':'var(--bg-soft)'};color:${decisao==='reprovado'?'var(--bad)':'var(--text2)'};font-weight:700" onclick="decidirEntrevista('${t.id}','${(t.name||'').replace(/'/g,"\\'")}','reprovado')">❌ Reprovado</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+window.decidirEntrevista=async function(testerId,testerNome,decisao){
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'entrevistaDecisaoPendente',processado:false,
+      testerId,testerNome,decisao,
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+  }
+};
 window.ativarNotificacoes=function(){
   if(typeof Notification==='undefined'){alert('Seu navegador não suporta notificações.');return;}
   Notification.requestPermission().then(()=>renderAll());
@@ -338,6 +407,7 @@ function checarNovosHorarios(testers){
 }
 window.onPadrinhoChange=function(id){
   selPadrinhoId=id;localStorage.setItem('tn_padrinhoId',id);
+  if(id==='ENTREVISTA'){renderEntrevistaView();return;}
   const testers=chatters.filter(c=>c.time==='tester'&&!c.testerDecision);
   renderDocumentoPadrinhos(testers);
   checarNovosHorarios(testers);

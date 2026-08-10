@@ -501,6 +501,8 @@ function initFirebase(){
     listenToDeserdarPendentes();
     listenToHorarioTestePendentes();
     listenToEntrevistaPendentes();
+    listenToDiscordPendentes();
+    listenToEntrevistaDecisaoPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -11889,10 +11891,15 @@ function renderAfilhadoClaims(){
     const meta=statusMeta[cl.status]||statusMeta.pendente;
     const testerChatterCl=S.chatters.find(ch=>ch.id===cl.testerId);
     const entrevistaLabel=testerChatterCl?.entrevista?.label||'';
+    // Resultado da entrevista com o Henrique Peres (10/08/2026) — decisão
+    // separada da Solicitação de Afilhado, só pra gestora acompanhar aqui.
+    const entrevistaDecisao=S.chatterFichas?.[cl.testerId]?.entrevistaDecisao||'';
+    const entrevistaDecisaoHtml=entrevistaDecisao?`<div style="font-size:11.5px;font-weight:700;margin-top:4px;color:${entrevistaDecisao==='aprovado'?'var(--ok)':'var(--bad)'}">🎤 Entrevista (Henrique Peres): ${entrevistaDecisao==='aprovado'?'✅ Aprovado':'❌ Reprovado'}</div>`:'';
     return`<div style="border:1px solid var(--line);border-left:3px solid ${meta.color};border-radius:9px;padding:11px 13px;margin-bottom:9px">
       <div style="font-weight:700;font-size:13.5px">👑 ${cl.padrinhoNome||'—'} → 🧪 ${cl.testerNome||'—'}</div>
       <div style="font-size:11px;color:${meta.color};font-weight:700;margin-top:2px">${meta.label}</div>
       ${entrevistaLabel?`<div style="font-size:11.5px;color:var(--text2);margin-top:4px">🎥 Entrevista marcada: Domingo, ${entrevistaLabel}</div>`:`<div style="font-size:11.5px;color:var(--text3);margin-top:4px">🎥 Ainda não marcou horário de entrevista</div>`}
+      ${entrevistaDecisaoHtml}
       <div style="display:flex;gap:6px;margin-top:9px">
         ${['aprovado','reservado','reprovado'].map(op=>{
           const labels={aprovado:'✅ Aprovar',reservado:'🔵 Reservar',reprovado:'❌ Reprovar'};
@@ -13182,6 +13189,90 @@ async function aplicarEntrevistaPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar entrevista como processada',e));
   }catch(e){
     console.error('Erro ao aplicar entrevista pendente',e);
+  }
+}
+
+/* ===========================================================
+   DISCORD DO TESTER — a pedido da gestora (10/08/2026): passo novo entre
+   dados PJ e escolha de horário, no link de tarefas. Guarda no CHATTER
+   (c.discordUsername), simples e não sensível, igual ao nicknameTelegram —
+   é assim que o Documento dos Padrinhos (modo "Henrique Peres/Entrevista")
+   consegue mostrar o Discord de cada tester sem precisar de mais infra.
+   =========================================================== */
+function listenToDiscordPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','discordPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarDiscordPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir Discord pendente',err);
+    });
+}
+async function aplicarDiscordPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
+  try{
+    const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    c.discordUsername=data.discordUsername||'';
+    save();
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar Discord como processado',e));
+  }catch(e){
+    console.error('Erro ao aplicar Discord pendente',e);
+  }
+}
+
+/* ===========================================================
+   DECISÃO DA ENTREVISTA (Henrique Peres) — a pedido da gestora
+   (10/08/2026): no Documento dos Padrinhos, quem seleciona o cargo
+   "Henrique Peres (Entrevista)" vê todo mundo que já marcou horário de
+   teste (de qualquer padrinho) e decide aprovado/reprovado ali mesmo. Essa
+   decisão é SEPARADA da decisão da Solicitação de Afilhado (setAfilhadoClaimDecision)
+   e do testerDecision final — por pedido explícito, ela só fica registrada
+   como resultado pra gestora ver (quadro Solicitação de Afilhado), sem
+   mexer em mais nada sozinha. Guardada na FICHA (não no chatter) porque é
+   avaliação interna, no mesmo padrão de testerDecision.
+   =========================================================== */
+function listenToEntrevistaDecisaoPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','entrevistaDecisaoPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarEntrevistaDecisaoPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir decisões de entrevista pendentes',err);
+    });
+}
+async function aplicarEntrevistaDecisaoPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
+  try{
+    const testerId=data.testerId;
+    const c=testerId?S.chatters.find(ch=>ch.id===testerId):null;
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    if(!S.chatterFichas[testerId])S.chatterFichas[testerId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    S.chatterFichas[testerId].entrevistaDecisao=data.decisao||'';
+    S.chatterFichas[testerId].entrevistaDecisaoData=new Date().toISOString();
+    save();
+    toast(`🎤 Henrique Peres ${data.decisao==='aprovado'?'aprovou':'reprovou'} ${c.name} na entrevista.`);
+    if(currentViewName()==='testers')renderAfilhadoClaims();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar decisão de entrevista como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar decisão de entrevista pendente',e);
   }
 }
 

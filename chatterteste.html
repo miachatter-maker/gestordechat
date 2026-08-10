@@ -247,6 +247,44 @@ window.enviarEntrevista=async function(slotId){
     alert('Erro ao enviar: '+e.message);
   }
 };
+// ---------- Discord (10/08/2026 — a pedido da gestora) ----------
+// Passo novo, entre "dados PJ enviados" e "escolher horário": o
+// entrevistador (Henrique Peres) precisa do usuário do Discord de cada
+// pessoa antes de falar com ela. Espelha o mesmo padrão simples do
+// horário/PJ: manda um pendente pro Firestore, marca localStorage
+// otimisticamente, e o app.js aplica no chatter (c.discordUsername).
+function discordHtml(tester){
+  return`<div class="card">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:8px">💬 Seu usuário do Discord</div>
+    <div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">É pra quem vai te entrevistar conseguir te chamar por lá.</div>
+    <div class="field">
+      <label class="flabel">Usuário do Discord</label>
+      <input class="finput" id="discord-username" placeholder="ex: seu_usuario">
+    </div>
+    <button class="btn btn-primary" id="btn-enviar-discord" onclick="enviarDiscord()">Enviar</button>
+  </div>`;
+}
+window.enviarDiscord=async function(){
+  const tester=chatters.find(t=>t.id===selTesterId);
+  if(!tester)return;
+  const discordUsername=(document.getElementById('discord-username')?.value||'').trim();
+  if(!discordUsername){alert('Preencha seu usuário do Discord.');return;}
+  const btn=document.getElementById('btn-enviar-discord');
+  btn.disabled=true;btn.textContent='Enviando...';
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'discordPendente',processado:false,
+      testerId:tester.id,testerNome:tester.name,discordUsername,
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    localStorage.setItem('tn_discordEnviado_'+tester.id,'1');
+    renderTesterDays(selTesterId);
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+    btn.disabled=false;btn.textContent='Enviar';
+  }
+};
 let mostrarPickerHorario=false;
 function horarioTesteHtml(tester){
   // Exceção do horário fixo do Victor foi removida (03/08/2026, a pedido da
@@ -691,14 +729,14 @@ function renderTesterDays(testerId){
     // sensível) espelhado no chatter — o CNPJ/pix/endereço em si continuam
     // só na Ficha (nunca voltam pro link público).
     const jaEnviouPJ=tester.dadosPjRecebidos||localStorage.getItem('tn_dadosPjEnviado_'+tester.id)==='1';
-    // Ordem combinada com a gestora (06/08/2026, revisada): 1) mensagem de
-    // parabéns citando o padrinho + documentação (dados PJ), já que só quem
-    // preenche certinho segue adiante; 2) só depois de enviar os dados PJ,
-    // escolha de horário; 3) só depois de escolher horário, tela final de
-    // boas-vindas. (Antes era horário primeiro — invertido a pedido da
-    // gestora.)
+    // Ordem combinada com a gestora (06/08/2026, revisada; 10/08/2026 —
+    // adicionado o passo do Discord entre dados PJ e horário): 1) mensagem
+    // de parabéns citando o padrinho + documentação (dados PJ); 2) usuário
+    // do Discord (o entrevistador precisa disso pra falar com a pessoa);
+    // 3) escolha de horário; 4) tela final de boas-vindas.
+    const jaEnviouDiscord=!!tester.discordUsername||localStorage.getItem('tn_discordEnviado_'+tester.id)==='1';
     const jaEscolheuHorario=!!(tester.horarioTeste&&tester.horarioTeste.slotId)||!!localStorage.getItem('tn_horarioSlot_'+tester.id);
-    if(jaEnviouPJ&&jaEscolheuHorario){
+    if(jaEnviouPJ&&jaEnviouDiscord&&jaEscolheuHorario){
       const meuSlotIdBemVindo=(tester.horarioTeste&&tester.horarioTeste.slotId)||localStorage.getItem('tn_horarioSlot_'+tester.id)||'';
       const slotEncontrado=HORARIO_SLOTS.find(s=>s.id===meuSlotIdBemVindo);
       const horarioLabel=(tester.horarioTeste&&tester.horarioTeste.label)||(slotEncontrado&&horarioSlotLabel(slotEncontrado))||'';
@@ -716,11 +754,18 @@ function renderTesterDays(testerId){
       </div>`;
       return;
     }
-    if(jaEnviouPJ&&!jaEscolheuHorario){
+    if(jaEnviouPJ&&jaEnviouDiscord&&!jaEscolheuHorario){
       el.innerHTML=`<div class="card" style="text-align:center">
         <div style="font-size:30px;margin-bottom:8px">✅</div>
         <div style="font-size:14.5px;line-height:1.6">Seus dados foram recebidos! Agora escolha seu horário de teste.</div>
       </div>${horarioTesteHtml(tester)}`;
+      return;
+    }
+    if(jaEnviouPJ&&!jaEnviouDiscord){
+      el.innerHTML=`<div class="card" style="text-align:center">
+        <div style="font-size:30px;margin-bottom:8px">✅</div>
+        <div style="font-size:14.5px;line-height:1.6">Seus dados foram recebidos! Agora precisamos do seu usuário do Discord.</div>
+      </div>${discordHtml(tester)}`;
       return;
     }
     if(!jaEnviouPJ){
