@@ -138,6 +138,11 @@ function migrateState(s){
     const cutoff=Date.now()-1000*60*60*24*200;
     Object.keys(s._tombstones).forEach(id=>{if(!(s._tombstones[id]>cutoff))delete s._tombstones[id];});
   }
+  if(!s._fieldTombstones||typeof s._fieldTombstones!=='object')s._fieldTombstones={};
+  else{ // mesma limpeza, pras field tombstones (ver tombstoneField())
+    const cutoff=Date.now()-1000*60*60*24*200;
+    Object.keys(s._fieldTombstones).forEach(p=>{if(!(s._fieldTombstones[p]>cutoff))delete s._fieldTombstones[p];});
+  }
   if(!s.justificativas)s.justificativas={};
   if(!s.chatlabAnalyses)s.chatlabAnalyses=[];
   if(!s.chatlabWeeklyReports)s.chatlabWeeklyReports={};
@@ -492,6 +497,7 @@ function initFirebase(){
     listenToSegundaChancePendentes();
     listenToSegundaChanceDecisoesPendentes();
     listenToExclusoesTesterPendentes();
+    listenToExclusoesAfilhadoPendentes();
     listenToDeserdarPendentes();
     listenToHorarioTestePendentes();
     listenToEntrevistaPendentes();
@@ -559,14 +565,23 @@ function mergeArraysSafe(local,remote){
   }});
   return order.map(id=>map.get(id));
 }
-function deepMergeState(local,remote){
+function deepMergeState(local,remote,path){
+  path=path||'';
+  // 10/08/2026 — se esse caminho foi marcado como "campo apagado de
+  // propósito" (tombstoneField) e o valor local de agora reflete isso
+  // (vazio/ausente), NUNCA deixa um remoto atrasado (ainda com o valor
+  // antigo) trazer de volta — ver comentário completo em tombstoneField().
+  // Sem isso, dava exatamente o bug "os endereços que eu excluo voltam".
+  if(S&&S._fieldTombstones&&S._fieldTombstones[path]&&(local===undefined||local===null||local===''||local===false||(isPlainObj(local)&&!Object.keys(local).length))){
+    return local;
+  }
   if(remote===undefined||remote===null)return local;
   if(local===undefined||local===null)return remote;
   if(Array.isArray(local)||Array.isArray(remote))return mergeArraysSafe(local,remote);
   if(isPlainObj(local)&&isPlainObj(remote)){
     const out={};
     const keys=new Set([...Object.keys(local),...Object.keys(remote)]);
-    keys.forEach(k=>{out[k]=deepMergeState(local[k],remote[k]);});
+    keys.forEach(k=>{out[k]=deepMergeState(local[k],remote[k],path?path+'.'+k:k);});
     return out;
   }
   // scalars: prefer remote, but a falsy/empty remote never overwrites real local content
@@ -659,6 +674,15 @@ function listenToFirestore(connectTimeout){
                 if(!S._tombstones)S._tombstones={};
                 Object.keys(incomingTomb).forEach(id=>{
                   if(!S._tombstones[id]||incomingTomb[id]>S._tombstones[id])S._tombstones[id]=incomingTomb[id];
+                });
+              }
+              // Mesma ideia, mas pras field tombstones (campos apagados dentro
+              // de objetos, tipo dadosPJ ou padrinhoId) — ver tombstoneField().
+              const incomingFieldTomb=parsedPart&&parsedPart._fieldTombstones;
+              if(incomingFieldTomb&&typeof incomingFieldTomb==='object'){
+                if(!S._fieldTombstones)S._fieldTombstones={};
+                Object.keys(incomingFieldTomb).forEach(p=>{
+                  if(!S._fieldTombstones[p]||incomingFieldTomb[p]>S._fieldTombstones[p])S._fieldTombstones[p]=incomingFieldTomb[p];
                 });
               }
               if(docId===FIREBASE_DOC_ID){
@@ -818,6 +842,23 @@ function markTombstone(id){
   if(!S._tombstones)S._tombstones={};
   S._tombstones[id]=Date.now();
 }
+// 10/08/2026 — a pedido da gestora, achado depois dela reclamar que
+// "os endereços que eu excluo voltam": a tombstone acima só protege itens de
+// LISTA (array com {id:...}, tipo turnos/trocas) — nunca cobria um CAMPO
+// apagado dentro de um objeto (ex: delete ficha.dadosPJ, ou padrinhoId
+// virando '' no deserdar). Quando ela apagava algo assim num dispositivo e
+// um snapshot meio atrasado do OUTRO dispositivo chegava depois (ainda com o
+// valor antigo), o deepMergeState (ver abaixo) não tinha como saber que
+// aquele "campo vazio" era uma exclusão de propósito — só via um valor vazio
+// vs um valor preenchido, e por padrão deixava o remoto (preenchido) vencer.
+// Resultado: o dado apagado "ressuscitava" sozinho. tombstoneField funciona
+// igual markTombstone, mas por CAMINHO (ex: 'chatterFichas.abc123.dadosPJ')
+// em vez de por id — chame toda vez que apagar/zerar um campo que importa.
+function tombstoneField(path){
+  if(!path)return;
+  if(!S._fieldTombstones)S._fieldTombstones={};
+  S._fieldTombstones[path]=Date.now();
+}
 
 let localSaveFailCount=0;
 let lastLocalSaveWarningAt=0;
@@ -966,6 +1007,10 @@ let S={
   _tombstones:{},        // id -> timestamp da exclusão — impede que um item apagado
                           // localmente seja "ressuscitado" por um merge com um
                           // snapshot remoto (Firestore) que ainda não sabia da exclusão
+  _fieldTombstones:{},   // 'caminho.dentro.do.objeto' -> timestamp — mesma ideia, mas
+                          // pra um CAMPO apagado dentro de um objeto (ex: dadosPJ de um
+                          // tester, ou padrinhoId zerado no deserdar), não um item de lista
+                          // inteiro. Ver tombstoneField() e o comentário completo lá.
 };
 
 /* ===========================================================
@@ -3785,6 +3830,7 @@ function deleteChatter(id){
   S.chatterTrainings=S.chatterTrainings.filter(t=>t.chatterId!==id);
   S.chatlabAnalyses=(S.chatlabAnalyses||[]).filter(a=>a.chatterId!==id);
   delete S.chatterFichas[id];
+  tombstoneField('chatterFichas.'+id);
   delete S.testerLogs[id];
   Object.keys(S.turnoLog).forEach(dateKey=>{
     S.turnoLog[dateKey]=S.turnoLog[dateKey].filter(e=>e.chatterId!==id);
@@ -11810,10 +11856,21 @@ function renderDeserdarHistorico(){
     el.innerHTML='<div style="font-size:12.5px;color:var(--text3)">Nenhuma deserção ainda.</div>';
     return;
   }
-  el.innerHTML=hist.map(h=>`<div style="border:1px solid var(--line);border-left:3px solid var(--bad);border-radius:9px;padding:10px 13px;margin-bottom:8px">
+  // 09/08/2026 — a pedido da gestora: esse quadro era só histórico estático
+  // (sem nenhum swipe attachado), por isso "arrastar" aqui nunca fazia nada.
+  // Agora dá pra arrastar cada item pra tirar da lista (só remove o registro
+  // do histórico — não mexe no tester, no padrinho nem em mais nada).
+  el.innerHTML=hist.map((h,idx)=>`<div class="deserdar-hist-row" data-key="${h.id||idx}" style="border:1px solid var(--line);border-left:3px solid var(--bad);border-radius:9px;padding:10px 13px;margin-bottom:8px;touch-action:pan-y">
     <div style="font-weight:700;font-size:13px">💔 ${h.padrinhoNome} deserdou ${h.testerNome}</div>
     <div style="font-size:11px;color:var(--text3);margin-top:2px">${h.quando?new Date(h.quando).toLocaleString('pt-BR'):''} · volta pra lista de quem ainda não tem padrinho</div>
+    <div style="font-size:10px;color:var(--text3);margin-top:4px">⟵ arraste pra tirar daqui</div>
   </div>`).join('');
+  attachSwipeToDelete(el,'.deserdar-hist-row',key=>removerDeserdarHistoricoItem(key),renderDeserdarHistorico);
+}
+function removerDeserdarHistoricoItem(key){
+  if(!Array.isArray(S.deserdarHistorico))return;
+  S.deserdarHistorico=S.deserdarHistorico.filter((h,idx)=>String(h.id||idx)!==String(key));
+  save();
 }
 function renderAfilhadoClaims(){
   renderRecadoPadrinhos();
@@ -11945,9 +12002,15 @@ function renderDadosPjPanel(){
       ['Fala inglês',d.falaIngles],
       ['Email do Trello',d.trelloEmail],['Número do Telegram',d.telegramNumero],['Nome no Telegram',d.telegramNome]
     ].filter(([,v])=>v);
-    return`<div class="dadospj-swipe-row" data-key="${c.id}" style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px">
+    // 10/08/2026 — badge de verificação automática do CNPJ (caso do Wesley):
+    // mostra se o link já conferiu na Receita que o CNPJ bate com o nome de
+    // quem preencheu, ou se não deu pra confirmar (precisa olhar na mão).
+    const cnpjBadge=d.cnpjVerificado
+      ?`<span style="font-size:10px;font-weight:800;color:var(--ok);background:var(--ok-soft);border-radius:6px;padding:2px 6px;margin-left:6px">✅ CNPJ verificado</span>`
+      :`<span title="${d.cnpjRazaoSocialReceita?'Razão social encontrada: '+d.cnpjRazaoSocialReceita:'Não foi possível confirmar automaticamente'}" style="font-size:10px;font-weight:800;color:var(--warn);background:var(--warn-soft);border-radius:6px;padding:2px 6px;margin-left:6px">⚠️ CNPJ não verificado — confira</span>`;
+    return`<div class="dadospj-swipe-row" data-key="${c.id}" style="border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px;touch-action:pan-y">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div style="font-weight:700;font-size:13.5px">${c.name}</div>
+        <div style="font-weight:700;font-size:13.5px">${c.name}${cnpjBadge}</div>
         <button data-noaccordion onclick="copiarDadosPJ('${c.id}')" title="Copiar dados" style="background:none;border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:13px">📋</button>
       </div>
       ${linhas.map(([lb,v])=>`<div style="font-size:12px;color:var(--text2);margin-bottom:2px"><strong>${lb}:</strong> ${v}</div>`).join('')}
@@ -11974,7 +12037,10 @@ function removerDadosPJ(chatterId){
   // pra nunca apagar nada sem checar.
   const c=S.chatters.find(ch=>ch.id===chatterId);
   if(!confirm(`Remover os dados de PJ de ${c?c.name:'essa pessoa'} desse quadro? Já deve ter copiado/colado o que precisava — isso não apaga o chatter, só tira daqui.`))return;
-  if(S.chatterFichas?.[chatterId])delete S.chatterFichas[chatterId].dadosPJ;
+  if(S.chatterFichas?.[chatterId]){
+    delete S.chatterFichas[chatterId].dadosPJ;
+    tombstoneField('chatterFichas.'+chatterId+'.dadosPJ');
+  }
   save();
   renderDadosPjPanel();
   toast('Removido do quadro de Dados PJ.');
@@ -12400,6 +12466,29 @@ function limparMapeamentoNaoSelecionados(){
   toast(`🧹 ${totalAntes-totalDepois} pessoa${totalAntes-totalDepois!==1?'s':''} removida${totalAntes-totalDepois!==1?'s':''} do Mapeamento dos Novos.`);
   renderMapeamentoNovosPool();
 }
+// 10/08/2026 — achado pela gestora: o quadro de Deserções recentes mostrava
+// o mesmo "Fulano deserdou Beltrano" duplicado várias vezes, sempre com o
+// mesmo horário. Causa: ela usa o app em mais de um dispositivo ao mesmo
+// tempo (computador + celular), cada um com sua PRÓPRIA escuta (onSnapshot)
+// nas coleções "...Pendente" — sem proteção, os dois liam processado:false
+// e processavam o MESMO pedido antes que qualquer um marcasse processado:true,
+// duplicando de verdade o efeito de cada pedido (não só na tela, no dado
+// mesmo). Toda função aplicarXPendente(docId,data) abaixo agora começa
+// chamando claimPendenteDoc(docId) — uma transação do Firestore que só deixa
+// UM dispositivo "ganhar o direito" de aplicar aquele pedido; o outro
+// descobre que já foi marcado processado e não faz nada.
+function claimPendenteDoc(docId){
+  if(!fbDb)return Promise.resolve(false);
+  const ref=fbDb.collection('gestorpro').doc(docId);
+  return fbDb.runTransaction(tx=>tx.get(ref).then(snap=>{
+    if(!snap.exists||snap.data().processado===true)return false;
+    tx.update(ref,{processado:true});
+    return true;
+  })).catch(e=>{
+    console.error('Erro ao reservar pedido pendente '+docId,e);
+    return false;
+  });
+}
 // Escuta a coleção 'gestorpro' filtrando só os documentos que a página
 // pública avaliacao.html cria (type:'avaliacaoPendente', processado:false).
 // Cada um vira, sozinho, uma Avaliação de Chatter aplicada — sem PDF, sem
@@ -12419,12 +12508,13 @@ function listenToAvaliacoesPendentes(){
       console.error('Erro ao ouvir avaliações pendentes',err);
     });
 }
-function aplicarAvaliacaoPendente(docId,data){
+async function aplicarAvaliacaoPendente(docId,data){
   // A pedido da gestora (07/08/2026): o relatório de avaliação do padrinho
   // continua sendo processado e registrado mesmo depois que o tester já foi
   // aprovado ou reprovado — de propósito, sem checar testerDecision aqui.
   // Só o chatter em si precisa existir (não foi apagado); a decisão que já
   // foi tomada não impede o registro do relatório.
+  if(!(await claimPendenteDoc(docId)))return; // outro dispositivo já pegou esse pedido
   try{
     const c=S.chatters.find(ch=>ch.id===data.chatterId);
     if(!c){
@@ -12485,7 +12575,8 @@ function listenToTarefasNovatoPendentes(){
       console.error('Erro ao ouvir tarefas de novato pendentes',err);
     });
 }
-function aplicarTarefaNovatoPendente(docId,data){
+async function aplicarTarefaNovatoPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId
       ?S.chatters.find(ch=>ch.id===data.testerId)
@@ -12561,7 +12652,8 @@ function listenToAfilhadoClaimsPendentes(){
       console.error('Erro ao ouvir solicitações de afilhado pendentes',err);
     });
 }
-function aplicarAfilhadoClaimPendente(docId,data){
+async function aplicarAfilhadoClaimPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const tester=data.testerId
       ?S.chatters.find(ch=>ch.id===data.testerId)
@@ -12620,7 +12712,8 @@ function listenToTesterAutoInclusaoPendentes(){
       console.error('Erro ao ouvir autoinclusões de tester pendentes',err);
     });
 }
-function aplicarTesterAutoInclusaoPendente(docId,data){
+async function aplicarTesterAutoInclusaoPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const nome=(data.nome||'').trim();
     if(!nome){
@@ -12677,7 +12770,8 @@ function listenToTesterDadosPendentes(){
       console.error('Erro ao ouvir dados de tester pendentes',err);
     });
 }
-function aplicarTesterDadosPendente(docId,data){
+async function aplicarTesterDadosPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
     if(!c){
@@ -12717,7 +12811,8 @@ function listenToDadosPjPendentes(){
       console.error('Erro ao ouvir dados PJ pendentes',err);
     });
 }
-function aplicarDadosPjPendente(docId,data){
+async function aplicarDadosPjPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
     if(!c){
@@ -12731,6 +12826,10 @@ function aplicarDadosPjPendente(docId,data){
       telefone:data.telefone||'',email:data.email||'',pix:data.pix||'',bancoChave:data.bancoChave||'',
       falaIngles:data.falaIngles||'',
       trelloEmail:data.trelloEmail||'',telegramNumero:data.telegramNumero||'',telegramNome:data.telegramNome||'',
+      // 10/08/2026 — a pedido da gestora (caso do Wesley, que usou CNPJ de
+      // familiar): o link já confere automaticamente na Receita se o CNPJ
+      // bate com o nome de quem preencheu, e manda esse resultado junto.
+      cnpjVerificado:!!data.cnpjVerificado,cnpjRazaoSocialReceita:data.cnpjRazaoSocialReceita||'',
       recebidoEm:new Date().toISOString()
     };
     // Espelha também no nível de cima da Ficha (falaIngles), não só dentro de
@@ -12778,7 +12877,8 @@ function listenToSegundaChancePendentes(){
       console.error('Erro ao ouvir pedidos de segunda chance pendentes',err);
     });
 }
-function aplicarSegundaChancePendente(docId,data){
+async function aplicarSegundaChancePendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
     if(!c||!data.fridayKey||!data.dia){
@@ -12813,7 +12913,8 @@ function listenToSegundaChanceDecisoesPendentes(){
       console.error('Erro ao ouvir decisões de segunda chance pendentes',err);
     });
 }
-function aplicarSegundaChanceDecisaoPendente(docId,data){
+async function aplicarSegundaChanceDecisaoPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
     const reqs=c&&S.chatterFichas[c.id]?S.chatterFichas[c.id].segundaChanceRequests||[]:[];
@@ -12864,7 +12965,8 @@ function listenToExclusoesTesterPendentes(){
       console.error('Erro ao ouvir exclusões de tester pendentes',err);
     });
 }
-function aplicarExclusaoTesterPendente(docId,data){
+async function aplicarExclusaoTesterPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const id=data.testerId;
     const c=id?S.chatters.find(ch=>ch.id===id):null;
@@ -12895,6 +12997,51 @@ function aplicarExclusaoTesterPendente(docId,data){
 }
 
 /* ===========================================================
+   EXCLUIR AFILHADO PELO LINK DOS PADRINHOS — 10/08/2026, a pedido da
+   gestora: faltava um X pra tirar um afilhado já apadrinhado (diferente
+   do excluirTesterPendente acima, que só serve pra nomes duplicados sem
+   nenhum progresso). Igual todo pedido vindo do link, o padrinho só
+   registra — quem aplica é o app principal. E, diferente de um delete de
+   verdade, isso só ARQUIVA (arquivadoTesters=true, mesmo mecanismo do
+   botão de swipe/🗑️ da aba Testers): a pessoa some da lista da gestora,
+   mas ficha, tarefas e histórico continuam intactos — se for pra apagar
+   de vez, a gestora decide isso manualmente pelo 🗑️ na aba Testers.
+   =========================================================== */
+function listenToExclusoesAfilhadoPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','excluirAfilhadoPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarExclusaoAfilhadoPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir exclusões de afilhado pendentes',err);
+    });
+}
+async function aplicarExclusaoAfilhadoPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
+  try{
+    const id=data.testerId;
+    const c=id?S.chatters.find(ch=>ch.id===id):null;
+    const ficha=id?S.chatterFichas?.[id]:null;
+    if(!c||!ficha){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    ficha.arquivadoTesters=true;
+    save();
+    toast(`✕ ${data.padrinhoNome||'Um padrinho'} excluiu "${c.name}" da lista de afilhados pelo link — nada foi apagado, só arquivado.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar exclusão de afilhado como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar exclusão de afilhado pendente',e);
+  }
+}
+
+/* ===========================================================
    DESERDAR — o padrinho aprovado pode liberar um afilhado que já
    apadrinhou (pra outro assumir num próximo domingo, ou porque não vai
    mais acompanhar). Mesmo padrão dos outros pedidos vindos do link dos
@@ -12914,7 +13061,8 @@ function listenToDeserdarPendentes(){
       console.error('Erro ao ouvir pedidos de deserdar pendentes',err);
     });
 }
-function aplicarDeserdarPendente(docId,data){
+async function aplicarDeserdarPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const id=data.testerId;
     const c=id?S.chatters.find(ch=>ch.id===id):null;
@@ -12925,6 +13073,7 @@ function aplicarDeserdarPendente(docId,data){
     }
     const padrinhoNomeAntigo=c.padrinhoNome||data.padrinhoNome||'';
     ficha.padrinhoId='';
+    tombstoneField('chatterFichas.'+id+'.padrinhoId');
     c.temPadrinho=false;
     c.padrinhoNome='';
     // Registro persistente — o toast() abaixo só aparece se o app estiver
@@ -12934,6 +13083,7 @@ function aplicarDeserdarPendente(docId,data){
     // sempre dar pra conferir depois no quadro da aba Testers.
     if(!Array.isArray(S.deserdarHistorico))S.deserdarHistorico=[];
     S.deserdarHistorico.unshift({
+      id:'des_'+Date.now()+Math.random().toString(36).slice(2),
       testerId:id,testerNome:c.name,
       padrinhoNome:padrinhoNomeAntigo||'Um padrinho',
       quando:new Date().toISOString()
@@ -12974,7 +13124,8 @@ function listenToHorarioTestePendentes(){
       console.error('Erro ao ouvir horários de teste pendentes',err);
     });
 }
-function aplicarHorarioTestePendente(docId,data){
+async function aplicarHorarioTestePendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
     if(!c){
@@ -13016,7 +13167,8 @@ function listenToEntrevistaPendentes(){
       console.error('Erro ao ouvir entrevistas pendentes',err);
     });
 }
-function aplicarEntrevistaPendente(docId,data){
+async function aplicarEntrevistaPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     const c=data.testerId?S.chatters.find(ch=>ch.id===data.testerId):null;
     if(!c){
@@ -13081,7 +13233,8 @@ function listenToChatlabPendentes(){
       console.error('Erro ao ouvir autoanálises pendentes do ChatLab',err);
     });
 }
-function aplicarChatlabPendente(docId,data){
+async function aplicarChatlabPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     if(!data.chatterId||!data.raw){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'dados incompletos'});
@@ -13128,7 +13281,8 @@ function listenToRelatoriosSemanaisPendentes(){
       console.error('Erro ao ouvir relatórios semanais pendentes',err);
     });
 }
-function aplicarRelatorioSemanalPendente(docId,data){
+async function aplicarRelatorioSemanalPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
   try{
     if(!data.chatterId||!data.rawGestora||!data.weekKey){
       fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'dados incompletos'});

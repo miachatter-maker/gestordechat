@@ -174,13 +174,13 @@ function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
 // "Modelo B" pra manter a simetria com o grupo de Segunda/Terça/Quarta
 // (Modelo A já tem os 3 turnos ali em cima); avisar se não era isso.
 const HORARIO_SLOTS=[
-  {id:'a1',grupo:'Segunda, terça e quarta — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
-  {id:'a2',grupo:'Segunda, terça e quarta — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
-  {id:'a3',grupo:'Segunda, terça e quarta — Modelo A',opcao:'Opção 3',horario:'01h-07h'},
+  {id:'a1',grupo:'Terça, quarta e quinta — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
+  {id:'a2',grupo:'Terça, quarta e quinta — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
+  {id:'a3',grupo:'Terça, quarta e quinta — Modelo A',opcao:'Opção 3',horario:'01h-07h'},
   {id:'b1',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
   {id:'b2',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
   {id:'b3',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 3',horario:'01h-07h'},
-  {id:'c1',grupo:'Segunda, terça e quarta — Modelo B',opcao:'Opção única',horario:'07h-13h'},
+  {id:'c1',grupo:'Terça, quarta e quinta — Modelo B',opcao:'Opção única',horario:'07h-13h'},
   {id:'d1',grupo:'Sexta, sábado e domingo — Modelo B',opcao:'Opção única',horario:'07h-13h'}
 ];
 function horarioSlotLabel(slot){return`${slot.grupo} · ${slot.opcao} (${slot.horario})`;}
@@ -654,21 +654,15 @@ function renderTesterDays(testerId){
     </div>`;
     return;
   }
-  // Ciclo fechado (prazo do Domingo já passou) e ninguém apadrinhou essa
-  // pessoa ainda — a pedido da gestora, mostra o agradecimento e convite
-  // pra tentar de novo, em vez de deixar a tela de tarefas aberta pra
-  // sempre pra quem já não vai mais ser chamado desse ciclo.
-  if(tester&&!tester.testerDecision&&!tester.temPadrinho){
-    const cicloCheck=getCicloAtual();
-    const domingoInfo=cicloCheck.dias.find(d=>d.dia===3);
-    if(domingoInfo&&new Date()>=domingoInfo.prazo){
-      el.innerHTML=`<div class="card" style="text-align:center">
-        <div style="font-size:30px;margin-bottom:8px">🙏</div>
-        <div style="font-size:14.5px">Obrigada pela participação! Seus resultados ainda não foram suficiente para começo do teste, mas pode retornar e repetir quando quiser.</div>
-      </div>`;
-      return;
-    }
-  }
+  // 10/08/2026 — a pedido explícito da gestora: essa mensagem de "resultado
+  // não foi suficiente" só pode aparecer quando o tester for REALMENTE
+  // reprovado (testerDecision==='reprovado', tratado acima). Antes também
+  // aparecia pra quem simplesmente ainda não tinha sido apadrinhado quando o
+  // prazo de Domingo passava — mas isso não significa reprovação, só que
+  // ninguém decidiu ainda (ou está em avaliação), e estava confundindo todo
+  // mundo nessa situação com quem foi de fato reprovado. Removido: agora
+  // quem está sem padrinho e sem decisão só vê a tela normal de tarefas
+  // (com os dias já bloqueados, se for o caso).
   if(tester&&tester.temPadrinho){
     // Gatilho é o APADRINHAMENTO (padrinho aprovado pra essa pessoa), não o
     // testerDecision — esse último é uma decisão SEPARADA e posterior
@@ -1030,6 +1024,37 @@ function validarDadosPJ(val){
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return'O e-mail informado não parece válido — confira e tente de novo.';
   return'';
 }
+function normalizarTexto(s){
+  return(s||'').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+}
+// 10/08/2026 — a pedido explícito da gestora, depois do caso do Wesley (que
+// preencheu um CNPJ de familiar e ela só descobriu porque ele mesmo contou
+// depois): antes o aviso "precisa ser CNPJ próprio" era só um texto — não
+// travava nada de verdade. Agora consulta a Receita Federal (via BrasilAPI,
+// pública/gratuita, sem chave) e confere se o nome cadastrado no app aparece
+// na razão social, nome fantasia ou no quadro de sócios (QSA) do CNPJ. Se
+// não bater, BLOQUEIA o envio de vez (não deixa prosseguir) até corrigir.
+// Se a consulta falhar (rede/CORS/CNPJ não encontrado na base), não trava
+// todo mundo à toa — pede confirmação manual e sinaliza isso pra gestora
+// conferir depois (fica marcado no Dados PJ como "não verificado").
+async function checarCnpjProprio(cnpjDigitos,nomeTester){
+  try{
+    const resp=await Promise.race([
+      fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjDigitos}`),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),9000))
+    ]);
+    if(!resp.ok)return{status:'nao_encontrado'};
+    const data=await resp.json();
+    const nomesEnvolvidos=[data.razao_social,data.nome_fantasia,...(Array.isArray(data.qsa)?data.qsa.map(s=>s.nome_socio):[])].map(normalizarTexto);
+    const textoBusca=nomesEnvolvidos.join(' | ');
+    const partesNome=normalizarTexto(nomeTester).split(/\s+/).filter(p=>p.length>2&&!['dos','das','de','da','do'].includes(p));
+    const bateu=partesNome.length>0&&partesNome.every(p=>textoBusca.includes(p));
+    return{status:bateu?'ok':'nao_bate',razaoSocial:data.razao_social,socios:(data.qsa||[]).map(s=>s.nome_socio)};
+  }catch(e){
+    console.error('Erro ao consultar CNPJ na Receita',e);
+    return{status:'erro_consulta'};
+  }
+}
 window.enviarDadosPJ=async function(){
   const tester=chatters.find(t=>t.id===selTesterId);
   if(!tester)return;
@@ -1037,7 +1062,21 @@ window.enviarDadosPJ=async function(){
   const erro=validarDadosPJ(val);
   if(erro){alert(erro);return;}
   const btn=document.getElementById('btn-enviar-pj');
-  btn.disabled=true;btn.textContent='Enviando...';
+  btn.disabled=true;btn.textContent='Verificando CNPJ...';
+  const cnpjDigitos=val('cnpj').replace(/\D/g,'');
+  const check=await checarCnpjProprio(cnpjDigitos,tester.name);
+  if(check.status==='nao_bate'){
+    alert(`⚠️ Esse CNPJ NÃO está no seu nome (${tester.name}).\n\nRazão Social encontrada na Receita: ${check.razaoSocial||'—'}${check.socios&&check.socios.length?'\nSócio(s): '+check.socios.join(', '):''}\n\nÉ obrigatório usar um CNPJ próprio, no seu nome — não é possível prosseguir com um CNPJ de outra pessoa. Corrija o campo e tente de novo.`);
+    btn.disabled=false;btn.textContent='Enviar dados';
+    return;
+  }
+  if(check.status==='nao_encontrado'||check.status==='erro_consulta'){
+    if(!confirm(`Não consegui confirmar automaticamente na Receita se esse CNPJ está no seu nome (não encontrado, ou a consulta falhou). Você TEM CERTEZA que é um CNPJ próprio, no seu nome? Isso vai ficar marcado como "não verificado" pra gestora conferir manualmente.`)){
+      btn.disabled=false;btn.textContent='Enviar dados';
+      return;
+    }
+  }
+  btn.textContent='Enviando...';
   try{
     await fbDb.collection('gestorpro').add({
       type:'dadosPjPendente',processado:false,
@@ -1047,6 +1086,8 @@ window.enviarDadosPJ=async function(){
       telefone:val('telefone'),email:val('email'),pix:val('pix'),bancoChave:val('bancoChave'),
       falaIngles:val('falaIngles'),
       trelloEmail:val('trelloEmail'),telegramNumero:val('telegramNumero'),telegramNome:val('telegramNome'),
+      cnpjVerificado:check.status==='ok',
+      cnpjRazaoSocialReceita:check.razaoSocial||'',
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
     localStorage.setItem('tn_dadosPjEnviado_'+tester.id,'1');

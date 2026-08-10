@@ -374,6 +374,7 @@ function renderTesterRow(t,ciclo){
         ${isMine?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
           <a class="btn btn-primary" style="text-decoration:none;flex:1;min-width:140px" href="avaliacao.html?id=${encodeURIComponent(t.id)}&nome=${encodeURIComponent(t.name)}">📜 Avalie seu afiliado</a>
           <button class="btn" style="background:var(--bad-soft);color:var(--bad);flex:0 0 auto;padding:13px 14px" title="Liberar esse afilhado pra outro padrinho" onclick="deserdarAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">💔 Deserdar</button>
+          <button class="btn" style="background:var(--bad-soft);color:var(--bad);flex:0 0 auto;padding:13px 14px" title="Tirar esse afilhado da lista (não apaga o histórico, a gestora que decide se apaga de vez)" onclick="excluirAfilhado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">✕ Excluir</button>
         </div>`:''}
       </div>`;
     }
@@ -484,17 +485,47 @@ window.excluirNomeDuplicado=async function(testerId,testerNome){
   // executa a exclusão é o app principal (aplicarExclusaoTesterPendente),
   // que confere tudo de novo antes de apagar — pedido da gestora pra nunca
   // arriscar apagar algo real por engano.
-  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
+  // 10/08/2026 — corrigido: antes exigia selecionar um nome de padrinho
+  // primeiro (`if(!selPadrinhoId){alert(...);return;}`), o que bloqueava a
+  // própria gestora de excluir um nome duplicado direto por esse link (ela
+  // não é um padrinho, não tem porque escolher um nome ali) — ela clicava
+  // e nada acontecia, parecia que "não conseguia deletar". Esse botão é
+  // seguro (o app principal recusa se a pessoa já tiver qualquer atividade
+  // real), então não precisa mais identificar quem pediu.
   if(!confirm(`Excluir "${testerNome}"? Use só pra nomes duplicados que nunca enviaram nenhuma tarefa — isso será checado de novo antes de apagar de verdade.`))return;
-  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  const padrinho=selPadrinhoId?chatters.find(c=>c.id===selPadrinhoId):null;
   try{
     await fbDb.collection('gestorpro').add({
       type:'excluirTesterPendente',processado:false,
       testerId,testerNome,
-      padrinhoId:selPadrinhoId,padrinhoNome:padrinho?padrinho.name:'',
+      padrinhoId:selPadrinhoId||'',padrinhoNome:padrinho?padrinho.name:'gestora (via link)',
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
     alert('Pedido enviado — some da lista em instantes se realmente não tiver nenhuma tarefa registrada.');
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar: '+e.message);
+  }
+};
+window.excluirAfilhado=async function(testerId,testerNome){
+  // 10/08/2026 — a pedido da gestora: faltava um X pra tirar um afilhado
+  // (diferente do 💔 Deserdar, que só libera pra outro padrinho reivindicar
+  // depois). Igual todo o resto desse link, o padrinho NUNCA apaga nada
+  // sozinho — só registra o pedido, e quem executa é o app principal
+  // (aplicarExclusaoAfilhadoPendente), que só ARQUIVA (some da lista da
+  // gestora) em vez de apagar de verdade — histórico, tarefas e tudo mais
+  // continuam intactos, igual o botão 🗑️ explícito na aba Testers.
+  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
+  if(!confirm(`Excluir "${testerNome}" da sua lista de afilhados? Isso não apaga o histórico dele — só tira daqui e avisa a gestora.`))return;
+  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'excluirAfilhadoPendente',processado:false,
+      testerId,testerNome,
+      padrinhoId:selPadrinhoId,padrinhoNome:padrinho?padrinho.name:'',
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('Pedido enviado — some da sua lista em instantes.');
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
