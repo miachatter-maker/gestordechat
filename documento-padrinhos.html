@@ -219,7 +219,7 @@ function getMergedTarefas(testerId){
     const rawTime=tsMillis(d.criadoEm)||Date.now();
     const existingTime=existingReg&&existingReg.enviadoEm?new Date(existingReg.enviadoEm).getTime():0;
     if(!existingReg||rawTime>=existingTime){
-      base[d.fridayKey][key]={resumo:d.resumo||'',disponibilidade:d.disponibilidade||'',cincoNotadas:d.cincoNotadas||'',ppmImage:d.ppmImage||'',ppmUrl:d.ppmUrl||'',enviadoEm:new Date(rawTime).toISOString()};
+      base[d.fridayKey][key]={resumo:d.resumo||'',disponibilidade:d.disponibilidade||'',cincoNotadas:d.cincoNotadas||'',ppmResultado:d.ppmResultado||'',ppmImage:d.ppmImage||'',ppmUrl:d.ppmUrl||'',enviadoEm:new Date(rawTime).toISOString()};
     }
   });
   return base;
@@ -345,11 +345,20 @@ function renderEntrevistaView(){
   const ultimoDomingoEV=new Date(agoraEV);
   ultimoDomingoEV.setHours(0,0,0,0);
   ultimoDomingoEV.setDate(ultimoDomingoEV.getDate()-ultimoDomingoEV.getDay());
-  // 10/08/2026 — a pedido da gestora: sempre em ordem cronológica (quem
-  // marcou primeiro aparece primeiro), não na ordem solta que o array de
-  // chatters vier.
+  // 10/08/2026 — a gestora corrigiu o critério: "ordem cronológica" aqui
+  // não é por quando a pessoa marcou o horário (isso misturava terça e
+  // sexta sem ordem nenhuma) — é pela ordem real do teste na semana: todo
+  // mundo de Terça/Quarta/Quinta primeiro (ordenado por horário do dia,
+  // 01h-07h antes de 07h-13h, antes de 13h-19h, antes de 19h-01h), e só
+  // depois quem começa Sexta/Sábado/Domingo, na mesma lógica de horário.
+  const ORDEM_CRONOLOGICA_SLOT={a3:0,c1:1,a2:2,a1:3,b3:4,d1:5,b2:6,b1:7};
   const candidatos=chatters.filter(c=>c.time==='tester'&&!c.testerDecision&&c.horarioTeste&&c.horarioTeste.slotId&&c.horarioTeste.escolhidoEm&&new Date(c.horarioTeste.escolhidoEm)>=ultimoDomingoEV)
-    .sort((a,b)=>new Date(a.horarioTeste.escolhidoEm)-new Date(b.horarioTeste.escolhidoEm));
+    .sort((a,b)=>{
+      const ra=ORDEM_CRONOLOGICA_SLOT[a.horarioTeste.slotId]??99;
+      const rb=ORDEM_CRONOLOGICA_SLOT[b.horarioTeste.slotId]??99;
+      if(ra!==rb)return ra-rb;
+      return new Date(a.horarioTeste.escolhidoEm)-new Date(b.horarioTeste.escolhidoEm);
+    });
   if(!candidatos.length){
     el.innerHTML='<div class="warn-box">Ninguém marcou horário de teste ainda.</div>';
     return;
@@ -502,7 +511,7 @@ function renderTesterRow(t,ciclo){
           ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
           ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
           ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
-          ${(reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:''}
+          ${reg.ppmResultado?`<div style="font-size:12.5px;font-weight:700;color:var(--ok);margin-bottom:3px">⌨️ ${reg.ppmResultado}</div>`:((reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:'')}
         </div>`;
       }).join('')}
       ${segundaChanceHtml(t.id)}

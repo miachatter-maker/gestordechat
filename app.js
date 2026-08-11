@@ -12071,6 +12071,27 @@ function setTesterDecision(chatterId,decision){
   // acumulando à toa na fatia própria de tarefas (shard-tarefas-tester). Sem
   // exceção pra Reservas/espera — a gestora pediu explicitamente pra não
   // guardar nem esse caso.
+  if(decision==='aprovado'){
+    // 10/08/2026 — a pedido da gestora: se a pessoa é aprovada, o resultado
+    // do Teste (PPM de cada dia + Mapeamento de Triagem) passa a constar pra
+    // sempre num quadro fixo "Teste" na Ficha, junto do resumo do padrinho.
+    // Isso precisa ser copiado AQUI, antes das linhas logo abaixo que
+    // apagam as fontes originais (o shard de tarefas é sempre limpo e o
+    // Mapeamento de Triagem é substituído pelo Mapeamento de Performance de
+    // verdade) — sem essa cópia esse histórico se perderia pra sempre.
+    const ciclosPPM=Object.keys(S.tarefasNovatoPorTester[chatterId]||{}).sort();
+    const ultimoCicloPPM=ciclosPPM[ciclosPPM.length-1];
+    const ppmDias=ultimoCicloPPM?Object.keys(S.tarefasNovatoPorTester[chatterId][ultimoCicloPPM]).sort().map(k=>{
+      const d=S.tarefasNovatoPorTester[chatterId][ultimoCicloPPM][k];
+      return{dia:k.replace('dia',''),resumo:d.resumo||'',ppmResultado:d.ppmResultado||d.ppmImage||'',enviadoEm:d.enviadoEm||''};
+    }):[];
+    if(!S.chatterFichas[chatterId])S.chatterFichas[chatterId]={tech:{},behavior:{},potential:{},risk:{},history:[],analytics:{}};
+    S.chatterFichas[chatterId].testeResultado={
+      ppmDias,
+      mapeamento:S.chatterFichas[chatterId].triagemIA?{...S.chatterFichas[chatterId].triagemIA}:null,
+      salvoEm:new Date().toISOString()
+    };
+  }
   delete S.tarefasNovatoPorTester[chatterId];
   if(decision==='aprovado'){
     c.time='basico'; // vira time normal — mas continua contando na lista de histórico de decisões
@@ -12079,6 +12100,7 @@ function setTesterDecision(chatterId,decision){
     // O Mapeamento de Triagem (feito antes de contratar) some quando a pessoa
     // é efetivada — a partir de agora ela é avaliada pelo Mapeamento de
     // Performance de verdade (entrevista completa, feita já como chatter).
+    // Já foi copiado pro quadro Teste (testeResultado.mapeamento) acima.
     if(S.chatterFichas[chatterId])delete S.chatterFichas[chatterId].triagemIA;
     toast(`✅ ${c.name} aprovado! Já passou pro Time Base e entra em todas as análises de desenvolvimento a partir de hoje.`);
   } else if(decision==='reprovado'){
@@ -12415,12 +12437,23 @@ function copiarLinkAvaliacao(){
 // Link ÚNICO (sem ?id) do quadro MAPEAMENTO DOS NOVOS — ao contrário dos
 // links de avaliação/chatlab (um por pessoa), esse é o MESMO link pra
 // todos os testers e padrinhos; a própria página pública pede o nome.
+// 10/08/2026 — a pedido da gestora: ela quer divulgar um link mais discreto
+// pros testers, que não deixe óbvio que existe um sistema inteiro por trás
+// (ex: agenciaseduct-chatterteste.vercel.app em vez de gestordechat.vercel.app).
+// Como ela não tem domínio próprio, o jeito gratuito é um ALIAS da Vercel
+// (Vercel → o projeto → Settings → Domains → Add → digitar o nome desejado
+// terminado em .vercel.app — aponta pro MESMO site, sem custo). Ela ainda
+// não criou esse alias, então isso fica pronto mas DESLIGADO por padrão
+// (string vazia = usa o link normal, sem quebrar nada agora). Assim que o
+// alias existir, é só preencher o nome aqui embaixo (sem "https://") que o
+// botão "Link das Tarefas" passa a gerar o endereço novo automaticamente.
+const CHATTERTESTE_ALIAS_HOST=''; // ex: 'agenciaseduct-chatterteste.vercel.app'
 function gerarLinkTarefasNovato(){
   // Renomeado de tarefas-novato.html pra chatterteste.html (06/08/2026, a
   // pedido da gestora) — o arquivo antigo virou um redirect, então quem já
   // tinha o link salvo continua funcionando, mas o link novo compartilhado
   // daqui pra frente já é o certo.
-  const url=`${location.origin}/chatterteste.html`;
+  const url=`${CHATTERTESTE_ALIAS_HOST?'https://'+CHATTERTESTE_ALIAS_HOST:location.origin}/chatterteste.html`;
   const input=document.getElementById('tarefas-novato-link-input');
   if(input)input.value=url;
   openModal('m-tarefas-novato-link');
@@ -12608,8 +12641,13 @@ async function aplicarTarefaNovatoPendente(docId,data){
       resumo:data.resumo||'',
       disponibilidade:data.disponibilidade||'',
       cincoNotadas:data.cincoNotadas||'', // só usado no Dia 2
-      ppmImage:data.ppmImage||'', // print comprimido em base64 (sem depender do Firebase Storage)
-      ppmUrl:data.ppmUrl||'', // mantido por compatibilidade, caso o Storage venha a ser usado no futuro
+      // 10/08/2026 — a gestora decidiu não guardar mais a imagem do print em
+      // lugar nenhum: a página pública já lê o resultado com IA e manda só o
+      // TEXTO (ppmResultado). ppmImage/ppmUrl continuam aceitos só por
+      // compatibilidade com registros enviados antes dessa mudança.
+      ppmResultado:data.ppmResultado||'',
+      ppmImage:data.ppmImage||'',
+      ppmUrl:data.ppmUrl||'',
       enviadoEm:new Date().toISOString()
     };
     // Poda ciclos antigos — a pedido da gestora: garantir pelo menos 15
@@ -13495,10 +13533,29 @@ function renderTesterDetail(cid){
     <button data-noaccordion class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--bad);border-color:var(--bad)" onclick="excluirTriagemIA('${cid}')">🗑️ Excluir triagem</button>`
   ):'';
 
+  // 10/08/2026 — quadro "Teste", a pedido da gestora: só aparece pra quem foi
+  // aprovado, e reúne o que sobrevive do processo de teste (o PPM de cada
+  // dia e o Mapeamento de Triagem, ambos apagados/substituídos assim que a
+  // decisão é tomada — ver setTesterDecision) junto do resumo do padrinho
+  // (esse já é permanente, lido direto — sem precisar de cópia).
+  const testeResultado=S.chatterFichas?.[cid]?.testeResultado;
+  const testePanel=(c.testerDecision==='aprovado'&&testeResultado)?fichaAccordion('teste-'+cid,'border:2px solid var(--ok)',
+    `<div><div class="panel-title">🧪 Teste</div><div class="panel-note">PPM, Mapeamento e opinião do padrinho${testeResultado.salvoEm?' · registrado em '+new Date(testeResultado.salvoEm).toLocaleDateString('pt-BR'):''}</div></div>`,
+    `${testeResultado.ppmDias&&testeResultado.ppmDias.length?`<div class="field"><label class="flabel">⌨️ Resultado do PPM (por dia)</label>
+      ${testeResultado.ppmDias.map(d=>`<div style="font-size:12.5px;color:var(--text2);padding:5px 0;border-bottom:1px solid var(--line)"><b>Dia ${d.dia}:</b> ${d.ppmResultado||'—'}${d.resumo?` — ${d.resumo}`:''}</div>`).join('')}
+    </div>`:'<div class="panel-note">Sem resultados de PPM guardados.</div>'}
+    ${testeResultado.mapeamento?`<div class="field" style="margin-top:12px"><label class="flabel">🔍 Mapeamento (Triagem)</label>
+      <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${testeResultado.mapeamento.ondeMora||'-'} · ${testeResultado.mapeamento.oQueFaz||'-'}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">📋 Parecer: ${testeResultado.mapeamento.resumo||'-'}</div>
+    </div>`:''}
+    <div class="field" style="margin-top:12px"><label class="flabel">📝 Resumo do padrinho</label>
+      <div style="font-size:12.5px;color:var(--text2)">${S.chatterFichas?.[cid]?.padrinhoObservacoesGerais||'— ainda não preenchido'}</div>
+    </div>`
+  ):'';
   const mandamentosPanel=mandamentosPanelHtml(cid);
   const relatorioSemanalPanel=relatorioSemanalFichaHtml(cid);
   const conversasAnalisadasPanel=conversasAnalisadasFichaHtml(cid);
-  el.innerHTML=reservaPanel+triagemPanel+analysisPanel+relatorioSemanalPanel+mandamentosPanel+conversasAnalisadasPanel+`
+  el.innerHTML=reservaPanel+triagemPanel+testePanel+analysisPanel+relatorioSemanalPanel+mandamentosPanel+conversasAnalisadasPanel+`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-weight:800;font-size:16px">${c.name}</div>
