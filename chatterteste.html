@@ -406,17 +406,17 @@ window.closeLightbox=function(){document.getElementById('lightbox').style.displa
 // num orçamento de tamanho de verdade — reduz a qualidade e, se ainda não
 // couber, reduz o tamanho também — em vez de só limitar a largura e torcer.
 //
-// Orçamento apertado de propósito (achado em 31/07/2026, a pedido da
-// gestora): as tarefas de tester têm fatia própria no Firestore
-// (shard-tarefas-tester, ~1MB) — o orçamento abaixo continua valendo só
-// pra deixar a imagem leve o suficiente pra chamada de IA ser rápida
-// (ver lerResultadoPPM logo abaixo). 10/08/2026 — a gestora decidiu que a
-// IMAGEM em si nunca mais é guardada em lugar nenhum (nem no Firestore,
-// nem na Ficha): assim que a pessoa cola o print, a IA lê o resultado na
-// hora e só o TEXTO extraído é enviado — isso tira de vez a pressão de
-// espaço que motivou essa compressão (mas a mantemos porque uma imagem
-// menor deixa a chamada de IA mais rápida e mais barata).
-const PPM_MAX_BASE64_CHARS=15000; // ~14.6KB — leve o bastante pra IA ler rápido
+// 12/08/2026 — a gestora reportou a IA lendo o PPM ERRADO (print real dizia
+// 27 PPM / 73% de precisão, a IA devolveu "82 PPM, 98% de precisão"). Causa
+// raiz: esse orçamento de 15000 (~14.6KB) forçava a compressão a esmagar a
+// qualidade/tamanho até os NÚMEROS GRANDES do topo do print ficarem
+// ilegíveis — a IA então "chutava" olhando o gráfico embaixo. Esse
+// orçamento apertado só fazia sentido quando a imagem ainda era GUARDADA no
+// Firestore (fatia de ~1MB); hoje (10/08/2026 em diante) a imagem nunca é
+// guardada em lugar nenhum — é usada só nessa chamada e descartada — então
+// não existe mais motivo pra comprimir tanto. Subido bem generoso (só pra
+// não estourar o corpo da requisição em fotos gigantes de celular).
+const PPM_MAX_BASE64_CHARS=900000; // ~878KB — generoso, prioriza a IA ler os números certo
 const AI_PROXY_URL='/api/claude';
 // Lê o print do resultado do teste de digitação (10fastfingers.com/pt/typing-test) via IA
 // (mesmo proxy Gemini que o resto do app usa) e devolve só o texto do
@@ -431,11 +431,16 @@ async function lerResultadoPPM(dataUrl){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       max_tokens:200,
-      system:'Você lê resultados de teste de velocidade de digitação (site 10fastfingers.com/pt/typing-test) a partir de uma imagem de print. Nesse site o resultado aparece como "wpm" (words per minute/palavras por minuto) e também mostra a precisão (accuracy) em %. Responda SÓ com o resultado extraído, em texto curto e direto, no formato "X PPM" ou "X PPM, Y% de precisão" se a precisão também aparecer na imagem. Se não conseguir identificar um resultado de teste de digitação nessa imagem, responda exatamente: "Não foi possível ler o resultado automaticamente — confira o print manualmente."',
+      // 12/08/2026 — prompt reforçado depois do erro de leitura (27 PPM/73%
+      // lido como 82 PPM/98%): agora aponta EXATAMENTE onde olhar (os dois
+      // números grandes do topo, ao lado dos rótulos "Palavras por minuto"/
+      // "WPM" e "Precisão"/"Accuracy") e proíbe explicitamente estimar ou
+      // calcular a partir do gráfico/curva abaixo desses números.
+      system:'Você lê resultados de teste de velocidade de digitação (sites como typingcore.com ou 10fastfingers.com) a partir de uma imagem de print. O resultado real fica em DOIS NÚMEROS GRANDES E EM DESTAQUE no topo da imagem, cada um com um rótulo pequeno logo acima: um rotulado "Palavras por minuto" ou "WPM" (esse número é o PPM) e outro rotulado "Precisão" ou "Accuracy" (em %). Leia PIXEL A PIXEL exatamente esses dois números grandes do topo — NUNCA estime, calcule ou "adivinhe" o valor a partir do gráfico/curva/linhas coloridas mais abaixo na imagem, mesmo que o texto do topo esteja pequeno ou difícil: olhe com atenção redobrada antes de responder, porque um número errado pode reprovar injustamente alguém. Responda SÓ com o resultado extraído, em texto curto e direto, no formato "X PPM" ou "X PPM, Y% de precisão" se a precisão também aparecer na imagem. Se não conseguir ler os números do topo com certeza, responda exatamente: "Não foi possível ler o resultado automaticamente — confira o print manualmente." (NÃO chute um número só pra responder algo).',
       messages:[{
         role:'user',
         content:[
-          {type:'text',text:'Leia o resultado desse print de teste de digitação.'},
+          {type:'text',text:'Leia o resultado desse print de teste de digitação — os dois números grandes do topo (PPM e precisão), não o gráfico.'},
           {type:'image',source:{type:'base64',media_type,data:base64Data}}
         ]
       }]
@@ -453,32 +458,25 @@ function fileToCompressedDataUrl(file){
       const img=new Image();
       img.onload=()=>{
         let w=img.width,h=img.height;
-        const maxW=520;
+        // 12/08/2026 — limite de largura bem mais alto que antes (era 520px,
+        // qualidade 0.55 — esmagava os números do print a ponto da IA ler
+        // errado). Só existe pra evitar fotos de celular gigantes demais
+        // (várias dezenas de MB) — na prática quase nunca reduz de verdade.
+        const maxW=1400;
         if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
         const canvas=document.createElement('canvas');
         canvas.width=w;canvas.height=h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        let quality=0.55;
+        let quality=0.92;
         let dataUrl=canvas.toDataURL('image/jpeg',quality);
+        // Só reduz qualidade se o print for realmente enorme — o piso (0.6)
+        // ainda deixa números pequenos legíveis, bem diferente do piso
+        // antigo (0.15) que já causou leitura errada da IA.
         let tentativas=0;
-        while(dataUrl.length>PPM_MAX_BASE64_CHARS&&quality>0.15&&tentativas<10){
+        while(dataUrl.length>PPM_MAX_BASE64_CHARS&&quality>0.6&&tentativas<6){
           quality-=0.05;
           dataUrl=canvas.toDataURL('image/jpeg',quality);
           tentativas++;
-        }
-        // Print muito grande/detalhado mesmo na qualidade mínima — reduz o
-        // tamanho físico também (redesenha menor a partir do canvas já
-        // reduzido, sem reler o arquivo original), repetindo até caber ou
-        // até ficar pequeno demais pra valer a pena (não trava em loop).
-        let canvasAtual=canvas,wAtual=w,hAtual=h,encolhidas=0;
-        while(dataUrl.length>PPM_MAX_BASE64_CHARS&&encolhidas<4&&wAtual>120){
-          wAtual=Math.round(wAtual*0.7);hAtual=Math.round(hAtual*0.7);
-          const canvasMenor=document.createElement('canvas');
-          canvasMenor.width=wAtual;canvasMenor.height=hAtual;
-          canvasMenor.getContext('2d').drawImage(canvasAtual,0,0,wAtual,hAtual);
-          canvasAtual=canvasMenor;
-          dataUrl=canvasAtual.toDataURL('image/jpeg',0.4);
-          encolhidas++;
         }
         resolve(dataUrl);
       };
