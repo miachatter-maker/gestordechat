@@ -503,6 +503,7 @@ function initFirebase(){
     listenToEntrevistaPendentes();
     listenToDiscordPendentes();
     listenToEntrevistaDecisaoPendentes();
+    listenToTranscricaoPpmPendentes();
   }catch(e){
     fbSyncStatus='offline';
     updateSyncBadge();
@@ -12657,10 +12658,14 @@ async function aplicarTarefaNovatoPendente(docId,data){
       resumo:data.resumo||'',
       disponibilidade:data.disponibilidade||'',
       cincoNotadas:data.cincoNotadas||'', // só usado no Dia 2
-      // 10/08/2026 — a gestora decidiu não guardar mais a imagem do print em
-      // lugar nenhum: a página pública já lê o resultado com IA e manda só o
-      // TEXTO (ppmResultado). ppmImage/ppmUrl continuam aceitos só por
-      // compatibilidade com registros enviados antes dessa mudança.
+      // 12/08/2026 — a gestora cancelou a leitura automática por IA (bug de
+      // leitura errada do PPM, ver thinkingLevel): o print volta a chegar
+      // como IMAGEM (ppmImage), guardado até um padrinho transcrever o
+      // resultado à mão no link dele (documento-padrinhos.html — ver
+      // aplicarTranscricaoPpmPendente). Nesse momento ppmResultado passa a
+      // ter o texto e a imagem é apagada de vez (não arquivada) pra liberar
+      // espaço. ppmUrl só existe por compatibilidade com registros bem
+      // antigos (época do Firebase Storage).
       ppmResultado:data.ppmResultado||'',
       ppmImage:data.ppmImage||'',
       ppmUrl:data.ppmUrl||'',
@@ -12688,6 +12693,59 @@ async function aplicarTarefaNovatoPendente(docId,data){
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar tarefa de novato como processada',e));
   }catch(e){
     console.error('Erro ao aplicar tarefa de novato pendente',e);
+  }
+}
+
+/* ===========================================================
+   TRANSCRIÇÃO MANUAL DO PPM — 12/08/2026, a gestora cancelou a leitura
+   automática por IA (print sendo lido errado — ver comentário do bug de
+   thinkingLevel). Agora o print chega como IMAGEM (ppmImage) e fica visível
+   pro padrinho em documento-padrinhos.html; o próprio padrinho transcreve o
+   resultado à mão (botão só existe naquele link). A página pública escreve
+   aqui um pedido type:'transcricaoPpmPendente', e é o app principal que
+   aplica de verdade: troca ppmImage pelo texto (ppmResultado) e APAGA a
+   imagem de vez (não arquiva) — é assim que o espaço é liberado.
+   =========================================================== */
+function listenToTranscricaoPpmPendentes(){
+  if(!fbDb)return;
+  fbDb.collection('gestorpro')
+    .where('type','==','transcricaoPpmPendente')
+    .where('processado','==',false)
+    .onSnapshot((snap)=>{
+      snap.docChanges().forEach(change=>{
+        if(change.type!=='added')return;
+        aplicarTranscricaoPpmPendente(change.doc.id,change.doc.data());
+      });
+    },(err)=>{
+      console.error('Erro ao ouvir transcrições de PPM pendentes',err);
+    });
+}
+async function aplicarTranscricaoPpmPendente(docId,data){
+  if(!(await claimPendenteDoc(docId)))return;
+  try{
+    const c=S.chatters.find(ch=>ch.id===data.testerId);
+    if(!c){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tester não encontrado'});
+      return;
+    }
+    const fk=data.fridayKey,diaN=data.dia;
+    const reg=S.tarefasNovatoPorTester[c.id]&&S.tarefasNovatoPorTester[c.id][fk]&&S.tarefasNovatoPorTester[c.id][fk]['dia'+diaN];
+    if(!reg){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'tarefa/dia não encontrado (pode já ter sido decidido)'});
+      return;
+    }
+    reg.ppmResultado=(data.ppmResultado||'').trim();
+    // Apaga a imagem de vez — não é arquivada em lugar nenhum, é isso que
+    // libera o espaço (o save() logo abaixo sobrescreve o documento inteiro
+    // da fatia, então o base64 antigo não sobra nem no Firestore).
+    reg.ppmImage='';
+    reg.ppmUrl='';
+    save();
+    toast(`✍️ ${data.padrinhoNome||'Padrinho'} transcreveu o PPM do Dia ${diaN} de ${c.name}.`);
+    if(currentViewName()==='testers')renderTesters();
+    fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar transcrição de PPM como processada',e));
+  }catch(e){
+    console.error('Erro ao aplicar transcrição de PPM pendente',e);
   }
 }
 
@@ -13558,7 +13616,17 @@ function renderTesterDetail(cid){
   const testePanel=(c.testerDecision==='aprovado'&&testeResultado)?fichaAccordion('teste-'+cid,'border:2px solid var(--ok)',
     `<div><div class="panel-title">🧪 Teste</div><div class="panel-note">PPM, Mapeamento e opinião do padrinho${testeResultado.salvoEm?' · registrado em '+new Date(testeResultado.salvoEm).toLocaleDateString('pt-BR'):''}</div></div>`,
     `${testeResultado.ppmDias&&testeResultado.ppmDias.length?`<div class="field"><label class="flabel">⌨️ Resultado do PPM (por dia)</label>
-      ${testeResultado.ppmDias.map(d=>`<div style="font-size:12.5px;color:var(--text2);padding:5px 0;border-bottom:1px solid var(--line)"><b>Dia ${d.dia}:</b> ${d.ppmResultado||'—'}${d.resumo?` — ${d.resumo}`:''}</div>`).join('')}
+      ${testeResultado.ppmDias.map(d=>{
+        // 12/08/2026 — a transcrição agora é manual, feita pelo padrinho no
+        // link dele; se a gestora aprovar ANTES disso acontecer, o que sobra
+        // aqui ainda é a imagem (data:image...), não o texto — mostra como
+        // print mesmo (em vez de despejar o base64 inteiro como texto).
+        const ehImagem=(d.ppmResultado||'').startsWith('data:image');
+        const conteudo=ehImagem
+          ?`<img src="${d.ppmResultado}" style="max-width:180px;border-radius:8px;display:block;margin-top:4px;cursor:pointer" onclick="window.open(this.src)">`
+          :(d.ppmResultado||'— ainda não transcrito pelo padrinho');
+        return`<div style="font-size:12.5px;color:var(--text2);padding:5px 0;border-bottom:1px solid var(--line)"><b>Dia ${d.dia}:</b> ${ehImagem?'':conteudo}${d.resumo?` — ${d.resumo}`:''}${ehImagem?conteudo:''}</div>`;
+      }).join('')}
     </div>`:'<div class="panel-note">Sem resultados de PPM guardados.</div>'}
     ${testeResultado.mapeamento?`<div class="field" style="margin-top:12px"><label class="flabel">🔍 Mapeamento (Triagem)</label>
       <div style="font-size:12.5px;color:var(--text2);line-height:1.5">${testeResultado.mapeamento.ondeMora||'-'} · ${testeResultado.mapeamento.oQueFaz||'-'}</div>

@@ -539,7 +539,7 @@ function renderTesterRow(t,ciclo){
           ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
           ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
           ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
-          ${reg.ppmResultado?`<div style="font-size:12.5px;font-weight:700;color:var(--ok);margin-bottom:3px">⌨️ ${reg.ppmResultado}</div>`:((reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">`:'')}
+          ${reg.ppmResultado?`<div style="font-size:12.5px;font-weight:700;color:var(--ok);margin-bottom:3px">⌨️ ${reg.ppmResultado}</div>`:((reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">${isMine?`<button class="btn" style="margin-top:6px;padding:8px 12px;font-size:12.5px;width:auto;background:var(--accent-soft);color:var(--accent-strong)" onclick="event.stopPropagation();transcreverPpm('${t.id}','${ciclo.fridayKey}',${d.dia})">✍️ Transcrever resultado</button>`:'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Aguardando o padrinho transcrever</div>'}`:'')}
         </div>`;
       }).join('')}
       ${segundaChanceHtml(t.id)}
@@ -655,6 +655,31 @@ window.excluirAfilhado=async function(testerId,testerNome){
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
+  }
+};
+// 12/08/2026 — a gestora cancelou a leitura automática do PPM por IA (bug de
+// leitura errada). O print agora fica visível aqui (imagem) e o PRÓPRIO
+// padrinho transcreve o resultado à mão — esse botão só existe neste link.
+// Igual todo o resto da página, o padrinho não apaga nada sozinho: só manda
+// o pedido (transcricaoPpmPendente); quem troca a imagem pelo texto e apaga
+// o print de vez (libera espaço) é o app principal
+// (aplicarTranscricaoPpmPendente, em app.js).
+window.transcreverPpm=async function(testerId,fridayKey,dia){
+  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
+  const texto=prompt('Digite exatamente o que está no print (ex: "62 PPM, 97% de precisão"):');
+  if(texto===null)return;
+  if(!texto.trim()){alert('Escreva o resultado antes de confirmar.');return;}
+  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  try{
+    await fbDb.collection('gestorpro').add({
+      type:'transcricaoPpmPendente',processado:false,
+      testerId,fridayKey,dia,ppmResultado:texto.trim(),
+      padrinhoId:selPadrinhoId,padrinhoNome:padrinho?padrinho.name:'',
+      criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(e){
+    console.error(e);
+    alert('Erro ao enviar transcrição: '+e.message);
   }
 };
 window.deserdarAfilhado=async function(testerId,testerNome){
