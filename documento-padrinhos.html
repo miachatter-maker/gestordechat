@@ -300,6 +300,16 @@ function hasAnyTarefaEnviada(testerId){
   if(temNaFatia)return true;
   return rawTarefaDocs.some(d=>d.testerId===testerId);
 }
+// 12/08/2026 — a pedido da gestora: o botão de excluir dos "disponíveis"
+// (sem padrinho ainda) deixou de valer só pra quem nunca enviou NADA — agora
+// também libera quem começou e abandonou no meio (enviou 1 ou 2 dias, nunca
+// os 3). "Completou o ciclo" = tem algum ciclo com os 3 dias enviados; só
+// esse caso continua fora do alcance do botão (aí é candidato de verdade,
+// aguardando decisão — apagar isso é coisa da gestora, não do padrinho).
+function hasCompletedFullCycle(testerId){
+  const tarefas=getMergedTarefas(testerId);
+  return Object.keys(tarefas).some(fk=>Object.keys(tarefas[fk]||{}).length>=3);
+}
 
 /* ---------- render ---------- */
 function renderAll(){
@@ -363,6 +373,61 @@ function modeloDoSlot(slotId){
   if(letra==='c'||letra==='d')return'Feli';
   return'';
 }
+// 12/08/2026 — a pedido da gestora: letra "Modelo A/B" que ela usa no
+// Discord (A é a Thays, B é a Feli) — não confundir com a letra do slotId
+// (a/b/c/d), que é só o código interno do horário.
+function letraModeloDoSlot(slotId){
+  const nome=modeloDoSlot(slotId);
+  if(nome==='Thays Arruda')return'A';
+  if(nome==='Feli')return'B';
+  return'';
+}
+// Pega o resultado de PPM mais recente já transcrito (texto), olhando do
+// ciclo/dia mais novo pro mais antigo — pra lista de entrevista só importa
+// o resultado mais atual da pessoa, não o histórico de dias inteiro.
+function ppmMaisRecente(testerId){
+  const tarefas=getMergedTarefas(testerId);
+  const fks=Object.keys(tarefas).sort();
+  for(let i=fks.length-1;i>=0;i--){
+    const dias=Object.keys(tarefas[fks[i]]||{}).sort().reverse();
+    for(const k of dias){
+      const reg=tarefas[fks[i]][k];
+      if(reg&&reg.ppmResultado)return reg.ppmResultado;
+    }
+  }
+  return'';
+}
+// Monta o texto prontinho pra colar no Discord: nome, horário, modelo,
+// Discord e PPM de cada candidato, um bloco por pessoa separado por linha
+// em branco.
+function textoListaEntrevista(candidatos){
+  return candidatos.map(t=>{
+    const letra=letraModeloDoSlot(t.horarioTeste.slotId);
+    const horario=t.horarioTeste.label||'';
+    const discord=t.discordUsername||'— sem Discord ainda';
+    const ppm=ppmMaisRecente(t.id)||'— sem resultado de PPM ainda';
+    return`${t.name} — ${horario}${letra?' — Modelo '+letra:''}\n${discord}\n${ppm}`;
+  }).join('\n\n');
+}
+window.copiarListaEntrevista=function(btn){
+  const ta=document.getElementById('lista-entrevista-texto');
+  if(!ta)return;
+  const marcarCopiado=()=>{
+    if(!btn)return;
+    const original=btn.textContent;
+    btn.textContent='✅ Copiado!';
+    setTimeout(()=>{btn.textContent=original;},1500);
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(ta.value).then(marcarCopiado).catch(()=>{
+      ta.select();
+      try{document.execCommand('copy');marcarCopiado();}catch(e){alert('Não consegui copiar — selecione o texto manualmente.');}
+    });
+  }else{
+    ta.select();
+    try{document.execCommand('copy');marcarCopiado();}catch(e){alert('Não consegui copiar — selecione o texto manualmente.');}
+  }
+};
 function renderEntrevistaView(){
   const el=document.getElementById('padrinho-doc');
   if(!el)return;
@@ -399,6 +464,12 @@ function renderEntrevistaView(){
   const ciclo=getCicloAtual();
   el.innerHTML=`<div>
     <div style="font-size:13px;font-weight:800;color:var(--accent-strong);text-transform:uppercase;letter-spacing:.03em;margin-bottom:10px">🎤 Pra entrevistar</div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px">📋 Lista pra colar no Discord</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Modelo A é a Thays, Modelo B é a Feli.</div>
+      <textarea id="lista-entrevista-texto" readonly style="width:100%;min-height:130px;border:1px solid var(--line-strong);border-radius:8px;padding:10px;font-family:var(--font);font-size:12.5px;color:var(--text);background:var(--bg-soft);resize:vertical" onclick="this.select()">${textoListaEntrevista(candidatos)}</textarea>
+      <button class="btn btn-primary" style="margin-top:8px" onclick="copiarListaEntrevista(this)">📋 Copiar lista</button>
+    </div>
     ${candidatos.map(t=>{
       const modelo=modeloDoSlot(t.horarioTeste.slotId);
       const ficha=chatterFichasLive[t.id]||{};
@@ -472,9 +543,12 @@ window.toggleTesterDetail=function(id){
 function renderTesterRow(t,ciclo){
   const map=getMapeamentoInfo(t.id,t.name);
   const claim=getMergedClaimForTester(t.id);
-  const podeExcluir=!t.testerDecision&&!hasAnyTarefaEnviada(t.id);
   const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
   const isMine=selPadrinhoId&&padrinhoId===selPadrinhoId;
+  // Só some pra "disponíveis" (sem padrinho ainda), sem decisão e sem ter
+  // completado o ciclo inteiro — ver hasCompletedFullCycle acima.
+  const podeExcluir=!t.testerDecision&&!padrinhoId&&!hasCompletedFullCycle(t.id);
+  const nuncaEnviouNada=!hasAnyTarefaEnviada(t.id);
   const badges=ciclo.dias.map(d=>{
     const status=getStatusDia(t.id,ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
     const label={enviado:'✅',bloqueado:'❌',aberto:'🟢',futuro:'⏳'}[status];
@@ -539,12 +613,12 @@ function renderTesterRow(t,ciclo){
           ${reg.resumo?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">📝 ${reg.resumo}</div>`:''}
           ${reg.disponibilidade?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">🗓️ ${reg.disponibilidade}</div>`:''}
           ${reg.cincoNotadas?`<div style="font-size:12.5px;color:var(--text2);margin-bottom:3px">👀 ${reg.cincoNotadas}</div>`:''}
-          ${reg.ppmResultado?`<div style="font-size:12.5px;font-weight:700;color:var(--ok);margin-bottom:3px">⌨️ ${reg.ppmResultado}</div>`:((reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)">${isMine?`<button class="btn" style="margin-top:6px;padding:8px 12px;font-size:12.5px;width:auto;background:var(--accent-soft);color:var(--accent-strong)" onclick="event.stopPropagation();transcreverPpm('${t.id}','${ciclo.fridayKey}',${d.dia})">✍️ Transcrever resultado</button>`:'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Aguardando o padrinho transcrever</div>'}`:'')}
+          ${reg.ppmResultado?`<div style="font-size:12.5px;font-weight:700;color:var(--ok);margin-bottom:3px">⌨️ ${reg.ppmResultado}</div>`:((reg.ppmImage||reg.ppmUrl)?`<img class="ppm-img" src="${reg.ppmImage||reg.ppmUrl}" onclick="openLightbox(this.src)"><button class="btn" style="margin-top:6px;padding:8px 12px;font-size:12.5px;width:auto;background:var(--accent-soft);color:var(--accent-strong)" onclick="event.stopPropagation();transcreverPpm('${t.id}','${ciclo.fridayKey}',${d.dia})">✍️ Transcrever resultado</button>`:'')}
         </div>`;
       }).join('')}
       ${segundaChanceHtml(t.id)}
       ${claimBoxHtml}
-      ${podeExcluir?`<button class="btn" style="margin-top:10px;background:var(--bad-soft);color:var(--bad)" onclick="event.stopPropagation();excluirNomeDuplicado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🗑️ Excluir esse nome (duplicado, nunca enviou tarefa)</button>`:''}
+      ${podeExcluir?`<button class="btn" style="margin-top:10px;background:var(--bad-soft);color:var(--bad)" onclick="event.stopPropagation();excluirNomeDuplicado('${t.id}','${(t.name||'').replace(/'/g,"\\'")}')">🗑️ ${nuncaEnviouNada?'Excluir esse nome (duplicado, nunca enviou tarefa)':'Excluir e liberar dados (não completou as tarefas)'}</button>`:''}
     </div>
   </div>`;
 }
@@ -607,18 +681,21 @@ window.decidirSegundaChance=async function(testerId,fridayKey,dia,decisao){
 };
 window.excluirNomeDuplicado=async function(testerId,testerNome){
   // Só chega até aqui um botão que já checou (podeExcluir) que essa pessoa
-  // nunca teve decisão nem tarefa enviada. Mesmo assim, quem realmente
-  // executa a exclusão é o app principal (aplicarExclusaoTesterPendente),
-  // que confere tudo de novo antes de apagar — pedido da gestora pra nunca
-  // arriscar apagar algo real por engano.
+  // está nos "disponíveis" (sem padrinho, sem decisão) e não completou o
+  // ciclo inteiro de tarefas. Mesmo assim, quem realmente executa a
+  // exclusão é o app principal (aplicarExclusaoTesterPendente), que confere
+  // tudo de novo antes de apagar — pedido da gestora pra nunca arriscar
+  // apagar algo real por engano.
   // 10/08/2026 — corrigido: antes exigia selecionar um nome de padrinho
   // primeiro (`if(!selPadrinhoId){alert(...);return;}`), o que bloqueava a
   // própria gestora de excluir um nome duplicado direto por esse link (ela
   // não é um padrinho, não tem porque escolher um nome ali) — ela clicava
   // e nada acontecia, parecia que "não conseguia deletar". Esse botão é
-  // seguro (o app principal recusa se a pessoa já tiver qualquer atividade
-  // real), então não precisa mais identificar quem pediu.
-  if(!confirm(`Excluir "${testerNome}"? Use só pra nomes duplicados que nunca enviaram nenhuma tarefa — isso será checado de novo antes de apagar de verdade.`))return;
+  // seguro (o app principal recusa se a pessoa já tiver decisão, padrinho
+  // ou ciclo completo), então não precisa mais identificar quem pediu.
+  // 12/08/2026 — ampliado: também serve pra quem começou e abandonou (1 ou
+  // 2 dias enviados, nunca os 3), não só duplicados com zero tarefa.
+  if(!confirm(`Excluir "${testerNome}" e liberar os dados dele? Use pra quem está sem padrinho e não terminou as tarefas (nunca enviou ou abandonou no meio) — isso será checado de novo antes de apagar de verdade.`))return;
   const padrinho=selPadrinhoId?chatters.find(c=>c.id===selPadrinhoId):null;
   try{
     await fbDb.collection('gestorpro').add({
@@ -627,7 +704,7 @@ window.excluirNomeDuplicado=async function(testerId,testerNome){
       padrinhoId:selPadrinhoId||'',padrinhoNome:padrinho?padrinho.name:'gestora (via link)',
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
-    alert('Pedido enviado — some da lista em instantes se realmente não tiver nenhuma tarefa registrada.');
+    alert('Pedido enviado — some da lista e libera os dados em instantes, se realmente não tiver decisão, padrinho ou ciclo completo registrado.');
   }catch(e){
     console.error(e);
     alert('Erro ao enviar: '+e.message);
@@ -658,23 +735,24 @@ window.excluirAfilhado=async function(testerId,testerNome){
   }
 };
 // 12/08/2026 — a gestora cancelou a leitura automática do PPM por IA (bug de
-// leitura errada). O print agora fica visível aqui (imagem) e o PRÓPRIO
-// padrinho transcreve o resultado à mão — esse botão só existe neste link.
-// Igual todo o resto da página, o padrinho não apaga nada sozinho: só manda
-// o pedido (transcricaoPpmPendente); quem troca a imagem pelo texto e apaga
-// o print de vez (libera espaço) é o app principal
-// (aplicarTranscricaoPpmPendente, em app.js).
+// leitura errada). O print agora fica visível aqui (imagem) e QUALQUER UM
+// nesse link pode transcrever o resultado à mão — não precisa selecionar um
+// nome de padrinho antes (a gestora pediu que funcione sendo padrinho ou
+// não, igual excluirNomeDuplicado). Igual todo o resto da página, quem
+// transcreve não apaga nada sozinho: só manda o pedido
+// (transcricaoPpmPendente); quem troca a imagem pelo texto e apaga o print
+// de vez (libera espaço) é o app principal (aplicarTranscricaoPpmPendente,
+// em app.js).
 window.transcreverPpm=async function(testerId,fridayKey,dia){
-  if(!selPadrinhoId){alert('Selecione seu nome de padrinho primeiro.');return;}
   const texto=prompt('Digite exatamente o que está no print (ex: "62 PPM, 97% de precisão"):');
   if(texto===null)return;
   if(!texto.trim()){alert('Escreva o resultado antes de confirmar.');return;}
-  const padrinho=chatters.find(c=>c.id===selPadrinhoId);
+  const padrinho=selPadrinhoId&&selPadrinhoId!=='ENTREVISTA'?chatters.find(c=>c.id===selPadrinhoId):null;
   try{
     await fbDb.collection('gestorpro').add({
       type:'transcricaoPpmPendente',processado:false,
       testerId,fridayKey,dia,ppmResultado:texto.trim(),
-      padrinhoId:selPadrinhoId,padrinhoNome:padrinho?padrinho.name:'',
+      padrinhoId:padrinho?padrinho.id:'',padrinhoNome:padrinho?padrinho.name:'alguém via link',
       criadoEm:firebase.firestore.FieldValue.serverTimestamp()
     });
   }catch(e){

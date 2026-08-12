@@ -13059,16 +13059,22 @@ async function aplicarSegundaChanceDecisaoPendente(docId,data){
 }
 
 /* ===========================================================
-   EXCLUSÃO DE TESTER PELO LINK DOS PADRINHOS — pedido da gestora pra
-   os próprios padrinhos organizarem o site e apagarem nomes duplicados
-   que nunca chegaram a fazer nenhuma tarefa (sobras de autoinclusão
-   repetida). O link dos padrinhos nunca apaga nada sozinho: ele só
-   registra o PEDIDO (excluirTesterPendente) e é o app principal quem
-   decide se aplica — e só aplica se, de fato, essa pessoa nunca teve
-   nenhuma decisão (aprovado/reprovado/espera) nem nenhuma tarefa nem
-   registro real. Assim um padrinho nunca consegue apagar histórico de
-   verdade por engano ou clique errado — pedido explícito da gestora
-   pra tomar cuidado extremo aqui.
+   EXCLUSÃO DE TESTER PELO LINK DOS PADRINHOS — pedido original da
+   gestora: os próprios padrinhos organizarem o site e apagarem nomes
+   duplicados que nunca chegaram a fazer nenhuma tarefa. O link dos
+   padrinhos nunca apaga nada sozinho: ele só registra o PEDIDO
+   (excluirTesterPendente) e é o app principal quem decide se aplica.
+   12/08/2026 — ampliado a pedido da gestora: agora também serve pra
+   limpar quem está "disponível" (sem padrinho ainda) mas ABANDONOU no
+   meio do caminho — começou a enviar tarefa mas nunca completou o
+   ciclo inteiro (3 dias). Antes só liberava quem tinha ZERO tarefa
+   enviada, o que deixava prints/textos incompletos acumulando pra
+   sempre no shard-tarefas-tester sem nenhuma forma de limpar. Ainda
+   assim continua bloqueado (por segurança) se a pessoa: já tem
+   decisão (aprovado/reprovado/espera), já tem um padrinho responsável
+   (isso é afilhado — usa excluirAfilhado, que arquiva em vez de
+   apagar), ou já COMPLETOU o ciclo inteiro alguma vez (nesse caso é
+   candidato de verdade aguardando decisão, não abandono).
    =========================================================== */
 function listenToExclusoesTesterPendentes(){
   if(!fbDb)return;
@@ -13094,12 +13100,17 @@ async function aplicarExclusaoTesterPendente(docId,data){
       return;
     }
     const temDecisao=!!c.testerDecision;
+    const temPadrinho=!!(S.chatterFichas&&S.chatterFichas[id]&&S.chatterFichas[id].padrinhoId);
     const tarefas=(S.tarefasNovatoPorTester&&S.tarefasNovatoPorTester[id])||{};
-    const temTarefaEnviada=Object.keys(tarefas).some(fk=>Object.keys(tarefas[fk]||{}).some(k=>tarefas[fk][k]&&tarefas[fk][k].enviadoEm));
+    // "Completou o ciclo inteiro" = tem algum ciclo (fridayKey) com os 3 dias
+    // enviados — só esse caso conta como candidato de verdade; 1 ou 2 dias
+    // enviados sem terminar é exatamente o abandono que essa exclusão passou
+    // a poder limpar.
+    const completouAlgumCiclo=Object.keys(tarefas).some(fk=>Object.keys(tarefas[fk]||{}).filter(k=>tarefas[fk][k]&&tarefas[fk][k].enviadoEm).length>=3);
     const temLog=((S.testerLogs&&S.testerLogs[id])||[]).length>0;
-    if(temDecisao||temTarefaEnviada||temLog){
-      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'bloqueado: já tem tarefa/decisão/registro real — não apaguei por segurança'});
-      toast(`⚠️ ${data.padrinhoNome||'Um padrinho'} tentou excluir "${c.name}" pelo link, mas já tem tarefa/decisão registrada — bloqueei por segurança.`);
+    if(temDecisao||temPadrinho||completouAlgumCiclo||temLog){
+      fbDb.collection('gestorpro').doc(docId).update({processado:true,erro:'bloqueado: já tem decisão/padrinho/ciclo completo/registro real — não apaguei por segurança'});
+      toast(`⚠️ ${data.padrinhoNome||'Um padrinho'} tentou excluir "${c.name}" pelo link, mas já tem decisão, padrinho ou ciclo completo registrado — bloqueei por segurança.`);
       return;
     }
     S.chatters=S.chatters.filter(ch=>ch.id!==id);
@@ -13107,7 +13118,7 @@ async function aplicarExclusaoTesterPendente(docId,data){
     delete S.testerLogs[id];
     if(S.tarefasNovatoPorTester)delete S.tarefasNovatoPorTester[id];
     save();
-    toast(`🗑️ ${data.padrinhoNome||'Um padrinho'} removeu "${data.testerNome||c.name}" (nome duplicado, sem tarefa) pelo link dos padrinhos.`);
+    toast(`🗑️ ${data.padrinhoNome||'Um padrinho'} removeu "${data.testerNome||c.name}" (sem padrinho, tarefas incompletas) pelo link dos padrinhos — dados liberados.`);
     if(currentViewName()==='testers')renderTesters();
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar exclusão de tester como processada',e));
   }catch(e){
