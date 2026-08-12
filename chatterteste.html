@@ -156,6 +156,11 @@ function getTercaDoCiclo(ref){
 // Segunda. Não mexe na regra normal (Sexta=Dia1/Sábado=Dia2/Domingo=Dia3,
 // prazo sempre meia-noite do dia seguinte) pros próximos ciclos.
 const PRAZO_DIA3_EXCECAO={'2026-07-31':1}; // chave do ciclo -> dias extras de prazo
+// EXCEÇÃO PONTUAL (só pro Dia 1 do ciclo de 2026-08-11, Terça/Quarta/Quinta
+// — a gestora avisou os testers tarde demais na Terça, então SÓ dessa vez o
+// prazo do Dia 1 vai até as 14h de Quinta (13/08) em vez da meia-noite
+// normal de Quarta (12/08). Não mexe na regra normal pros próximos ciclos.
+const PRAZO_DIA1_EXCECAO={'2026-08-11':{extraDias:1,hora:14}}; // chave do ciclo -> {extraDias, hora do prazo}
 function getCicloAtual(){
   const now=new Date();
   // Sempre usa o começo de ciclo (Terça ou Sexta) mais recente entre os
@@ -171,10 +176,13 @@ function getCicloAtual(){
   const labels=usaTerca?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
   const fridayKey=fmt(inicio); // nome mantido por compatibilidade — o valor agora pode ser uma Terça também
   const extraDia3=PRAZO_DIA3_EXCECAO[fridayKey]||0;
+  const excDia1=PRAZO_DIA1_EXCECAO[fridayKey];
   const dias=[1,2,3].map(n=>{
     const dataDia=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate()+(n-1));
-    const extra=n===3?extraDia3:0;
-    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1+extra);
+    let extra=n===3?extraDia3:0;
+    let horaPrazo=0;
+    if(n===1&&excDia1){extra=excDia1.extraDias||0;horaPrazo=excDia1.hora||0;}
+    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1+extra,horaPrazo,0,0);
     return{dia:n,dataDia,prazo,label:labels[n-1]};
   });
   return{fridayKey,dias};

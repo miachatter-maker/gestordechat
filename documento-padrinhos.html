@@ -127,6 +127,12 @@ function getTercaDoCiclo(ref){
   if(dow===2)diff=0;else if(dow===3)diff=1;else if(dow===4)diff=2;else diff=(dow-2+7)%7;
   return new Date(d.getFullYear(),d.getMonth(),d.getDate()-diff);
 }
+// EXCEÇÃO PONTUAL (só pro Dia 1 do ciclo de 2026-08-11, Terça/Quarta/Quinta
+// — a gestora avisou os testers tarde demais na Terça, então SÓ dessa vez o
+// prazo do Dia 1 vai até as 14h de Quinta (13/08) em vez da meia-noite
+// normal de Quarta (12/08). Precisa ficar em sincronia com chatterteste.html
+// pra não mostrar "bloqueado" aqui enquanto o tester ainda consegue enviar.
+const PRAZO_DIA1_EXCECAO={'2026-08-11':{extraDias:1,hora:14}};
 function getCicloAtual(){
   const now=new Date();
   // Mesma regra do chatterteste.html: usa sempre o começo de ciclo (Terça
@@ -137,9 +143,12 @@ function getCicloAtual(){
   const inicio=usaTerca?ter:sex;
   const labels=usaTerca?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
   const fridayKey=fmt(inicio); // nome mantido por compatibilidade — o valor agora pode ser uma Terça também
+  const excDia1=PRAZO_DIA1_EXCECAO[fridayKey];
   const dias=[1,2,3].map(n=>{
     const dataDia=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate()+(n-1));
-    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1);
+    let extra=0,horaPrazo=0;
+    if(n===1&&excDia1){extra=excDia1.extraDias||0;horaPrazo=excDia1.hora||0;}
+    const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1+extra,horaPrazo,0,0);
     return{dia:n,dataDia,prazo,label:labels[n-1]};
   });
   return{fridayKey,dias};
