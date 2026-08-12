@@ -1119,15 +1119,31 @@ function getSextaDoCiclo(ref){
   const sex=new Date(d.getFullYear(),d.getMonth(),d.getDate()-diff);
   return sex;
 }
+// 11/08/2026 — a pedido da gestora: às vezes o teste roda também Terça,
+// Quarta e Quinta, além de Sexta/Sábado/Domingo — mesmo formato de 3 dias,
+// só que ancorado na Terça. Mantido em sincronia com chatterteste.html e
+// documento-padrinhos.html (mesma "chave de ciclo").
+function getTercaDoCiclo(ref){
+  const d=new Date(ref);
+  const dow=d.getDay(); // 0=dom,2=ter,3=qua,4=qui
+  let diff;
+  if(dow===2)diff=0;else if(dow===3)diff=1;else if(dow===4)diff=2;else diff=(dow-2+7)%7;
+  return new Date(d.getFullYear(),d.getMonth(),d.getDate()-diff);
+}
 function getCicloNovatoInfo(ref){
   const now=ref?new Date(ref):new Date();
+  // Usa sempre o começo de ciclo (Terça ou Sexta) mais recente entre os dois.
   const sex=getSextaDoCiclo(now);
-  const fridayKey=fmt(sex);
+  const ter=getTercaDoCiclo(now);
+  const usaTerca=ter.getTime()>sex.getTime();
+  const inicio=usaTerca?ter:sex;
+  const labels=usaTerca?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
+  const fridayKey=fmt(inicio);
   const dias=[1,2,3].map(n=>{
-    const dataDia=new Date(sex.getFullYear(),sex.getMonth(),sex.getDate()+(n-1));
+    const dataDia=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate()+(n-1));
     const dataKey=fmt(dataDia);
     const prazo=new Date(dataDia.getFullYear(),dataDia.getMonth(),dataDia.getDate()+1); // 00h do dia seguinte
-    return{dia:n,dataKey,prazo,label:['Sexta','Sábado','Domingo'][n-1]};
+    return{dia:n,dataKey,prazo,label:labels[n-1]};
   });
   return{fridayKey,dias};
 }
