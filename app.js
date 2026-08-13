@@ -12741,6 +12741,18 @@ async function aplicarTranscricaoPpmPendente(docId,data){
     reg.ppmImage='';
     reg.ppmUrl='';
     save();
+    // 13/08/2026 — achado ao vivo: faltava atualizar o documento ORIGINAL
+    // (tnp_...) que chatterteste.html (visão do próprio tester) e o merge de
+    // pendentes brutos do documento-padrinhos.html leem direto — só
+    // atualizar a fatia central (acima) não bastava, então o print base64
+    // continuava aparecendo pra sempre (e o texto "transcrito" virava o
+    // próprio base64, por causa do fallback ppmResultado||ppmImage nesses
+    // dois lugares). Agora o doc original também é corrigido, então os dois
+    // lugares passam a ler o mesmo texto certo — e o base64 realmente some
+    // do Firestore (o objetivo original de liberar espaço).
+    fbDb.collection('gestorpro').doc('tnp_'+c.id+'_'+fk+'_'+diaN).update({
+      ppmResultado:reg.ppmResultado,ppmImage:'',ppmUrl:''
+    }).catch(e=>console.error('Erro ao atualizar doc original da tarefa (transcrição PPM)',e));
     toast(`✍️ ${data.padrinhoNome||'Padrinho'} transcreveu o PPM do Dia ${diaN} de ${c.name}.`);
     if(currentViewName()==='testers')renderTesters();
     fbDb.collection('gestorpro').doc(docId).update({processado:true}).catch(e=>console.error('Erro ao marcar transcrição de PPM como processada',e));
