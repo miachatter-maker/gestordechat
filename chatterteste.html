@@ -163,19 +163,9 @@ const PRAZO_DIA3_EXCECAO={'2026-07-31':1}; // chave do ciclo -> dias extras de p
 // prazo do Dia 1 vai até as 14h de Quinta (13/08) em vez da meia-noite
 // normal de Quarta (12/08). Não mexe na regra normal pros próximos ciclos.
 const PRAZO_DIA1_EXCECAO={'2026-08-11':{extraDias:1,hora:14}}; // chave do ciclo -> {extraDias, hora do prazo}
-function getCicloAtual(){
-  const now=new Date();
-  // Sempre usa o começo de ciclo (Terça ou Sexta) mais recente entre os
-  // dois — numa sexta-feira, o começo "sexta" (0 dias atrás) vence o
-  // começo "terça" (3 dias atrás); numa terça-feira, é o oposto. Isso cobre
-  // os dois formatos (Terça/Quarta/Quinta e Sexta/Sábado/Domingo) com a
-  // MESMA lógica de liberação dia-a-dia que já existia — dia1 no 1º dia do
-  // grupo, dia2 no 2º, dia3 no 3º, prazo sempre 00h do dia seguinte.
-  const sex=getSextaDoCiclo(now);
-  const ter=getTercaDoCiclo(now);
-  const usaTerca=ter.getTime()>sex.getTime();
-  const inicio=usaTerca?ter:sex;
-  const labels=usaTerca?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
+function construirCiclo(inicio){
+  const dow=inicio.getDay();
+  const labels=dow===2?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
   const fridayKey=fmt(inicio); // nome mantido por compatibilidade — o valor agora pode ser uma Terça também
   const extraDia3=PRAZO_DIA3_EXCECAO[fridayKey]||0;
   const excDia1=PRAZO_DIA1_EXCECAO[fridayKey];
@@ -188,6 +178,35 @@ function getCicloAtual(){
     return{dia:n,dataDia,prazo,label:labels[n-1]};
   });
   return{fridayKey,dias};
+}
+function getCicloAtual(){
+  const now=new Date();
+  // Sempre usa o começo de ciclo (Terça ou Sexta) mais recente entre os
+  // dois — numa sexta-feira, o começo "sexta" (0 dias atrás) vence o
+  // começo "terça" (3 dias atrás); numa terça-feira, é o oposto. Isso cobre
+  // os dois formatos (Terça/Quarta/Quinta e Sexta/Sábado/Domingo) com a
+  // MESMA lógica de liberação dia-a-dia que já existia — dia1 no 1º dia do
+  // grupo, dia2 no 2º, dia3 no 3º, prazo sempre 00h do dia seguinte.
+  const sex=getSextaDoCiclo(now);
+  const ter=getTercaDoCiclo(now);
+  const usaTerca=ter.getTime()>sex.getTime();
+  const inicio=usaTerca?ter:sex;
+  return construirCiclo(inicio);
+}
+// 14/08/2026 — bug real (a Mia reportou pelo Lailson): essa página só
+// mostrava SEMPRE o ciclo global atual (getCicloAtual), então quando o
+// ciclo vira (ex: de Terça pra Sexta) no meio do processo de alguém que
+// ainda não entregou tudo, a pessoa simplesmente deixa de ver os dias
+// antigos — não tem como voltar lá pra enviar o que faltou, mesmo com
+// segunda chance aprovada pelo padrinho. Essa função dá prioridade ao
+// ciclo ANTIGO (o que tem segunda chance aprovada) sobre o ciclo atual,
+// enquanto essa segunda chance existir — depois que ela for enviada ou
+// revogada, volta a mostrar o ciclo atual normalmente.
+function getCicloParaTester(tester,cicloGlobal){
+  if(!tester)return cicloGlobal;
+  const aprovadas=(tester.segundaChanceAprovadas||[]).filter(a=>a.fridayKey&&a.fridayKey!==cicloGlobal.fridayKey);
+  if(!aprovadas.length)return cicloGlobal;
+  return construirCiclo(new Date(aprovadas[0].fridayKey+'T00:00:00'));
 }
 function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
 
@@ -795,7 +814,7 @@ function renderTesterDays(testerId){
       return;
     }
   }
-  const ciclo=getCicloAtual();
+  const ciclo=getCicloParaTester(tester,getCicloAtual());
   // Entrevista só pode aparecer depois que TODAS as 3 tarefas (Sexta, Sábado
   // e Domingo) já foram entregues — a pedido explícito da gestora (07/08/2026):
   // "só é possível no domingo e após entrega das outras tarefas". Sem isso,
@@ -1145,7 +1164,7 @@ window.enviarTarefaDia=async function(diaN){
   if(!testerId){alert('Selecione seu nome primeiro.');return;}
   const tester=chatters.find(c=>c.id===testerId);
   if(!tester)return;
-  const ciclo=getCicloAtual();
+  const ciclo=getCicloParaTester(tester,getCicloAtual());
   const diaInfo=ciclo.dias.find(d=>d.dia===diaN);
   const status=getStatusDia(ciclo.fridayKey,diaN,diaInfo.dataDia,diaInfo.prazo);
   if(status!=='aberto'){alert('Esse dia não está mais disponível pra envio.');renderTesterDays(testerId);return;}
