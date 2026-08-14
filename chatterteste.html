@@ -201,16 +201,17 @@ function fmtBR(d){return`${p2(d.getDate())}/${p2(d.getMonth()+1)}`;}
 // sistema de vagas) — só exibe o dele, sem picker.
 // 13/08/2026 — a pedido da gestora: removida a vaga de 07h-13h (Modelo B/
 // Feli) dos dois grupos — agora só sobram os 3 turnos do Modelo A (19h-01h,
-// 13h-19h, 01h-07h) por grupo de dias. Junto com isso, o passo de marcar
-// entrevista por videochamada também foi removido (ver comentário acima de
-// "Discord").
+// 13h-19h, 01h-07h). Junto com isso, o passo de marcar entrevista por
+// videochamada também foi removido (ver comentário acima de "Discord").
+// Na sequência, a gestora simplificou de novo: só fica o grupo Modelo A de
+// Segunda, terça e quarta — o grupo de Sexta/Sábado/Domingo saiu de vez.
+// Quem já tinha escolhido um horário do grupo antigo (b1/b2/b3) continua
+// vendo o próprio horário normalmente (o rótulo fica salvo no chatter, não
+// depende dessa lista pra exibir) — só não aparece mais pra ESCOLHER de novo.
 const HORARIO_SLOTS=[
-  {id:'a1',grupo:'Terça, quarta e quinta — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
-  {id:'a2',grupo:'Terça, quarta e quinta — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
-  {id:'a3',grupo:'Terça, quarta e quinta — Modelo A',opcao:'Opção 3',horario:'01h-07h'},
-  {id:'b1',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 1',horario:'19h-01h'},
-  {id:'b2',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 2',horario:'13h-19h'},
-  {id:'b3',grupo:'Sexta, sábado e domingo — Modelo A',opcao:'Opção 3',horario:'01h-07h'}
+  {id:'a1',grupo:'Segunda, terça e quarta — Thays',opcao:'Opção 1',horario:'19h-01h'},
+  {id:'a2',grupo:'Segunda, terça e quarta — Thays',opcao:'Opção 2',horario:'13h-19h'},
+  {id:'a3',grupo:'Segunda, terça e quarta — Thays',opcao:'Opção 3',horario:'01h-07h'}
 ];
 function horarioSlotLabel(slot){return`${slot.grupo} · ${slot.opcao} (${slot.horario})`;}
 

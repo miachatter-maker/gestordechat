@@ -133,15 +133,9 @@ function getTercaDoCiclo(ref){
 // normal de Quarta (12/08). Precisa ficar em sincronia com chatterteste.html
 // pra não mostrar "bloqueado" aqui enquanto o tester ainda consegue enviar.
 const PRAZO_DIA1_EXCECAO={'2026-08-11':{extraDias:1,hora:14}};
-function getCicloAtual(){
-  const now=new Date();
-  // Mesma regra do chatterteste.html: usa sempre o começo de ciclo (Terça
-  // ou Sexta) mais recente entre os dois.
-  const sex=getSextaDoCiclo(now);
-  const ter=getTercaDoCiclo(now);
-  const usaTerca=ter.getTime()>sex.getTime();
-  const inicio=usaTerca?ter:sex;
-  const labels=usaTerca?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
+function construirCiclo(inicio){
+  const dow=inicio.getDay();
+  const labels=dow===2?['Terça','Quarta','Quinta']:['Sexta','Sábado','Domingo'];
   const fridayKey=fmt(inicio); // nome mantido por compatibilidade — o valor agora pode ser uma Terça também
   const excDia1=PRAZO_DIA1_EXCECAO[fridayKey];
   const dias=[1,2,3].map(n=>{
@@ -152,6 +146,36 @@ function getCicloAtual(){
     return{dia:n,dataDia,prazo,label:labels[n-1]};
   });
   return{fridayKey,dias};
+}
+function getCicloAtual(){
+  const now=new Date();
+  // Mesma regra do chatterteste.html: usa sempre o começo de ciclo (Terça
+  // ou Sexta) mais recente entre os dois.
+  const sex=getSextaDoCiclo(now);
+  const ter=getTercaDoCiclo(now);
+  const usaTerca=ter.getTime()>sex.getTime();
+  const inicio=usaTerca?ter:sex;
+  return construirCiclo(inicio);
+}
+// 14/08/2026 — bug real que a Mia reportou: quando o ciclo global vira
+// (ex: virou Sexta enquanto o Rafael, a Bianca, o João e o Lailson ainda
+// enviaram tudo no ciclo de Terça e ninguém tinha decidido/apadrinhado
+// eles ainda), essa tela usava SEMPRE getCicloAtual() pra montar os badges
+// e o detalhe de cada tester — então quem enviou tarefa no ciclo anterior
+// "sumia" (ficava tudo ⏳/❌ como se nunca tivesse feito nada), porque a
+// tarefa dele tá salva sob o fridayKey do ciclo VELHO, não do novo. Essa
+// função escolhe, pra cada tester, o ciclo em que ele realmente tem
+// tarefas enviadas (o mais recente com dados), caindo pro ciclo atual só
+// se ele não tiver nada em nenhum ciclo ainda (tester novo).
+function getCicloParaTester(t,cicloAtual){
+  const tarefas=getMergedTarefas(t.id);
+  const temNoAtual=tarefas[cicloAtual.fridayKey]&&Object.keys(tarefas[cicloAtual.fridayKey]).length;
+  if(temNoAtual)return cicloAtual;
+  const fks=Object.keys(tarefas).filter(fk=>Object.keys(tarefas[fk]||{}).length).sort();
+  if(!fks.length)return cicloAtual;
+  const fkMaisRecente=fks[fks.length-1];
+  if(fkMaisRecente===cicloAtual.fridayKey)return cicloAtual;
+  return construirCiclo(new Date(fkMaisRecente+'T00:00:00'));
 }
 
 function janelaReivindicacaoAtiva(){
@@ -540,7 +564,7 @@ window.toggleTesterDetail=function(id){
   if(selPadrinhoId==='ENTREVISTA'){renderEntrevistaView();return;}
   renderDocumentoPadrinhos(chatters.filter(c=>c.time==='tester'&&!c.testerDecision));
 };
-function renderTesterRow(t,ciclo){
+function renderTesterRow(t,cicloGlobal){
   const map=getMapeamentoInfo(t.id,t.name);
   const claim=getMergedClaimForTester(t.id);
   const padrinhoId=(chatterFichasLive[t.id]&&chatterFichasLive[t.id].padrinhoId)||'';
@@ -549,6 +573,9 @@ function renderTesterRow(t,ciclo){
   // completado o ciclo inteiro — ver hasCompletedFullCycle acima.
   const podeExcluir=!t.testerDecision&&!padrinhoId&&!hasCompletedFullCycle(t.id);
   const nuncaEnviouNada=!hasAnyTarefaEnviada(t.id);
+  // Ver comentário de getCicloParaTester acima — usa o ciclo em que essa
+  // pessoa realmente enviou tarefa, não sempre o ciclo global atual.
+  const ciclo=getCicloParaTester(t,cicloGlobal);
   const badges=ciclo.dias.map(d=>{
     const status=getStatusDia(t.id,ciclo.fridayKey,d.dia,d.dataDia,d.prazo);
     const label={enviado:'✅',bloqueado:'❌',aberto:'🟢',futuro:'⏳'}[status];
